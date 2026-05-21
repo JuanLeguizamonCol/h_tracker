@@ -1,15 +1,14 @@
 """
 Profile router — authenticated employee manages their own profile.
 
-All routes resolve the current user from the session/token, so no
+All routes resolve the current user from the JWT token, so no
 employee_id is ever accepted from the client.
 
 Allowed self-edit fields (personal info + location + emergency contact).
 Corporate/admin fields are intentionally excluded from PATCH.
 """
-import os
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date
@@ -19,6 +18,7 @@ from models.employees import Employee
 from models.user_roles import UserRole
 from schemas.employees import EmployeeOut
 from schemas.skills import EmployeeSkillCreate, EmployeeSkillUpdate, EmployeeSkillOut
+from utils.auth_jwt import get_current_employee
 from services.skills import (
     get_employee_skills,
     create_employee_skill,
@@ -26,24 +26,7 @@ from services.skills import (
     delete_employee_skill,
 )
 
-AUTH_MODE = os.getenv("AUTH_MODE", "azure")
-_MOCK_EMPLOYEE = {"email": "dev@impactpoint.dev"}
-
 profile_router = APIRouter(prefix="/profile", tags=["profile"])
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _current_employee(request: Request, db: Session) -> Employee:
-    """Resolve current user from mock header or Azure token."""
-    if AUTH_MODE == "mock":
-        email = request.headers.get("X-Dev-User-Email", _MOCK_EMPLOYEE["email"])
-        emp = db.query(Employee).filter(Employee.email == email).first()
-        if not emp:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee profile not found")
-        return emp
-    # Azure: integrate token claims here
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Azure profile lookup not yet wired")
 
 
 def _is_admin(emp: Employee, db: Session) -> bool:
@@ -77,58 +60,72 @@ _SELF_EDITABLE = set(ProfilePatch.model_fields.keys())
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @profile_router.get("/", response_model=EmployeeOut)
-def get_profile(request: Request, db: Session = Depends(get_db)):
+def get_profile(current_employee: Employee = Depends(get_current_employee)):
     """Return the logged-in employee's full record."""
-    return _current_employee(request, db)
+    return current_employee
 
 
 @profile_router.patch("/", response_model=EmployeeOut)
-def patch_profile(request: Request, patch: ProfilePatch, db: Session = Depends(get_db)):
+def patch_profile(
+    patch: ProfilePatch,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
     """Update only the self-editable fields of the logged-in employee."""
-    emp = _current_employee(request, db)
     for field, value in patch.model_dump(exclude_unset=True).items():
         if field in _SELF_EDITABLE:
-            setattr(emp, field, value)
+            setattr(current_employee, field, value)
     db.commit()
-    db.refresh(emp)
-    return emp
+    db.refresh(current_employee)
+    return current_employee
 
 
 # ── Skills ────────────────────────────────────────────────────────────────────
 
 @profile_router.get("/skills", response_model=List[EmployeeSkillOut])
-def list_my_skills(request: Request, db: Session = Depends(get_db)):
-    emp = _current_employee(request, db)
-    return get_employee_skills(db, emp.id)
+def list_my_skills(
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    return get_employee_skills(db, current_employee.id)
 
 
 @profile_router.post("/skills", response_model=EmployeeSkillOut, status_code=status.HTTP_201_CREATED)
-def add_skill(request: Request, skill_in: EmployeeSkillCreate, db: Session = Depends(get_db)):
-    emp = _current_employee(request, db)
-    return create_employee_skill(db, emp.id, skill_in)
+def add_skill(
+    skill_in: EmployeeSkillCreate,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    return create_employee_skill(db, current_employee.id, skill_in)
 
 
 @profile_router.patch("/skills/{skill_id}", response_model=EmployeeSkillOut)
-def edit_skill(skill_id: str, request: Request, skill_in: EmployeeSkillUpdate, db: Session = Depends(get_db)):
+def edit_skill(
+    skill_id: str,
+    skill_in: EmployeeSkillUpdate,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
     from models.employee_skills import EmployeeSkill
-    emp = _current_employee(request, db)
     skill = db.query(EmployeeSkill).filter(
         EmployeeSkill.id == skill_id,
-        EmployeeSkill.employee_id == emp.id,
+        EmployeeSkill.employee_id == current_employee.id,
     ).first()
     if not skill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
-    updated = update_employee_skill(db, skill_id, skill_in)
-    return updated
+    return update_employee_skill(db, skill_id, skill_in)
 
 
 @profile_router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_skill(skill_id: str, request: Request, db: Session = Depends(get_db)):
+def remove_skill(
+    skill_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
     from models.employee_skills import EmployeeSkill
-    emp = _current_employee(request, db)
     skill = db.query(EmployeeSkill).filter(
         EmployeeSkill.id == skill_id,
-        EmployeeSkill.employee_id == emp.id,
+        EmployeeSkill.employee_id == current_employee.id,
     ).first()
     if not skill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")

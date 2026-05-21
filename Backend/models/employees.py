@@ -51,6 +51,8 @@ class Employee(Base):
     employment_status = Column(String, nullable=True)
     billing_currency = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
+    password_hash = Column(String, nullable=True)
+    must_change_password = Column(Boolean, nullable=False, default=True)
 
     assigned_projects = relationship("EmployeeProject", back_populates="employee")
     time_entries = relationship("TimeEntry", back_populates="employee")

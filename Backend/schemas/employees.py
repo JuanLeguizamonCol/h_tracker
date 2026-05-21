@@ -90,3 +90,4 @@ class EmployeeOut(EmployeeBase):
     user_id: str
     created_at: datetime
     updated_at: datetime
+    must_change_password: bool = True

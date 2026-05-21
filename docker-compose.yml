@@ -26,17 +26,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Azure credentials and API keys come from azure.env.
-    # Run: docker-compose --env-file azure.env up -d
-    # Or:  cp azure.env .env && docker-compose up -d
-    env_file:
-      - ./azure.env
     environment:
       DATABASE_URL: postgresql://hours_user:hours_pass@postgres:5432/hours_tracker
       ENV: ${ENV:-dev}
       CORS_ORIGINS: "http://localhost:8080,http://localhost:3000"
       SQL_ECHO: "false"
       UPLOAD_DIR: /app/uploads
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production-use-a-long-random-string}
     volumes:
       - uploads:/app/uploads
       - ./assets:/app/assets:ro
@@ -45,14 +41,6 @@ services:
     build:
       context: .
       dockerfile: frontend.Dockerfile
-      args:
-        # Vite vars are baked into the bundle at build time.
-        # Values come from azure.env (via --env-file) or fall back to defaults.
-        VITE_AUTH_MODE: ${VITE_AUTH_MODE:-azure}
-        VITE_AZURE_CLIENT_ID: ${VITE_AZURE_CLIENT_ID:-b44bcf9e-cc38-4542-82b9-e9447a45a7ec}
-        VITE_AZURE_TENANT_ID: ${VITE_AZURE_TENANT_ID:-9a347a67-e3c3-4de7-9c88-449af6f6c092}
-        VITE_AZURE_API_SCOPE: ${VITE_AZURE_API_SCOPE:-api://6cda0fcc-09b3-4173-b6cc-07df8bf2b82b/user_impersonation}
-        VITE_AZURE_REDIRECT_URI: ${VITE_AZURE_REDIRECT_URI:-http://localhost:3000}
     restart: unless-stopped
     ports:
       - "3000:80"

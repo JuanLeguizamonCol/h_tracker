@@ -6,6 +6,9 @@ from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 
 from config.database import engine, Base, SessionLocal
+from utils.auth_jwt import hash_password
+
+DEFAULT_PASSWORD = hash_password("Impact2026!")
 
 import models  # imports all via __init__
 from models.employees import Employee
@@ -38,11 +41,11 @@ def seed():
             return
 
         # EMPLOYEES
-        emp_admin = Employee(id=uid(), user_id="admin-001", name="Juan Leguizamon", email="juan@impactpoint.com", is_active=True)
-        emp_laura = Employee(id=uid(), user_id=uid(), name="Laura Garcia", email="laura@impactpoint.com", is_active=True)
-        emp_carlos = Employee(id=uid(), user_id=uid(), name="Carlos Rodriguez", email="carlos@impactpoint.com", is_active=True)
-        emp_maria = Employee(id=uid(), user_id=uid(), name="Maria Fernandez", email="maria@impactpoint.com", is_active=True)
-        emp_diego = Employee(id=uid(), user_id=uid(), name="Diego Lopez", email="diego@impactpoint.com", is_active=True)
+        emp_admin = Employee(id=uid(), user_id="admin-001", name="Juan Leguizamon", email="juan@impactpoint.com", is_active=True, password_hash=DEFAULT_PASSWORD)
+        emp_laura = Employee(id=uid(), user_id=uid(), name="Laura Garcia", email="laura@impactpoint.com", is_active=True, password_hash=DEFAULT_PASSWORD)
+        emp_carlos = Employee(id=uid(), user_id=uid(), name="Carlos Rodriguez", email="carlos@impactpoint.com", is_active=True, password_hash=DEFAULT_PASSWORD)
+        emp_maria = Employee(id=uid(), user_id=uid(), name="Maria Fernandez", email="maria@impactpoint.com", is_active=True, password_hash=DEFAULT_PASSWORD)
+        emp_diego = Employee(id=uid(), user_id=uid(), name="Diego Lopez", email="diego@impactpoint.com", is_active=True, password_hash=DEFAULT_PASSWORD)
         employees = [emp_admin, emp_laura, emp_carlos, emp_maria, emp_diego]
         db.add_all(employees)
         db.flush()

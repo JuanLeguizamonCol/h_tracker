@@ -1,11 +1,10 @@
-import os
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from config.database import get_db
 from services.employees import (
-    create_employee, get_employees, get_employee, get_or_create_employee_by_email,
+    create_employee, get_employees, get_employee,
     update_employee, delete_employee,
 )
 from services.skills import (
@@ -21,9 +20,10 @@ from models.employees import Employee
 from models.user_roles import UserRole
 from models.projects import Project
 from models.employee_projects import EmployeeProject
+from utils.auth_jwt import get_current_employee
 import uuid
 
-AUTH_MODE = os.getenv("AUTH_MODE", "azure")
+employees_router = APIRouter(prefix="/employees", tags=["employees"])
 
 
 def _auto_assign_internal_projects(db: Session, employee_id: str) -> None:
@@ -39,51 +39,28 @@ def _auto_assign_internal_projects(db: Session, employee_id: str) -> None:
             ))
     db.commit()
 
-employees_router = APIRouter(prefix="/employees", tags=["employees"])
-
-_MOCK_EMPLOYEE = {"email": "dev@impactpoint.dev", "name": "Dev Admin"}
-
 
 # ── Admin guard dependency ────────────────────────────────────────────────────
 
-async def require_admin(request: Request, db: Session = Depends(get_db)):
-    """Raises 403 if the requesting user is not an admin."""
-    if AUTH_MODE == "mock":
-        email = request.headers.get("X-Dev-User-Email", _MOCK_EMPLOYEE["email"])
-        emp = db.query(Employee).filter(Employee.email == email).first()
-        if not emp:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-        role_record = db.query(UserRole).filter(UserRole.user_id == emp.id).first()
-        if not role_record or role_record.role != "admin":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-    # Azure mode: token authentication enforced by Azure AD;
-    # per-role enforcement would require additional claim integration.
-
-
-def _get_actor_id(request: Request, db: Session) -> str | None:
-    """Return the employee.id of the requester (used for audit fields)."""
-    if AUTH_MODE == "mock":
-        email = request.headers.get("X-Dev-User-Email", _MOCK_EMPLOYEE["email"])
-        emp = db.query(Employee).filter(Employee.email == email).first()
-        return emp.id if emp else None
-    return None
+async def require_admin(
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Raises 403 if the requesting employee is not an admin."""
+    role_record = db.query(UserRole).filter(UserRole.user_id == current_employee.id).first()
+    if not role_record or role_record.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
 
 # ── /me  (open to all authenticated users) ────────────────────────────────────
 
 @employees_router.get("/me", response_model=EmployeeOut)
-async def get_current_employee(request: Request, db: Session = Depends(get_db)):
-    if AUTH_MODE == "mock":
-        email = request.headers.get("X-Dev-User-Email", _MOCK_EMPLOYEE["email"])
-        name = request.headers.get("X-Dev-User-Name", _MOCK_EMPLOYEE["name"])
-    else:
-        from utils.auth_microsoft import azure_scheme
-        user = await azure_scheme(request)
-        email = user.claims.get("preferred_username") or user.claims.get("email", "")
-        name = user.claims.get("name", email.split("@")[0])
-    emp = get_or_create_employee_by_email(db, email=email, name=name)
-    _auto_assign_internal_projects(db, emp.id)
-    return emp
+def get_current_employee_me(
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    _auto_assign_internal_projects(db, current_employee.id)
+    return current_employee
 
 
 # ── Admin-only CRUD ───────────────────────────────────────────────────────────
@@ -180,14 +157,13 @@ def get_employee_internal_cost(employee_id: str, db: Session = Depends(get_db)):
 def upsert_employee_internal_cost(
     employee_id: str,
     cost_in: EmployeeInternalCostCreate,
-    request: Request,
     db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
 ):
     emp = get_employee(db, employee_id)
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
-    actor_id = _get_actor_id(request, db)
-    return upsert_internal_cost(db, employee_id, cost_in, actor_id=actor_id)
+    return upsert_internal_cost(db, employee_id, cost_in, actor_id=current_employee.id)
 
 
 @employees_router.get(

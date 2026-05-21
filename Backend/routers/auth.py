@@ -1,70 +1,118 @@
-import os
+import uuid
 import logging
-from fastapi import APIRouter, Depends, Security, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from config.database import get_db
-from services.user_provisioning import upsert_app_user
-from schemas.app_user import AppUserOut
+from models.employees import Employee
+from models.user_roles import UserRole
+from schemas.employees import EmployeeOut
+from utils.auth_jwt import verify_password, create_access_token, get_current_employee, hash_password
 
 logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
-AUTH_MODE = os.getenv("AUTH_MODE", "azure")
 
-# Dev-only mock identity
-_MOCK_USER = {
-    "oid": "00000000-0000-0000-0000-000000000001",
-    "email": "dev@impactpoint.local",
-    "name": "Dev User",
-}
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
-def _extract_claims_from_token(token) -> dict:
-    """Extract user claims from a validated fastapi-azure-auth token."""
-    claims = getattr(token, "claims", {})
-    oid = claims.get("oid") or claims.get("sub") or ""
-    email = (
-        claims.get("preferred_username")
-        or claims.get("email")
-        or claims.get("upn")
-        or ""
-    )
-    display_name = claims.get("name", "")
-    return {"oid": oid, "email": email, "display_name": display_name}
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
 
 
-if AUTH_MODE == "mock" and os.getenv("ENV", "dev") != "prod":
-    logger.warning("*** /auth/me running in MOCK mode — NOT for production ***")
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
-    @auth_router.get("/me", response_model=AppUserOut)
-    def get_current_user_mock(
-        request: Request,
-        db: Session = Depends(get_db),
-    ):
-        dev_oid = request.headers.get("X-Dev-User-Oid", _MOCK_USER["oid"])
-        dev_email = request.headers.get("X-Dev-User-Email", _MOCK_USER["email"])
-        dev_name = request.headers.get("X-Dev-User-Name", _MOCK_USER["name"])
-        user = upsert_app_user(db, azure_oid=dev_oid, email=dev_email, display_name=dev_name)
-        return user
 
-else:
-    from utils.auth_microsoft import azure_scheme
+class AdminResetPasswordRequest(BaseModel):
+    temporary_password: str
 
-    @auth_router.get("/me", response_model=AppUserOut)
-    def get_current_user(
-        db: Session = Depends(get_db),
-        token=Security(azure_scheme),
-    ):
-        claims = _extract_claims_from_token(token)
-        oid = claims["oid"]
-        if not oid:
-            raise HTTPException(status_code=401, detail="Token missing oid/sub claim")
-        user = upsert_app_user(
-            db,
-            azure_oid=oid,
-            email=claims.get("email") or None,
-            display_name=claims.get("display_name") or None,
+
+@auth_router.post("/login")
+def login(body: LoginRequest, db: Session = Depends(get_db)):
+    emp = db.query(Employee).filter(
+        Employee.email == body.email.strip().lower(),
+        Employee.is_active == True,
+    ).first()
+    if not emp or not emp.password_hash or not verify_password(body.password, emp.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
         )
-        return user
+    token = create_access_token(emp.id, emp.email)
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@auth_router.post("/register", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
+def register(body: RegisterRequest, db: Session = Depends(get_db)):
+    """Public self-registration. Creates a new employee with role 'employee'."""
+    email = body.email.strip().lower()
+    if db.query(Employee).filter(Employee.email == email).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    if len(body.password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters")
+    emp_id = str(uuid.uuid4())
+    emp = Employee(
+        id=emp_id,
+        user_id=emp_id,
+        name=body.name.strip(),
+        email=email,
+        password_hash=hash_password(body.password),
+        is_active=True,
+        must_change_password=True,
+    )
+    db.add(emp)
+    db.flush()
+    db.add(UserRole(id=str(uuid.uuid4()), user_id=emp.id, role="employee"))
+    db.commit()
+    db.refresh(emp)
+    return emp
+
+
+@auth_router.get("/me", response_model=EmployeeOut)
+def get_me(current_employee: Employee = Depends(get_current_employee)):
+    return current_employee
+
+
+@auth_router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    body: ChangePasswordRequest,
+    current_employee: Employee = Depends(get_current_employee),
+    db: Session = Depends(get_db),
+):
+    if not current_employee.password_hash or not verify_password(body.current_password, current_employee.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters")
+    current_employee.password_hash = hash_password(body.new_password)
+    current_employee.must_change_password = False
+    db.commit()
+
+
+@auth_router.post("/admin-reset-password/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_reset_password(
+    employee_id: str,
+    body: AdminResetPasswordRequest,
+    current_employee: Employee = Depends(get_current_employee),
+    db: Session = Depends(get_db),
+):
+    """Admin-only: reset another employee's password and force a change on next login."""
+    from models.user_roles import UserRole
+    admin_role = db.query(UserRole).filter(UserRole.user_id == current_employee.id, UserRole.role == "admin").first()
+    if not admin_role:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    if len(body.temporary_password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters")
+    target = db.query(Employee).filter(Employee.id == employee_id, Employee.is_active == True).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+    target.password_hash = hash_password(body.temporary_password)
+    target.must_change_password = True
+    db.commit()

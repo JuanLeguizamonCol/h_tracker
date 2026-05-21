@@ -1,10 +1,10 @@
 import os
 import logging
-from fastapi import FastAPI, Security
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from utils.auth_microsoft import azure_scheme
+from utils.auth_jwt import get_current_employee
 from config.database import engine, Base
 
 # Import routers
@@ -39,23 +39,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-AUTH_MODE = os.getenv("AUTH_MODE", "azure")
-
-app = FastAPI(
-    swagger_ui_oauth2_redirect_url="/docs/oauth2-redirect",
-    swagger_ui_init_oauth={
-        "usePkceWithAuthorizationCodeGrant": True,
-        "clientId": os.getenv("AZURE_SWAGGER_CLIENT_ID", "b44bcf9e-cc38-4542-82b9-e9447a45a7ec"),
-        "scopes": [
-            os.getenv(
-                "AZURE_API_SCOPE",
-                "api://6cda0fcc-09b3-4173-b6cc-07df8bf2b82b/user_impersonation",
-            )
-        ],
-    },
-)
-app.title = "Impact Point Hours Tracker"
-app.version = "0.0.2"
+app = FastAPI(title="Impact Point Hours Tracker", version="0.0.2")
 
 # CORS
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:8080,http://localhost:3000").split(",")
@@ -73,22 +57,11 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "up
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-
-# ---------- Auth dependency selection ----------
-def get_auth_dependency():
-    if AUTH_MODE == "mock":
-        env = os.getenv("ENV", "dev")
-        if env == "prod":
-            raise RuntimeError("AUTH_MODE=mock is forbidden when ENV=prod")
-        logger.warning("*** AUTH_MODE=mock is active — NOT for production ***")
-        return []
-    return [Security(azure_scheme)]
-
-
-auth_deps = get_auth_dependency()
+# JWT auth dependency applied to all protected routers
+auth_deps = [Depends(get_current_employee)]
 
 # ---------- Routers ----------
-app.include_router(auth_router)
+app.include_router(auth_router)  # public — login / register
 app.include_router(clients_router, dependencies=auth_deps)
 app.include_router(employees_router, dependencies=auth_deps)
 app.include_router(projects_router, dependencies=auth_deps)
