@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from models.invoice_fee_attachments import InvoiceFeeAttachment
 from schemas.invoice_fee_attachments import InvoiceFeeAttachmentCreate
+from utils import blob_storage
 
 
 def create_invoice_fee_attachment(db: Session, attachment_in: InvoiceFeeAttachmentCreate) -> InvoiceFeeAttachment:
@@ -30,11 +31,14 @@ def delete_invoice_fee_attachment(db: Session, attachment_id: str, upload_dir: s
     db_att = get_invoice_fee_attachment(db, attachment_id)
     if not db_att:
         return False
-    # Remove file from disk if upload_dir is set
-    if upload_dir and db_att.file_name:
-        file_path = os.path.join(upload_dir, db_att.file_name)
-        if os.path.exists(file_path):
-            os.remove(file_path)
+    # Remove the underlying file: Blob Storage when enabled, else local disk.
+    if db_att.file_name:
+        if blob_storage.blob_enabled():
+            blob_storage.delete_blob(db_att.file_name)
+        elif upload_dir:
+            file_path = os.path.join(upload_dir, db_att.file_name)
+            if os.path.exists(file_path):
+                os.remove(file_path)
     db.delete(db_att)
     db.commit()
     return True

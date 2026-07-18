@@ -83,186 +83,129 @@ def _get_signature_base64(signatory_name: str) -> Optional[str]:
 
 # ── HTML Template ─────────────────────────────────────────────────────────────
 
-_INVOICE_HTML_TEMPLATE = """<!DOCTYPE html>
+_INVOICE_HTML_TEMPLATE = '''
+<!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8"/>
-<style>
-  @page {{
-    size: letter;
-    margin: 0.75in;
-  }}
-  body {{
-    font-family: "Times New Roman", Times, serif;
-    font-size: 11pt;
-    color: #000000;
-    margin: 0;
-    padding: 0;
-  }}
-  .page-break {{
-    page-break-after: always;
-  }}
+  <meta charset="UTF-8">
+  <title>Invoice {invoice_number}</title>
+  <style>
+    @page {{
+      size: letter;
+      margin: 0.75in;
+    }}
 
-  /* ── Header ── */
-  table.header-table {{
-    width: 100%;
-    border-collapse: collapse;
-  }}
-  .company-block {{
-    font-size: 10pt;
-    line-height: 1.5;
-  }}
-  .company-name {{
-    font-size: 12pt;
-    font-weight: bold;
-  }}
-  .logo-img {{
-    max-height: 60px;
-    margin-bottom: 4pt;
-    display: block;
-  }}
+    body {{
+      font-family: "Times New Roman", Times, serif;
+      font-size: 11pt;
+      color: #000;
+      line-height: 1.4;
+    }}
 
-  /* ── Invoice title / date ── */
-  .invoice-title {{
-    text-align: center;
-    font-size: 13pt;
-    font-weight: bold;
-    margin-top: 22pt;
-    margin-bottom: 4pt;
-  }}
-  .invoice-date-center {{
-    text-align: center;
-    font-size: 11pt;
-    margin-bottom: 22pt;
-  }}
+    .page {{
+      page-break-after: always;
+    }}
 
-  /* ── Client block ── */
-  .client-block {{
-    margin-bottom: 18pt;
-    line-height: 1.7;
-    font-size: 11pt;
-  }}
+    .page-last {{
+      page-break-after: avoid;
+    }}
 
-  /* ── Body text ── */
-  .body-text {{
-    margin-top: 10pt;
-    margin-bottom: 10pt;
-    line-height: 1.8;
-    font-size: 11pt;
-    text-align: justify;
-  }}
+    .logo-img img {{
+      height: 45pt;
+    }}
 
-  /* ── Signature section ── */
-  .signature-section {{
-    margin-top: 28pt;
-    font-size: 11pt;
-    line-height: 1.8;
-  }}
-  .signature-img {{
-    max-height: 55px;
-    display: block;
-    margin: 6pt 0 2pt 0;
-  }}
+    .address-cell {{
+      font-size: 9pt;
+      color: #666;
+      line-height: 1.6;
+    }}
 
-  /* ── Period table ── */
-  table.period-table {{
-    border-collapse: collapse;
-    margin-bottom: 14pt;
-    font-size: 10pt;
-  }}
-  table.period-table th {{
-    background-color: #000000;
-    color: #ffffff;
-    padding: 4pt 12pt;
-    border: 1pt solid #000000;
-    text-align: left;
-    font-weight: bold;
-  }}
-  table.period-table td {{
-    border: 1pt solid #000000;
-    padding: 4pt 12pt;
-  }}
+    .invoice-title {{
+      text-align: center;
+      font-family: Arial, sans-serif;
+      font-size: 11pt;
+      font-weight: bold;
+      margin: 20pt 0 8pt 0;
+    }}
 
-  /* ── Fees table ── */
-  table.fees-table {{
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 10pt;
-    margin-bottom: 6pt;
-  }}
-  table.fees-table th {{
-    background-color: #000000;
-    color: #ffffff;
-    border: 1pt solid #000000;
-    padding: 4pt 6pt;
-    text-align: left;
-    font-weight: bold;
-  }}
-  table.fees-table td {{
-    border: 1pt solid #cccccc;
-    padding: 4pt 6pt;
-  }}
-  table.fees-table tr.total-row td {{
-    border: 1pt solid #000000;
-    background-color: #f0f0f0;
-    font-weight: bold;
-  }}
-  .text-right {{
-    text-align: right;
-  }}
+    .invoice-date {{
+      text-align: center;
+      font-size: 11pt;
+      margin-bottom: 25pt;
+    }}
 
-  /* ── Total-due box ── */
-  .total-due-box {{
-    background-color: #FFFFCC;
-    border: 2pt solid #000000;
-    text-align: center;
-    font-weight: bold;
-    font-size: 13pt;
-    padding: 8pt 12pt;
-    margin-top: 12pt;
-    margin-bottom: 18pt;
-  }}
+    .client-info {{
+      margin-bottom: 20pt;
+      line-height: 1.6;
+    }}
 
-  /* ── ACH section ── */
-  .ach-section {{
-    margin-top: 16pt;
-    font-size: 10pt;
-  }}
-  .ach-title {{
-    font-weight: bold;
-    font-size: 11pt;
-    margin-bottom: 6pt;
-  }}
-  table.ach-table {{
-    border-collapse: collapse;
-    font-size: 10pt;
-  }}
-  table.ach-table td {{
-    padding: 2pt 10pt 2pt 0;
-  }}
-</style>
+    .greeting {{
+      margin-bottom: 18pt;
+    }}
+
+    .body-text {{
+      margin-bottom: 15pt;
+    }}
+
+    .signature-section {{
+      margin-top: 25pt;
+    }}
+
+    .sincerely {{
+      margin-bottom: 12pt;
+    }}
+
+    .signature-img img {{
+      height: 40pt;
+    }}
+
+    .signature-name {{
+      margin-top: 12pt;
+    }}
+
+    .total-box {{
+      font-weight: bold;
+      background-color: #FFFFCC;
+      border-top: 1pt solid #000;
+      border-bottom: 2pt solid #000;
+      padding: 5pt 8pt;
+    }}
+
+    .ach-section {{
+      margin-top: 50pt;
+    }}
+
+    .ach-title {{
+      font-style: italic;
+      font-size: 10pt;
+      margin-bottom: 15pt;
+    }}
+
+    .text-right {{
+      text-align: right;
+    }}
+  </style>
 </head>
 <body>
 
-<!-- ============================================================ -->
-<!-- PAGE 1: COVER LETTER                                         -->
-<!-- ============================================================ -->
-<div class="page-break">
+<!-- PAGE 1: COVER LETTER -->
+<div class="page">
 
-  <!-- Header -->
-  <table class="header-table">
+  <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:30pt;">
     <tr>
-      <td>{logo_block}</td>
-      <td style="text-align:right; vertical-align:top;">&nbsp;</td>
+      <td align="left" valign="top" class="logo-img">{logo_img}</td>
+      <td align="right" valign="top" class="address-cell">
+        {company_address}<br/>
+        {company_city_state_zip}<br/>
+        {company_phone}
+      </td>
     </tr>
   </table>
 
-  <!-- Invoice number + date (centered) -->
   <div class="invoice-title">Invoice {invoice_number}</div>
-  <div class="invoice-date-center">{invoice_date}</div>
+  <div class="invoice-date">{invoice_date}</div>
 
-  <!-- Client contact block -->
-  <div class="client-block">
+  <div class="client-info">
     {client_contact}<br/>
     {client_title}<br/>
     {client_company}<br/>
@@ -270,48 +213,43 @@ _INVOICE_HTML_TEMPLATE = """<!DOCTYPE html>
     {client_city_state_zip}
   </div>
 
-  <!-- Opening salutation -->
-  <p class="body-text">Dear {client_contact},</p>
+  <div class="greeting">Dear {greeting}</div>
 
-  <!-- Body -->
-  <p class="body-text">
-    Attached, please find our invoice for services rendered during the period
-    from <b>{period_from}</b> through <b>{period_to}</b>.
-  </p>
+  <div class="body-text">
+    Attached, please find our invoice for services rendered during the period from {period_from} through {period_to}.
+  </div>
 
-  <p class="body-text">
-    If you have any questions, please do not hesitate to contact us.
-  </p>
+  <div class="body-text">
+    Please do not hesitate to contact me with any questions.
+  </div>
 
-  <!-- Signature -->
   <div class="signature-section">
-    <p>Sincerely,</p>
-    {signature_block}
-    <p><b>{signatory_name}</b><br/>{signatory_title}</p>
+    <div class="sincerely">Sincerely,</div>
+    <div class="signature-img">{signature_img}</div>
+    <div class="signature-name">{signatory_name}</div>
+    <div>{signatory_title}</div>
   </div>
 
-</div><!-- end page 1 -->
+</div>
 
+<!-- PAGE 2: INVOICE DETAIL -->
+<div class="page-last">
 
-<!-- ============================================================ -->
-<!-- PAGE 2: INVOICE DETAIL                                       -->
-<!-- ============================================================ -->
-<div>
-
-  <!-- Header (same as page 1) -->
-  <table class="header-table">
+  <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:30pt;">
     <tr>
-      <td>{logo_block}</td>
-      <td style="text-align:right; vertical-align:top;">&nbsp;</td>
+      <td align="left" valign="top" class="logo-img">{logo_img}</td>
+      <td align="right" valign="top" class="address-cell">
+        {company_address}<br/>
+        {company_city_state_zip}<br/>
+        {company_phone}
+      </td>
     </tr>
   </table>
 
-  <!-- Invoice number + date -->
   <div class="invoice-title">Invoice {invoice_number}</div>
-  <div class="invoice-date-center">{invoice_date}</div>
+  <div class="invoice-date">{invoice_date}</div>
 
-  <!-- Client block -->
-  <div class="client-block">
+  <div class="client-info">
     {client_contact}<br/>
     {client_title}<br/>
     {client_company}<br/>
@@ -319,78 +257,81 @@ _INVOICE_HTML_TEMPLATE = """<!DOCTYPE html>
     {client_city_state_zip}
   </div>
 
-  <!-- Period table -->
-  <table class="period-table">
+  <table width="100%" border="0" cellpadding="3" cellspacing="0" style="margin-bottom:25pt;">
     <tr>
-      <th>Period From</th>
-      <th>Period To</th>
+      <td width="15%" align="left">for the period</td>
+      <td width="85%" align="center">{period_from}</td>
     </tr>
     <tr>
-      <td>{period_from}</td>
-      <td>{period_to}</td>
+      <td width="15%" align="left">through</td>
+      <td width="85%" align="center">{period_to}</td>
     </tr>
   </table>
 
-  <!-- Fees table -->
-  <table class="fees-table">
-    <colgroup>
-      <col style="width:32%;"/>
-      <col style="width:14%;"/>
-      <col style="width:10%;"/>
-      <col style="width:14%;"/>
-      <col style="width:14%;"/>
-      <col style="width:16%;"/>
-    </colgroup>
-    <tr>
-      <th>Fees</th>
-      <th class="text-right">Hourly Rate</th>
-      <th class="text-right">Hours</th>
-      <th class="text-right">Subtotal</th>
-      <th class="text-right">Discount</th>
-      <th class="text-right">Total</th>
+  <!-- FEES TABLE con anchos HTML directos -->
+  <table width="100%" border="0" cellpadding="6" cellspacing="0">
+    <tr style="border-bottom:1pt solid #000;">
+      <th width="32%" align="left" style="border-bottom:1pt solid #000;">Fees:</th>
+      <th width="12%" align="center" style="border-bottom:1pt solid #000;">Hourly Rate</th>
+      <th width="10%" align="center" style="border-bottom:1pt solid #000;">Hours</th>
+      <th width="15%" align="right" style="border-bottom:1pt solid #000;">Subtotal</th>
+      <th width="15%" align="right" style="border-bottom:1pt solid #000;">Discount</th>
+      <th width="16%" align="right" style="border-bottom:1pt solid #000;">Total</th>
     </tr>
     {professional_rows}
-    <tr class="total-row">
-      <td colspan="3">Total Fees Due</td>
-      <td class="text-right">{total_fees}</td>
-      <td class="text-right">{total_discount}</td>
-      <td class="text-right">{total_due_fees}</td>
+    <tr>
+      <td colspan="6" style="border-bottom:1.5pt solid #000; padding-top:10pt;"></td>
+    </tr>
+    <tr>
+      <td width="32%" align="left" style="padding-left:15pt; padding-top:10pt;">Total Fees Due</td>
+      <td width="12%"></td>
+      <td width="10%"></td>
+      <td width="15%" align="right" style="padding-top:10pt;">{total_fees}</td>
+      <td width="15%" align="right" style="padding-top:10pt;">{total_discount}</td>
+      <td width="16%" align="right" style="padding-top:10pt;">{total_after_discount}</td>
+    </tr>
+    {cap_row}
+    <tr>
+      <td width="32%"></td>
+      <td width="12%"></td>
+      <td width="10%"></td>
+      <td width="15%"></td>
+      <td width="15%" align="right" style="font-weight:bold; padding-top:15pt;">TOTAL DUE UPON RECEIPT</td>
+      <td width="16%" align="right" class="total-box" style="padding-top:15pt;">{total_due}</td>
     </tr>
   </table>
 
-  <!-- Total due box -->
-  <div class="total-due-box">
-    TOTAL DUE UPON RECEIPT: {total_due}
-  </div>
-
-  <!-- ACH Instructions -->
   <div class="ach-section">
-    <div class="ach-title">ACH Instructions:</div>
-    <table class="ach-table">
+    <div class="ach-title">ACH Instructions</div>
+    <table width="100%" border="0" cellpadding="3" cellspacing="0">
       <tr>
-        <td><b>Bank:</b></td>
-        <td>{bank_name}</td>
+        <td width="50%"></td>
+        <td width="25%" align="right" style="font-weight:bold;">Bank:</td>
+        <td width="25%" align="left">{bank_name}</td>
       </tr>
       <tr>
-        <td><b>ABA:</b></td>
-        <td>{bank_aba}</td>
+        <td width="50%"></td>
+        <td width="25%" align="right" style="font-weight:bold;">ABA:</td>
+        <td width="25%" align="left">{bank_aba}</td>
       </tr>
       <tr>
-        <td><b>Account Name:</b></td>
-        <td>{bank_account_name}</td>
+        <td width="50%"></td>
+        <td width="25%" align="right" style="font-weight:bold;">Account Name:</td>
+        <td width="25%" align="left">{bank_account_name}</td>
       </tr>
       <tr>
-        <td><b>Account Number:</b></td>
-        <td>{bank_account_number}</td>
+        <td width="50%"></td>
+        <td width="25%" align="right" style="font-weight:bold;">Account Number:</td>
+        <td width="25%" align="left">{bank_account_number}</td>
       </tr>
     </table>
   </div>
 
-</div><!-- end page 2 -->
+</div>
 
 </body>
 </html>
-"""
+'''
 
 
 # ── Template data builder ─────────────────────────────────────────────────────
@@ -427,12 +368,12 @@ def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
 
         rows_html.append(
             f"<tr>"
-            f"<td>{name_cell}</td>"
-            f"<td class='text-right'>{_format_currency(rate)}</td>"
-            f"<td class='text-right'>{hours:.2f}</td>"
-            f"<td class='text-right'>{_format_currency(subtotal)}</td>"
-            f"<td class='text-right'>{disc_label}</td>"
-            f"<td class='text-right'><b>{_format_currency(net)}</b></td>"
+            f"<td width='32%'>{name_cell}</td>"
+            f"<td width='12%' align='center'>{_format_currency(rate)}</td>"
+            f"<td width='10%' align='center'>{hours:.2f}</td>"
+            f"<td width='15%' align='right'>{_format_currency(subtotal)}</td>"
+            f"<td width='15%' align='right'>{disc_label}</td>"
+            f"<td width='16%' align='right'><b>{_format_currency(net)}</b></td>"
             f"</tr>"
         )
 
@@ -470,10 +411,17 @@ def generate_invoice_html(edit_data: dict) -> str:
     if zip_:
         client_city_state_zip = f"{client_city_state_zip} {zip_}".strip(", ")
 
+    # Salutation: contact name + colon  →  "Dear John Smith:"
+    greeting = f"{client_contact}:"
+
     # ── Company profile ───────────────────────────────────────────────────────
     owner_company = invoice.get("owner_company") or "IPC"
     profile = COMPANY_PROFILES.get(owner_company, COMPANY_PROFILES["IPC"])
     bank = profile["bank"]
+
+    company_address = profile["address"]
+    company_city_state_zip = profile["city_state_zip"]
+    company_phone = profile["phone"]
 
     # ── Logo ──────────────────────────────────────────────────────────────────
     logo_file = profile.get("logo_file") or LOGO_FILE
@@ -481,31 +429,13 @@ def generate_invoice_html(edit_data: dict) -> str:
     if logo_uri is None and owner_company != "IPC":
         logger.warning("⚠️ %s not found in assets/logos/ — using text fallback", logo_file)
     if logo_uri:
-        logo_block = (
-            f'<img src="{logo_uri}" class="logo-img" alt="Logo"/>'
-            f'<div class="company-block">'
-            f'<span class="company-name">{profile["name"]}</span><br/>'
-            f'{profile["address"]}<br/>'
-            f'{profile["city_state_zip"]}<br/>'
-            f'{profile["phone"]}'
-            f'</div>'
-        )
+        logo_img = f'<img src="{logo_uri}" alt="Logo"/>'
     else:
-        logo_block = (
-            f'<div class="company-block">'
-            f'<span class="company-name">{profile["name"]}</span><br/>'
-            f'{profile["address"]}<br/>'
-            f'{profile["city_state_zip"]}<br/>'
-            f'{profile["phone"]}'
-            f'</div>'
-        )
+        logo_img = f'<span style="font-weight:bold; font-size:12pt;">{profile["name"]}</span>'
 
     # ── Signature ─────────────────────────────────────────────────────────────
     sig_uri = _get_signature_base64(signatory_name) if signatory_name else None
-    if sig_uri:
-        signature_block = f'<img src="{sig_uri}" class="signature-img" alt="Signature"/>'
-    else:
-        signature_block = ""
+    signature_img = f'<img src="{sig_uri}" alt="Signature"/>' if sig_uri else ""
 
     # ── Fee rows ──────────────────────────────────────────────────────────────
     all_lines = list(lines)
@@ -529,9 +459,27 @@ def generate_invoice_html(edit_data: dict) -> str:
     capped_fees = min(total_net, float(cap)) if cap is not None else total_net
     total_due_val = capped_fees + total_expenses
 
+    # ── Cap row (only shown when a cap actually reduces the fees) ───────────────
+    if cap is not None and float(cap) < total_net:
+        cap_row = (
+            '<tr>'
+            '<td width="32%" align="left" style="padding-left:15pt;">Fees Capped At</td>'
+            '<td width="12%"></td>'
+            '<td width="10%"></td>'
+            '<td width="15%"></td>'
+            '<td width="15%"></td>'
+            f'<td width="16%" align="right">{_format_currency(capped_fees)}</td>'
+            '</tr>'
+        )
+    else:
+        cap_row = ""
+
     return _INVOICE_HTML_TEMPLATE.format(
-        # Header / logo
-        logo_block=logo_block,
+        # Header / logo + company
+        logo_img=logo_img,
+        company_address=company_address,
+        company_city_state_zip=company_city_state_zip,
+        company_phone=company_phone,
         # Invoice meta
         invoice_number=invoice_number,
         invoice_date=invoice_date or "—",
@@ -543,15 +491,17 @@ def generate_invoice_html(edit_data: dict) -> str:
         client_title=client_title,
         client_address=client_address,
         client_city_state_zip=client_city_state_zip,
+        greeting=greeting,
         # Signature
-        signature_block=signature_block,
+        signature_img=signature_img,
         signatory_name=signatory_name or "—",
         signatory_title=signatory_title or "—",
         # Fees
         professional_rows=professional_rows,
         total_fees=_format_currency(total_fees + total_discount),
         total_discount=_format_currency(total_discount),
-        total_due_fees=_format_currency(total_net),
+        total_after_discount=_format_currency(total_net),
+        cap_row=cap_row,
         total_due=_format_currency(total_due_val),
         # ACH
         bank_name=bank["bank_name"],

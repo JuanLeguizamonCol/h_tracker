@@ -9,12 +9,16 @@ COPY Frontend/ .
 
 # Vite MUST see these as env vars at build time — not just .env files.
 # Values are passed from docker-compose build.args (sourced from azure.env).
+# VITE_API_URL — absolute URL of the backend Container App. When set, the SPA
+# calls the backend directly (CORS); when empty (local dev) it uses /api proxy.
+ARG VITE_API_URL
 ARG VITE_AUTH_MODE=azure
 ARG VITE_AZURE_CLIENT_ID
 ARG VITE_AZURE_TENANT_ID
 ARG VITE_AZURE_API_SCOPE
 ARG VITE_AZURE_REDIRECT_URI
 
+ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_AUTH_MODE=$VITE_AUTH_MODE
 ENV VITE_AZURE_CLIENT_ID=$VITE_AZURE_CLIENT_ID
 ENV VITE_AZURE_TENANT_ID=$VITE_AZURE_TENANT_ID

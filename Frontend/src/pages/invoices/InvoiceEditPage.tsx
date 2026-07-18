@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useInvoiceEditData, usePatchInvoice } from '@/hooks/useInvoices';
 import { InvoiceEditLine, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch } from '@/types';
-import { api } from '@/lib/api';
+import { api, apiUrl, authHeader } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -301,15 +301,7 @@ export default function InvoiceEditPage() {
     const setter = format === 'pdf' ? setExportingPdf : setExportingXlsx;
     setter(true);
     try {
-      const resp = await fetch(`/api/invoices/${invoiceId}/export/${format}`);
-      if (!resp.ok) throw new Error('Export failed');
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${invoiceLabel}.${format}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await api.download(`/invoices/${invoiceId}/export/${format}`, `${invoiceLabel}.${format}`);
     } catch {
       toast.error(`Failed to export ${format.toUpperCase()}.`);
     } finally {
@@ -493,7 +485,7 @@ export default function InvoiceEditPage() {
                           const ctrl = new AbortController();
                           previewAbortRef.current = ctrl;
                           setPreviewLoading(true);
-                          fetch(`/api/invoices/preview-number?company=${co}`, { signal: ctrl.signal })
+                          fetch(apiUrl(`/invoices/preview-number?company=${co}`), { signal: ctrl.signal, headers: authHeader() })
                             .then(r => r.json())
                             .then((d: { invoice_number: string }) => {
                               setPreviewNumber(d.invoice_number);

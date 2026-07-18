@@ -7,7 +7,7 @@ import { format } from 'date-fns';
 import { useProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
 import { useCreateInvoice, useCreateInvoiceLines, useUpdateInvoice } from '@/hooks/useInvoices';
-import { api } from '@/lib/api';
+import { api, apiUrl, authHeader } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -98,7 +98,7 @@ export default function InvoiceManualPage() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setInvoiceNumberLoading(true);
-    fetch(`/api/invoices/preview-number?company=${company}`, { signal: ctrl.signal })
+    fetch(apiUrl(`/invoices/preview-number?company=${company}`), { signal: ctrl.signal, headers: authHeader() })
       .then(r => r.json())
       .then((data: { invoice_number: string }) => {
         setInvoiceNumber(data.invoice_number);

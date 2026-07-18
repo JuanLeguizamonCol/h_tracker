@@ -49,15 +49,8 @@ export default function Invoices() {
       const params = new URLSearchParams();
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (companyFilter !== 'all') params.set('company', companyFilter);
-      const url = `/api/invoices/export/report${params.toString() ? `?${params}` : ''}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Export failed');
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `Invoices_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      const path = `/invoices/export/report${params.toString() ? `?${params}` : ''}`;
+      await api.download(path, `Invoices_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch {
       toast.error('Failed to export report.');
     } finally {
