@@ -43,6 +43,9 @@ class EmployeeBase(BaseModel):
 
 class EmployeeCreate(EmployeeBase):
     user_id: Optional[str] = None
+    # Optional initial credentials / app role set by an admin at creation time.
+    password: Optional[str] = None
+    user_role: Optional[str] = "employee"
 
 
 class EmployeeUpdate(BaseModel):

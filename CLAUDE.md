@@ -96,8 +96,13 @@ EXPENSIFY_* / FRESHSALES_*        integraciones opcionales
 ### Startup del backend
 El `backend.Dockerfile` ejecuta al inicio (sin seed):
 ```bash
-alembic upgrade head && python -m jobs.bootstrap_admin && uvicorn main:app --host 0.0.0.0 --port 8000
+python -m jobs.init_db && python -m jobs.bootstrap_admin && uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+- **`jobs/init_db.py`**: DB nueva → `create_all` + `alembic stamp head`; DB existente → `alembic upgrade head`.
+  ⚠️ La cadena de migraciones NO construye desde cero (la 002 hace `DROP TABLE` de las
+  tablas core esperando `create_all`), por eso `alembic upgrade head` directo falla en
+  una DB vacía. `init_db` resuelve esto. El índice único de `invoices` está declarado
+  también en el modelo (`__table_args__`) para que `create_all` lo cree en deploys nuevos.
 
 ### Nginx (frontend)
 - `/config.js` → config runtime (`window.__ENV__.API_URL`), sin caché
