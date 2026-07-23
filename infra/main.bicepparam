@@ -39,20 +39,23 @@ param dbAdminLogin = 'hours_admin'
 // Name of the logical database created inside the server.
 param dbName = 'hours_tracker'
 
-// dbAdminPassword — DO NOT set here. Pass at deploy time.
-// Example: --parameters dbAdminPassword=$env:DB_PASSWORD
+// Secure params are sourced from environment variables at deploy time (CI sets
+// them from GitHub secrets). They stay out of source control this way. NOTE: a
+// .bicepparam file must assign EVERY required parameter, so these cannot be left
+// to inline `--parameters` on the CLI — doing so fails compilation with BCP258.
+param dbAdminPassword = readEnvironmentVariable('DB_PASSWORD')
 
 // ---------------------------------------------------------------------------
 // Application secrets
 // ---------------------------------------------------------------------------
 
-// jwtSecretKey — DO NOT set here. Pass at deploy time.
-// The key must be at least 32 characters long. Generate with:
-//   openssl rand -base64 48
+// JWT signing key (min 32 chars). Generate with: openssl rand -base64 48
+param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY')
 
-// Initial admin account. Email is safe to keep here; the password is a secret
-// passed at deploy time (--parameters adminPassword=$env:ADMIN_PASSWORD).
-// The admin is created idempotently at backend startup with must_change_password=true.
+// Initial admin account. Email is safe to keep here; the password comes from the
+// ADMIN_PASSWORD env var (CI secret). The admin is created idempotently at backend
+// startup with must_change_password=true.
+param adminPassword = readEnvironmentVariable('ADMIN_PASSWORD')
 param adminEmail = 'jleguizamon@impactpoint.com'
 
 // Auth is handled entirely by the FastAPI backend (username/password → JWT),
