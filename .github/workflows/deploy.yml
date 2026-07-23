@@ -132,6 +132,7 @@ jobs:
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
+          set -o pipefail   # otherwise `| tee` masks an az failure as success
           az deployment group create \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --parameters infra/main.bicepparam \

@@ -140,8 +140,15 @@ resource pgServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview'
       mode: 'Disabled'
     }
     network: {
-      // Public access — firewall rules defined below.
-      // For production hardening, replace with VNet injection.
+      // Public networking is ENABLED but the only firewall rule (below) is the
+      // "Allow Azure services" range (0.0.0.0/0.0.0.0) — this does NOT open the
+      // DB to the internet; only Azure-internal callers (e.g. our Container Apps)
+      // can reach it, and they still need the admin credentials.
+      //
+      // HARDENING ROADMAP: for full isolation, move to VNet integration
+      // (Container Apps Environment + PostgreSQL delegated subnet + Private DNS)
+      // and set publicNetworkAccess: 'Disabled'. Deferred — it requires a VNet
+      // and re-testing connectivity, so it is intentionally not enabled here.
       publicNetworkAccess: 'Enabled'
     }
     authConfig: {
@@ -151,7 +158,8 @@ resource pgServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview'
   }
 }
 
-// Allow connections from Azure services (0.0.0.0 → 0.0.0.0 is the Azure magic range)
+// Allow connections from Azure services ONLY (0.0.0.0 → 0.0.0.0 is the Azure
+// magic range — it is NOT 0.0.0.0/0; the public internet cannot connect).
 resource pgFirewallAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-12-01-preview' = {
   parent: pgServer
   name: 'AllowAzureServices'
@@ -209,7 +217,9 @@ resource uploadsContainer 'Microsoft.Storage/storageAccounts/blobServices/contai
 
 // Connection string assembled from the account key (retrieved at deploy time).
 var storageKey = storageAccount.listKeys().keys[0].value
-var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};AccountKey=${storageKey};EndpointSuffix=${environment().suffixes.storage}'
+// Use az.environment() (fully qualified): the `environment` param above shadows
+// the bare environment() built-in, which newer Bicep rejects (BCP265).
+var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};AccountKey=${storageKey};EndpointSuffix=${az.environment().suffixes.storage}'
 
 // ---------------------------------------------------------------------------
 // 4. Container Apps Environment
@@ -355,6 +365,28 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: eurToUsdRate
             }
           ]
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/health'
+                port: 8000
+              }
+              initialDelaySeconds: 15
+              periodSeconds: 30
+              failureThreshold: 3
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/health'
+                port: 8000
+              }
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              failureThreshold: 3
+            }
+          ]
         }
       ]
       scale: {
@@ -425,6 +457,28 @@ resource frontendApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'BACKEND_URL'
               value: 'https://${backendApp.properties.configuration.ingress.fqdn}'
+            }
+          ]
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/'
+                port: 80
+              }
+              initialDelaySeconds: 5
+              periodSeconds: 30
+              failureThreshold: 3
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/config.js'
+                port: 80
+              }
+              initialDelaySeconds: 3
+              periodSeconds: 10
+              failureThreshold: 3
             }
           ]
         }
