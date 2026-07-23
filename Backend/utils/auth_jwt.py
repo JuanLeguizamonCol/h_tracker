@@ -30,6 +30,32 @@ def create_access_token(employee_id: str, email: str) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
+# ── Password-setup / invitation tokens ────────────────────────────────────────
+# Single-purpose, signed tokens emailed to a new user so they can set their own
+# password without prior credentials. Stateless (no DB table): validity is the
+# signature + expiry + the "purpose" claim.
+
+PASSWORD_SETUP_PURPOSE = "set_password"
+PASSWORD_SETUP_EXPIRE_HOURS = int(os.getenv("PASSWORD_SETUP_EXPIRE_HOURS", "72"))
+
+
+def create_password_setup_token(employee_id: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(hours=PASSWORD_SETUP_EXPIRE_HOURS)
+    payload = {"sub": employee_id, "purpose": PASSWORD_SETUP_PURPOSE, "exp": expire}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_password_setup_token(token: str) -> str | None:
+    """Return the employee_id if the token is a valid, unexpired set-password token, else None."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return None
+    if payload.get("purpose") != PASSWORD_SETUP_PURPOSE:
+        return None
+    return payload.get("sub")
+
+
 def get_current_employee(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),

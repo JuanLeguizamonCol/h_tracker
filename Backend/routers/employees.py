@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -72,8 +73,22 @@ def get_current_employee_me(
     dependencies=[Depends(require_admin)],
 )
 def create_new_employee(employee_in: EmployeeCreate, db: Session = Depends(get_db)):
+    if employee_in.password is not None and len(employee_in.password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters")
+    if employee_in.user_role and employee_in.user_role.strip().lower() not in ("employee", "admin"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role must be 'employee' or 'admin'")
+    email = employee_in.email.strip().lower()
+    if db.query(Employee).filter(Employee.email == email).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     emp = create_employee(db, employee_in)
     _auto_assign_internal_projects(db, emp.id)
+    # Best-effort: email the new user a link to set their own password. Never let
+    # an email failure break user creation.
+    try:
+        from services.invitations import send_password_setup_invitation
+        send_password_setup_invitation(emp)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("employees").exception("Failed to send invitation email to %s", emp.email)
     return emp
 
 

@@ -52,6 +52,16 @@ param copToUsdRate string = '4200'
 @description('EUR to USD exchange rate.')
 param eurToUsdRate string = '1.08'
 
+@description('Microsoft Graph app (client) id used to send invitation emails. Empty disables email.')
+param graphClientId string = ''
+
+@description('Microsoft Graph client secret. Empty disables email.')
+@secure()
+param graphClientSecret string = ''
+
+@description('From address for invitation emails — must be a real M365 mailbox.')
+param graphSender string = ''
+
 // ---------------------------------------------------------------------------
 // Variables — naming
 // ---------------------------------------------------------------------------
@@ -286,6 +296,10 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'acr-password'
           value: acrAdminPassword0
         }
+        {
+          name: 'graph-client-secret'
+          value: graphClientSecret
+        }
       ]
       registries: [
         {
@@ -363,6 +377,29 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'EUR_TO_USD_RATE'
               value: eurToUsdRate
+            }
+            // FRONTEND_URL is patched after the frontend is deployed (same step as
+            // CORS_ORIGINS) — used to build the /set-password invitation links.
+            {
+              name: 'FRONTEND_URL'
+              value: 'https://placeholder.azurecontainerapps.io'
+            }
+            // Microsoft Graph (invitation emails). Empty values disable email.
+            {
+              name: 'GRAPH_TENANT_ID'
+              value: tenant().tenantId
+            }
+            {
+              name: 'GRAPH_CLIENT_ID'
+              value: graphClientId
+            }
+            {
+              name: 'GRAPH_CLIENT_SECRET'
+              secretRef: 'graph-client-secret'
+            }
+            {
+              name: 'GRAPH_SENDER'
+              value: graphSender
             }
           ]
           probes: [

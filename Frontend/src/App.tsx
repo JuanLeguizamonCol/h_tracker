@@ -31,6 +31,7 @@ const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Auth = lazy(() => import("./pages/Auth"));
 const ChangePasswordPage = lazy(() => import("./pages/ChangePasswordPage"));
+const SetPasswordPage = lazy(() => import("./pages/SetPasswordPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +54,7 @@ const App = () => (
           <Suspense fallback={null}>
             <Routes>
               <Route path="/auth" element={<Auth />} />
+              <Route path="/set-password" element={<SetPasswordPage />} />
               <Route path="/change-password" element={<ProtectedRoute><ChangePasswordPage /></ProtectedRoute>} />
               <Route path="/" element={<ProtectedRoute><MainLayout><Dashboard /></MainLayout></ProtectedRoute>} />
               <Route path="/timesheet" element={<ProtectedRoute><MainLayout><Timesheet /></MainLayout></ProtectedRoute>} />

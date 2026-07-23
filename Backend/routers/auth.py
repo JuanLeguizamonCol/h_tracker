@@ -9,7 +9,10 @@ from config.database import get_db
 from models.employees import Employee
 from models.user_roles import UserRole
 from schemas.employees import EmployeeOut
-from utils.auth_jwt import verify_password, create_access_token, get_current_employee, hash_password
+from utils.auth_jwt import (
+    verify_password, create_access_token, get_current_employee, hash_password,
+    verify_password_setup_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,11 @@ class ChangePasswordRequest(BaseModel):
 
 class AdminResetPasswordRequest(BaseModel):
     temporary_password: str
+
+
+class SetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 
 @auth_router.post("/login")
@@ -131,4 +139,34 @@ def admin_reset_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     target.password_hash = hash_password(body.temporary_password)
     target.must_change_password = True
+    db.commit()
+
+
+# ── Password setup via emailed invitation token (public) ──────────────────────
+
+@auth_router.get("/reset-token-valid")
+def reset_token_valid(token: str, db: Session = Depends(get_db)):
+    """Public: let the frontend check an invitation token before showing the form."""
+    employee_id = verify_password_setup_token(token)
+    if not employee_id:
+        return {"valid": False}
+    emp = db.query(Employee).filter(Employee.id == employee_id, Employee.is_active == True).first()
+    if not emp:
+        return {"valid": False}
+    return {"valid": True, "email": emp.email, "name": emp.name}
+
+
+@auth_router.post("/set-password", status_code=status.HTTP_204_NO_CONTENT)
+def set_password(body: SetPasswordRequest, db: Session = Depends(get_db)):
+    """Public: set a password using a valid emailed invitation token (no prior login)."""
+    employee_id = verify_password_setup_token(body.token)
+    if not employee_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired link")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters")
+    emp = db.query(Employee).filter(Employee.id == employee_id, Employee.is_active == True).first()
+    if not emp:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired link")
+    emp.password_hash = hash_password(body.new_password)
+    emp.must_change_password = False
     db.commit()

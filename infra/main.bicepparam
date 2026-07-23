@@ -67,3 +67,16 @@ param adminEmail = 'jleguizamon@impactpoint.com'
 
 param copToUsdRate = '4200'
 param eurToUsdRate = '1.08'
+
+// ---------------------------------------------------------------------------
+// Microsoft Graph — invitation emails (optional)
+// ---------------------------------------------------------------------------
+// Sent from a real M365 mailbox via an app registration with the Mail.Send
+// application permission (admin consent required). If GRAPH_CLIENT_ID /
+// GRAPH_CLIENT_SECRET are not provided as env vars at deploy time, email stays
+// disabled (user creation still works, just without the invitation mail) — the
+// '' defaults keep the .bicepparam compiling either way.
+param graphClientId = readEnvironmentVariable('GRAPH_CLIENT_ID', '')
+param graphClientSecret = readEnvironmentVariable('GRAPH_CLIENT_SECRET', '')
+// From address — must be a real licensed/shared mailbox in the tenant.
+param graphSender = 'no-reply@impactpoint.com'

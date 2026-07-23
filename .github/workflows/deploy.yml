@@ -131,6 +131,10 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          # Optional — invitation emails via Microsoft Graph. Empty if unset;
+          # email stays disabled and the deploy still succeeds.
+          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
+          GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
         run: |
           set -o pipefail   # otherwise `| tee` masks an az failure as success
           az deployment group create \
@@ -161,7 +165,7 @@ jobs:
           az containerapp update \
             --name ${{ env.BACKEND_APP }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --set-env-vars "CORS_ORIGINS=https://${FRONTEND_FQDN}"
+            --set-env-vars "CORS_ORIGINS=https://${FRONTEND_FQDN}" "FRONTEND_URL=https://${FRONTEND_FQDN}"
 
       # -----------------------------------------------------------------------
       # Update backend image to the SHA-tagged version built in job 1.
