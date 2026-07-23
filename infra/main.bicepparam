@@ -50,6 +50,11 @@ param dbName = 'hours_tracker'
 // The key must be at least 32 characters long. Generate with:
 //   openssl rand -base64 48
 
+// Initial admin account. Email is safe to keep here; the password is a secret
+// passed at deploy time (--parameters adminPassword=$env:ADMIN_PASSWORD).
+// The admin is created idempotently at backend startup with must_change_password=true.
+param adminEmail = 'jleguizamon@impactpoint.com'
+
 // Auth is handled entirely by the FastAPI backend (username/password → JWT),
 // so no Entra ID / App Registration parameters are required here.
 

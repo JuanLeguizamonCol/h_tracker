@@ -10,11 +10,11 @@
 #   AZURE_SUBSCRIPTION_ID — Azure subscription ID
 #   DB_PASSWORD           — PostgreSQL admin password (passed to Bicep)
 #   JWT_SECRET_KEY        — FastAPI JWT signing key (passed to Bicep)
+#   ADMIN_PASSWORD        — Initial admin account password (passed to Bicep)
 #
-# First-run note: On the very first deployment VITE_API_URL will be empty
-# because the backend Container App does not exist yet. The frontend build
-# will proceed without it; after the first deploy you can push again and it
-# will resolve correctly.
+# The backend URL is injected into the frontend at RUNTIME (via /config.js from
+# the BACKEND_URL env var), not baked in at build time — so a single deploy is
+# always correct, even on the very first run. No rebuild/second push needed.
 # =============================================================================
 
 name: Build, Push & Deploy
@@ -35,6 +35,7 @@ env:
   ACR_LOGIN_SERVER: impactpointhoursacr.azurecr.io
   BACKEND_APP: impactpoint-hours-backend
   FRONTEND_APP: impactpoint-hours-frontend
+  INVOICE_JOB: impactpoint-hours-invoice-job
 
 # =============================================================================
 # Job 1 — Build Docker images and push to ACR
@@ -69,22 +70,6 @@ jobs:
         run: az acr login --name ${{ env.ACR_NAME }}
 
       # -----------------------------------------------------------------------
-      # Resolve backend URL for VITE_API_URL bake-in.
-      # On first run this will be empty; the frontend will use a placeholder
-      # and you update VITE_AZURE_REDIRECT_URI + redeploy once the URL is known.
-      # -----------------------------------------------------------------------
-      - name: Resolve backend FQDN (if app already exists)
-        id: backend-fqdn
-        continue-on-error: true
-        run: |
-          FQDN=$(az containerapp show \
-            --name ${{ env.BACKEND_APP }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --query "properties.configuration.ingress.fqdn" \
-            --output tsv 2>/dev/null || echo "")
-          echo "fqdn=${FQDN}" >> "$GITHUB_OUTPUT"
-
-      # -----------------------------------------------------------------------
       # Build & push BACKEND image
       # Context: ./Backend  |  Dockerfile: backend.Dockerfile (at repo root)
       # -----------------------------------------------------------------------
@@ -100,17 +85,13 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Build & push FRONTEND image
-      # VITE_* args are baked into the static bundle at build time by Vite.
-      # VITE_API_URL points to the backend Container App ingress FQDN.
+      # No build args: the backend URL is injected at runtime via /config.js
+      # (BACKEND_URL env var), so the image is backend-agnostic.
       # -----------------------------------------------------------------------
       - name: Build and push frontend image
         run: |
-          BACKEND_FQDN="${{ steps.backend-fqdn.outputs.fqdn }}"
-          VITE_API_URL="https://${BACKEND_FQDN}"
-
           docker build \
             --file frontend.Dockerfile \
-            --build-arg VITE_API_URL="${VITE_API_URL}" \
             --tag ${{ env.ACR_LOGIN_SERVER }}/frontend:latest \
             --tag ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ github.sha }} \
             .
@@ -150,6 +131,7 @@ jobs:
             --parameters infra/main.bicepparam \
             --parameters dbAdminPassword="${{ secrets.DB_PASSWORD }}" \
             --parameters jwtSecretKey="${{ secrets.JWT_SECRET_KEY }}" \
+            --parameters adminPassword="${{ secrets.ADMIN_PASSWORD }}" \
             --name "deploy-${{ github.sha }}" \
             --output json \
           | tee /tmp/bicep-output.json
@@ -197,6 +179,17 @@ jobs:
             --name ${{ env.FRONTEND_APP }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ needs.build-and-push.outputs.image-tag }}
+
+      # -----------------------------------------------------------------------
+      # Update the scheduled invoice Job to the SHA-tagged image so the nightly
+      # run uses the same build as the web app (Bicep pins it to :latest).
+      # -----------------------------------------------------------------------
+      - name: Update invoice Job image
+        run: |
+          az containerapp job update \
+            --name ${{ env.INVOICE_JOB }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR_LOGIN_SERVER }}/backend:${{ needs.build-and-push.outputs.image-tag }}
 
       # -----------------------------------------------------------------------
       # Print deployed URLs for visibility in the Actions run summary

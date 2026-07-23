@@ -36,6 +36,16 @@ param dbName string = 'hours_tracker'
 @secure()
 param jwtSecretKey string
 
+@description('Email of the initial admin account created idempotently at startup.')
+param adminEmail string = 'jleguizamon@impactpoint.com'
+
+@description('Comma-separated email domains allowed to self-register. Empty string disables self-registration.')
+param allowedEmailDomains string = 'impactpoint.com'
+
+@description('Initial password for the admin account (min 8 chars). Passed at deploy time; never stored in source.')
+@secure()
+param adminPassword string
+
 @description('COP to USD exchange rate.')
 param copToUsdRate string = '4200'
 
@@ -53,6 +63,7 @@ var pgServerName = '${prefix}-db'
 var containerAppsEnvName = '${prefix}-env'
 var backendAppName = '${prefix}-backend'
 var frontendAppName = '${prefix}-frontend'
+var invoiceJobName = '${prefix}-invoice-job'
 // Storage account: 3-24 chars, lowercase alphanumeric, globally unique.
 var storageAccountName = 'ipthours${uniqueString(resourceGroup().id)}'
 var uploadsContainerName = 'invoice-attachments'
@@ -254,6 +265,10 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
           value: jwtSecretKey
         }
         {
+          name: 'admin-password'
+          value: adminPassword
+        }
+        {
           name: 'storage-connection-string'
           value: storageConnectionString
         }
@@ -308,6 +323,18 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
               secretRef: 'jwt-secret-key'
             }
             {
+              name: 'ADMIN_EMAIL'
+              value: adminEmail
+            }
+            {
+              name: 'ADMIN_PASSWORD'
+              secretRef: 'admin-password'
+            }
+            {
+              name: 'ALLOWED_EMAIL_DOMAINS'
+              value: allowedEmailDomains
+            }
+            {
               name: 'AZURE_STORAGE_CONNECTION_STRING'
               secretRef: 'storage-connection-string'
             }
@@ -356,9 +383,10 @@ resource frontendApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: frontendAppName
   location: location
   tags: tags
-  // Frontend image is built with VITE_* args baked in at build time.
-  // VITE_API_URL must point to the backend ingress FQDN — the pipeline
-  // passes this as a build-arg when the backend URL is known post-deploy.
+  // The frontend image is backend-agnostic. The backend URL is provided at
+  // runtime via the BACKEND_URL env var below, which the container entrypoint
+  // writes into /config.js before nginx starts — no build-time bake, so a
+  // single deploy is always correct even on the first run.
   properties: {
     managedEnvironmentId: containerAppsEnv.id
     configuration: {
@@ -392,8 +420,8 @@ resource frontendApp 'Microsoft.App/containerApps@2024-03-01' = {
             memory: '0.5Gi'
           }
           env: [
-            // Runtime env var — Nginx can expose this via window.__env__ injection
-            // or the pipeline rebuilds the image with the correct VITE_API_URL arg.
+            // Read at startup by the entrypoint hook, which writes it into
+            // /config.js (window.__ENV__.API_URL) so the SPA calls this backend.
             {
               name: 'BACKEND_URL'
               value: 'https://${backendApp.properties.configuration.ingress.fqdn}'
@@ -415,6 +443,75 @@ resource frontendApp 'Microsoft.App/containerApps@2024-03-01' = {
           }
         ]
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. Scheduled Invoice Generation — Container Apps Job
+// ---------------------------------------------------------------------------
+// Runs `python -m jobs.generate_invoices` once per day on a single replica.
+// Kept OUT of the backend web app so it executes exactly once regardless of how
+// many backend replicas are running. Idempotency is additionally guaranteed at
+// the DB layer by a partial unique index on (project_id, period_start, period_end).
+//
+// cronExpression is UTC. '0 13 * * *' = 13:00 UTC = 08:00 America/Bogota (UTC-5).
+
+resource invoiceJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: invoiceJobName
+  location: location
+  tags: tags
+  properties: {
+    environmentId: containerAppsEnv.id
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 1800          // 30 min hard cap per run
+      replicaRetryLimit: 1
+      scheduleTriggerConfig: {
+        cronExpression: '0 13 * * *'
+        parallelism: 1              // never run two replicas at once
+        replicaCompletionCount: 1
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: databaseUrl
+        }
+        {
+          name: 'acr-password'
+          value: acrAdminPassword0
+        }
+      ]
+      registries: [
+        {
+          server: acrLoginServer
+          username: acrAdminUsername
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'invoice-job'
+          image: '${acrLoginServer}/backend:latest'
+          command: [
+            'python'
+            '-m'
+            'jobs.generate_invoices'
+          ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'DATABASE_URL'
+              secretRef: 'database-url'
+            }
+          ]
+        }
+      ]
     }
   }
 }
@@ -449,3 +546,6 @@ output uploadsContainerName string = uploadsContainerName
 
 @description('Log Analytics Workspace resource ID.')
 output logAnalyticsWorkspaceId string = logAnalytics.id
+
+@description('Name of the scheduled invoice-generation Container Apps Job.')
+output invoiceJobName string = invoiceJob.name

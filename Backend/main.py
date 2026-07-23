@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from utils.auth_jwt import get_current_employee
-from config.database import engine, Base
 
 # Import routers
 from routers.auth import auth_router
@@ -90,17 +89,12 @@ def health():
     return {"status": "ok"}
 
 
-# ---------- Create tables (fallback if no Alembic migration run) ----------
-Base.metadata.create_all(bind=engine)
+# NOTE: Schema creation/migration is handled at startup by `jobs/init_db.py`
+# (see backend.Dockerfile CMD), which runs before this module is imported.
+# We intentionally do NOT call Base.metadata.create_all here — that ran on every
+# import and could silently mask a missing migration.
 
-
-# ---------- Scheduler ----------
-from services.invoice_scheduler import start_scheduler, stop_scheduler
-
-@app.on_event("startup")
-async def startup_event():
-    start_scheduler()
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    stop_scheduler()
+# NOTE: Scheduled invoice generation no longer runs in this web process.
+# It runs as a standalone Azure Container Apps Job (single replica, cron trigger)
+# via `python -m jobs.generate_invoices`. Running it here would execute once per
+# replica and risk duplicate invoices under horizontal scaling.

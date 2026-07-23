@@ -38,7 +38,6 @@ uvicorn==0.38.0
 alembic==1.15.2
 reportlab==4.2.5
 openpyxl==3.1.5
-apscheduler==3.10.4
 python-dateutil==2.9.0
 xhtml2pdf==0.2.16
 azure-storage-blob==12.23.1

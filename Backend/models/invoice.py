@@ -1,5 +1,5 @@
 from config.database import Base
-from sqlalchemy import Column, String, Date, DateTime, Numeric, ForeignKey
+from sqlalchemy import Column, String, Date, DateTime, Numeric, ForeignKey, Boolean, Index, text
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
@@ -8,6 +8,18 @@ import uuid
 class Invoice(Base):
 
     __tablename__ = "invoices"
+
+    # Partial unique index: an active project+period can be auto-invoiced only
+    # once. Declared here (not just in migration 025) so create_all builds it on
+    # a fresh DB too — keeping the fresh-deploy and migrated schemas identical.
+    __table_args__ = (
+        Index(
+            "uq_invoices_auto_project_period",
+            "project_id", "period_start", "period_end",
+            unique=True,
+            postgresql_where=text("auto_generated"),
+        ),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
@@ -22,6 +34,10 @@ class Invoice(Base):
     due_date = Column(Date, nullable=True)
     period_start = Column(Date, nullable=True)
     period_end = Column(Date, nullable=True)
+    # True when created by the scheduled invoice job (vs. manually by a user).
+    # Backed by a partial unique index on (project_id, period_start, period_end)
+    # so the same project+period can never be auto-invoiced twice.
+    auto_generated = Column(Boolean, nullable=False, default=False)
     signatory_name = Column(String, nullable=True)
     signatory_title = Column(String, nullable=True)
     owner_company = Column(String(10), nullable=True, default='IPC')

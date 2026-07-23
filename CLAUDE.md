@@ -15,10 +15,11 @@ Sistema de seguimiento de horas y facturación para empresas de servicios profes
 | Estado/Fetching | TanStack React Query v5 |
 | Fechas | date-fns |
 | Notificaciones | Sonner |
-| Auth | Azure AD (fastapi-azure-auth) — modo `AUTH_MODE=mock` en dev |
-| Scheduler | APScheduler 3.10 (background job para facturas mensuales) |
-| Exportación | ReportLab (PDF), OpenPyXL (Excel) |
-| Contenerización | Docker Compose + Nginx reverse proxy |
+| Auth | Usuario/contraseña → JWT (HS256, python-jose + passlib/bcrypt) |
+| Facturación programada | Azure Container Apps Job (cron diario) — `python -m jobs.generate_invoices` |
+| Exportación | ReportLab / xhtml2pdf (PDF), OpenPyXL (Excel) |
+| Almacenamiento | Azure Blob Storage para adjuntos (fallback a filesystem local) |
+| Contenerización | Docker Compose + Nginx (local) · Azure Container Apps + Bicep (prod) |
 
 ---
 
@@ -27,27 +28,39 @@ Sistema de seguimiento de horas y facturación para empresas de servicios profes
 ```
 H_Tracker/
 ├── Backend/
-│   ├── main.py                    # Entrada FastAPI, routers, scheduler startup/shutdown
+│   ├── main.py                    # Entrada FastAPI, routers (sin scheduler in-process)
 │   ├── config/
 │   │   └── database.py            # SQLAlchemy engine, SessionLocal, Base
-│   ├── models/                    # 17 modelos SQLAlchemy
-│   ├── schemas/                   # 15 schemas Pydantic (Create/Update/Out)
-│   ├── services/                  # 21 servicios de negocio
-│   ├── routers/                   # 16 routers FastAPI
-│   ├── alembic/versions/          # 6 migraciones
-│   ├── requirements.txt
-│   └── seed.py                    # Datos iniciales
+│   ├── models/                    # ~24 modelos SQLAlchemy
+│   ├── schemas/                   # ~20 schemas Pydantic (Create/Update/Out)
+│   ├── services/                  # ~27 servicios de negocio
+│   ├── routers/                   # ~21 routers FastAPI
+│   ├── jobs/                      # Entrypoints de una sola ejecución:
+│   │   ├── bootstrap_admin.py     #   crea el admin inicial (idempotente, al arranque)
+│   │   └── generate_invoices.py   #   generación programada de facturas (Container Apps Job)
+│   ├── utils/
+│   │   ├── auth_jwt.py            # hash/verify password, create/verify JWT
+│   │   └── blob_storage.py       # Azure Blob (upload/SAS/delete) con fallback local
+│   ├── alembic/versions/          # 25 migraciones (001–025)
+│   ├── reset_all_passwords.py     # Utilidad admin (manual)
+│   └── requirements.txt
 ├── Frontend/
+│   ├── public/config.js          # Config runtime (window.__ENV__.API_URL) — reescrito al arranque
 │   ├── src/
 │   │   ├── App.tsx                # Rutas React Router (lazy loading)
-│   │   ├── pages/                 # 19 páginas
-│   │   ├── hooks/                 # 11 archivos de hooks (React Query)
+│   │   ├── pages/                 # ~14 páginas
+│   │   ├── hooks/                 # ~15 archivos de hooks (React Query)
 │   │   ├── components/ui/         # Shadcn/ui components
-│   │   ├── contexts/AuthContext.tsx
-│   │   ├── lib/api.ts             # Cliente HTTP (fetch + Bearer token / mock)
+│   │   ├── contexts/AuthContext.tsx  # login(email,password) → JWT en localStorage
+│   │   ├── lib/api.ts             # Cliente HTTP (fetch + Bearer token)
 │   │   └── types/index.ts         # Tipos TypeScript globales
+├── infra/                         # IaC de Azure
+│   ├── main.bicep                #   ACR, PostgreSQL, Storage, Container Apps Env, apps + Job
+│   ├── main.bicepparam
+│   └── setup.sh                  #   bootstrap único (RG, ACR, OIDC, roles)
+├── .github/workflows/deploy.yml   # CI/CD: build+push a ACR → deploy Bicep → update imágenes
 ├── backend.Dockerfile
-├── frontend.Dockerfile
+├── frontend.Dockerfile / frontend-entrypoint.sh
 ├── docker-compose.yml
 ├── nginx.conf
 └── CLAUDE.md                      # Este archivo
@@ -66,32 +79,42 @@ frontend  → puerto 3000:80
 
 ### Variables de entorno clave (backend)
 ```
-DATABASE_URL        postgresql://hours_user:hours_pass@postgres:5432/hours_tracker
-AUTH_MODE           mock | azure
-CORS_ORIGINS        http://localhost:8080,http://localhost:3000
-UPLOAD_DIR          /app/uploads
-COP_TO_USD_RATE     4200
-EUR_TO_USD_RATE     1.08
+DATABASE_URL                     postgresql://hours_user:hours_pass@postgres:5432/hours_tracker
+JWT_SECRET_KEY                   clave de firma de tokens (obligatoria en prod)
+ADMIN_EMAIL / ADMIN_PASSWORD     admin inicial creado idempotentemente al arranque
+ADMIN_NAME                       (opcional) nombre del admin
+ALLOWED_EMAIL_DOMAINS            dominios permitidos para /auth/register (default: impactpoint.com)
+CORS_ORIGINS                     http://localhost:8080,http://localhost:3000
+UPLOAD_DIR                       /app/uploads (fallback si no hay Blob)
+AZURE_STORAGE_CONNECTION_STRING  si está seteada, los adjuntos van a Blob Storage
+AZURE_STORAGE_CONTAINER          invoice-attachments
+COP_TO_USD_RATE / EUR_TO_USD_RATE   4200 / 1.08
+EXPENSIFY_* / FRESHSALES_*        integraciones opcionales
 ```
+> No existe `AUTH_MODE`. La auth es siempre usuario/contraseña → JWT.
 
 ### Startup del backend
-El `backend.Dockerfile` ejecuta al inicio:
+El `backend.Dockerfile` ejecuta al inicio (sin seed):
 ```bash
-alembic upgrade head && python seed.py && uvicorn main:app --host 0.0.0.0 --port 8000
+alembic upgrade head && python -m jobs.bootstrap_admin && uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### Nginx
-- `/api/*` → `http://backend:8000/` (strips `/api` prefix)
+### Nginx (frontend)
+- `/config.js` → config runtime (`window.__ENV__.API_URL`), sin caché
+- `/api/*` → backend (solo local/same-origin; upstream por variable+resolver para no
+  romper el arranque cuando el host `backend` no existe, p.ej. en Azure)
 - Todo lo demás → `index.html` (SPA fallback)
+- **En Azure el SPA llama al backend por URL absoluta** (`config.js`), no por `/api`.
 
 ---
 
-## Modelos de base de datos (17)
+## Modelos de base de datos (~24)
+
+Los principales (hay más: skills, costos internos, secuencias de numeración, on-hold, etc.):
 
 | Modelo | Tabla | Descripción |
 |--------|-------|-------------|
-| AppUser | app_users | Usuario Azure AD (azure_oid, email, display_name) |
-| Employee | employees | Perfil de empleado (user_id FK a azure_oid, hourly_rate, title, department, business_unit) |
+| Employee | employees | Perfil de empleado + credenciales (email, password_hash, must_change_password, title, department, business_unit) |
 | Client | clients | Cliente con campos de facturación extendidos |
 | Project | projects | Proyecto con client_id, manager_id, status, is_internal, project_code |
 | ProjectCategory | project_categories | Categorías (area_category / business_unit) |
@@ -99,14 +122,14 @@ alembic upgrade head && python seed.py && uvicorn main:app --host 0.0.0.0 --port
 | UserRole | user_roles | Roles de app (employee / admin) |
 | EmployeeProject | employee_projects | Asignación empleado↔proyecto con role_id |
 | TimeEntry | time_entries | Entrada de horas (date, hours, billable, status=normal) |
-| Invoice | invoices | Factura (status: draft/sent/paid/cancelled/voided) |
+| Invoice | invoices | Factura (status, period_start/end, owner_company, auto_generated). Índice único parcial `(project_id, period_start, period_end) WHERE auto_generated` → no duplica facturas auto |
 | InvoiceLine | invoice_lines | Línea de factura (employee, hours, rate_snapshot, discount) |
 | InvoiceManualLine | invoice_manual_lines | Línea manual (person_name, hours, rate_usd) |
 | InvoiceFee | invoice_fees | Honorario (label, quantity, unit_price_usd) |
 | InvoiceFeeAttachment | invoice_fee_attachments | Archivos adjuntos a honorarios |
 | InvoiceTimeEntry | invoice_time_entries | Vínculo factura↔time_entry (evita doble facturación) |
 | InvoiceExpense | invoice_expenses | Gasto (category, amount_usd, professional, vendor) |
-| SchedulerLog | scheduler_log | Log de ejecuciones del scheduler de facturas |
+| SchedulerLog | scheduler_log | Log de ejecuciones del job de facturas (`jobs/generate_invoices`) |
 
 ### Relaciones clave
 ```
@@ -120,17 +143,27 @@ Project ──< Invoice ──< InvoiceLine
 ```
 
 ### Nota FK importante
-`time_entries.user_id` es FK a `employees.id` (UUID interno), **NO** a `employees.user_id` (Azure AD OID).
+`time_entries.user_id` es FK a `employees.id` (UUID interno), **NO** a `employees.user_id`.
 Siempre usar `employee.id` al crear TimeEntry desde el frontend.
+(`employees.user_id` es un identificador interno propio, ya no un OID de Azure AD.)
 
 ---
 
 ## API Backend — Endpoints
 
-### Auth
+### Auth (público excepto donde se indica)
 ```
-GET  /auth/me                     → AppUserOut (crea si no existe)
+POST /auth/login                          → {access_token, token_type} body:{email, password}
+POST /auth/register                       → EmployeeOut (restringido a ALLOWED_EMAIL_DOMAINS)
+GET  /auth/me                             → EmployeeOut (requiere token)
+POST /auth/change-password                → 204 (requiere token)
+POST /auth/admin-reset-password/{id}      → 204 (solo admin)
 ```
+> Todos los routers salvo `/auth` requieren `Authorization: Bearer <jwt>`
+> (dependencia global `get_current_employee` en `main.py`).
+
+Routers adicionales no listados abajo: `freshsales`, `skill-catalog`,
+`notifications`, `invoice-hours-on-hold`, `profile`.
 
 ### Employees
 ```
@@ -316,19 +349,26 @@ GET  /health                      → {status: "ok"}
 ## Servicios backend clave
 
 ### invoice_generator.py
-Genera facturas draft automáticamente para proyectos activos no internos:
-1. Busca proyectos activos no internos sin factura en el período
-2. Obtiene time entries billables no vinculadas a otra factura
-3. Agrupa por empleado, busca rol en `employee_projects`, obtiene `hourly_rate_usd`
-4. Crea `Invoice` + `InvoiceLine` por empleado + `InvoiceTimeEntry` links
-5. Numeración: `INV-{YYYY}-{seq:03d}`
+- `generate_invoice_for_project_period(db, project, ps, pe)` — genera **una** factura draft
+  para un proyecto + período. **Idempotente**: chequea existencia previa y captura
+  `IntegrityError` del índice único (carrera). Setea `period_start/end` y `auto_generated=True`.
+- `generate_invoices_for_period(db, ps, pe)` — wrapper que itera todos los proyectos
+  activos no internos (usado por el endpoint manual `/generate-monthly`).
+- Solo toma time entries billables **no vinculadas** (evita re-facturar horas).
+- Numeración vía `invoice_number_service.atomic_generate_number` (secuencia atómica
+  por empresa, `INSERT … ON CONFLICT … RETURNING`).
 
-### invoice_scheduler.py
-APScheduler `BackgroundScheduler`:
-- Job: `auto_generate_monthly_invoices` — cron día 5, 00:00
-- Genera para el mes anterior
-- Registra en `scheduler_log`
-- Se inicia/detiene en `@app.on_event("startup/shutdown")`
+### jobs/generate_invoices.py  (reemplaza al viejo APScheduler)
+Entrypoint de una sola ejecución (`python -m jobs.generate_invoices`), corre como
+**Azure Container Apps Job** (cron diario, `parallelism: 1`):
+- Por cada proyecto activo no interno, si hoy es su día de facturación
+  (`services/billing_periods.py`), genera la factura del período vigente.
+- Registra en `scheduler_log` y sale con código 0/1.
+- Doble garantía anti-duplicados: el Job corre una sola vez + el índice único parcial.
+
+### services/billing_periods.py
+Cálculo de períodos por proyecto (`next_invoice_date`, `period_bounds_for_project`)
+según `billing_period` (monthly/bimonthly/quarterly/weekly/biweekly/custom).
 
 ### expensify_service.py
 - Llama a Expensify Partner API
@@ -345,14 +385,18 @@ APScheduler `BackgroundScheduler`:
 
 ## Migraciones Alembic
 
+25 migraciones (001–025). Hitos:
+
 | Revisión | Descripción |
 |----------|-------------|
 | 001 | Schema inicial (todas las tablas core) |
-| 002 | Alineación con frontend |
 | 003 | Soporte edición facturas (discount_type, discount_value, manual_lines) |
-| 004 | Adiciones fase 2 |
 | 005 | Manager en proyectos + categorías |
 | 006 | Tabla scheduler_log |
+| 010 | Notifications |
+| 017–022 | Numeración de facturas por empresa (secuencias, normalización) |
+| 023–024 | Auth por contraseña (`password_hash`, `must_change_password`) |
+| 025 | `invoices.auto_generated` + índice único parcial anti-duplicados |
 
 Para correr migraciones:
 ```bash
@@ -364,15 +408,17 @@ alembic downgrade -1       # Revertir última
 
 ## Flujo de creación de factura
 
-### Automático (scheduler — día 5 de cada mes)
+### Automático (Azure Container Apps Job — cron diario)
 ```
-APScheduler → invoice_generator.generate_invoices_for_period(prev_month)
+Container Apps Job (parallelism 1) → python -m jobs.generate_invoices
   → Por cada proyecto activo no interno:
-    → Verificar que no existe factura para ese período
-    → Buscar time entries billables no vinculadas
-    → Agrupar por empleado → calcular horas × rate
-    → Crear Invoice (draft) + InvoiceLines + InvoiceTimeEntry links
-    → Registrar en SchedulerLog
+    → ¿Hoy == día de facturación del proyecto? (billing_periods) — si no, skip
+    → generate_invoice_for_project_period(project, período):
+        → Si ya existe factura auto para (proyecto, período) → skip
+        → time entries billables NO vinculadas → agrupar por empleado → horas × rate
+        → Crear Invoice (draft, auto_generated) + InvoiceLines + InvoiceTimeEntry links
+        → El índice único parcial impide duplicados aunque haya carrera
+    → Registrar corrida en SchedulerLog
 ```
 
 ### Manual desde frontend
@@ -394,19 +440,22 @@ InvoiceNewPage:
 
 ---
 
-## Autenticación — modo dev (mock)
+## Autenticación (usuario/contraseña → JWT)
 
-Con `AUTH_MODE=mock` el backend acepta header `X-Dev-User`:
-```json
-{ "oid": "...", "email": "...", "name": "..." }
-```
+No hay Azure AD ni modo mock. Flujo:
+1. `POST /auth/login` con `{email, password}` → JWT (HS256, exp 7 días, `sub` = `employee.id`).
+2. El frontend guarda el token en `localStorage` (`auth_token`) y lo envía como `Bearer`.
+3. `get_current_employee` (en `utils/auth_jwt.py`) valida el token en cada request y
+   carga el `Employee` activo. Es dependencia global de todos los routers salvo `/auth`.
 
-El frontend en modo mock guarda el usuario en `localStorage` bajo la key `mock_user`.
+- Contraseñas hasheadas con bcrypt (passlib). `must_change_password` fuerza cambio en el primer login.
+- Admin inicial: creado idempotentemente al arranque por `jobs/bootstrap_admin.py`
+  desde `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
+- Autoregistro (`/auth/register`) restringido a `ALLOWED_EMAIL_DOMAINS`.
 
 En `AuthContext.tsx`:
-- `GET /employees/me` → retorna el Employee del usuario logueado
-- `employee.id` = UUID interno de `employees` table
-- `employee.user_id` = Azure AD OID (diferente a `employee.id`)
+- `login(email, password)` → guarda token → `GET /auth/me` retorna el Employee.
+- `employee.id` = UUID interno; `employee.user_id` = identificador interno propio.
 
 **IMPORTANTE:** Al crear `TimeEntry`, usar siempre `employee.id` como `user_id`,
 nunca `employee.user_id`. El campo `time_entries.user_id` es FK a `employees.id`.
@@ -433,6 +482,12 @@ docker exec -it h_tracker-postgres-1 psql -U hours_user -d hours_tracker
 
 # Correr migraciones manualmente
 docker exec h_tracker-backend-1 alembic upgrade head
+
+# Ejecutar el job de facturas manualmente (mismo entrypoint que el Container Apps Job)
+docker exec h_tracker-backend-1 python -m jobs.generate_invoices
+
+# Crear/asegurar admin manualmente
+docker exec -e ADMIN_EMAIL=... -e ADMIN_PASSWORD=... h_tracker-backend-1 python -m jobs.bootstrap_admin
 ```
 
 ---
@@ -445,3 +500,25 @@ docker exec h_tracker-backend-1 alembic upgrade head
 | Backend API | http://localhost:8001 |
 | Swagger UI | http://localhost:8001/docs |
 | PostgreSQL | localhost:5433 |
+
+---
+
+## Despliegue en Azure
+
+IaC en `infra/` (Bicep) + CI/CD en `.github/workflows/deploy.yml`.
+
+**Recursos (`infra/main.bicep`):** ACR, PostgreSQL Flexible Server, Storage Account +
+contenedor Blob, Container Apps Environment, backend app, frontend app y el
+**Container Apps Job** de facturas.
+
+**Bootstrap único (una vez):** `infra/setup.sh` crea RG, ACR, App Registration con
+federated credential (OIDC, sin secretos) y roles.
+
+**Secrets de GitHub requeridos:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_SUBSCRIPTION_ID`, `DB_PASSWORD`, `JWT_SECRET_KEY`, `ADMIN_PASSWORD`.
+
+**Pipeline (push a `master`):** build+push de imágenes a ACR → `az deployment group create`
+(Bicep) → update de imágenes al tag SHA (backend, frontend, job) → patch de `CORS_ORIGINS`.
+
+**URL del backend en el frontend:** inyectada en runtime vía `/config.js` desde la env
+`BACKEND_URL` (no se hornea en build) → un solo deploy queda correcto desde el primer run.

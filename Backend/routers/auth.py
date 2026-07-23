@@ -1,3 +1,4 @@
+import os
 import uuid
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,6 +14,14 @@ from utils.auth_jwt import verify_password, create_access_token, get_current_emp
 logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Self-registration is restricted to company email domains. Comma-separated list;
+# set ALLOWED_EMAIL_DOMAINS="" to disable self-registration entirely.
+ALLOWED_EMAIL_DOMAINS = [
+    d.strip().lower()
+    for d in os.getenv("ALLOWED_EMAIL_DOMAINS", "impactpoint.com").split(",")
+    if d.strip()
+]
 
 
 class LoginRequest(BaseModel):
@@ -52,8 +61,15 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
 @auth_router.post("/register", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
 def register(body: RegisterRequest, db: Session = Depends(get_db)):
-    """Public self-registration. Creates a new employee with role 'employee'."""
+    """Self-registration, restricted to authorized company email domains.
+    Creates a new employee with role 'employee'."""
     email = body.email.strip().lower()
+    domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+    if not ALLOWED_EMAIL_DOMAINS or domain not in ALLOWED_EMAIL_DOMAINS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is restricted to authorized company emails",
+        )
     if db.query(Employee).filter(Employee.email == email).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     if len(body.password) < 8:
