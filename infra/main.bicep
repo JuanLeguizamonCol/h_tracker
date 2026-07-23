@@ -298,7 +298,10 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
         }
         {
           name: 'graph-client-secret'
-          value: graphClientSecret
+          // Container Apps rejects empty secret values, so use a placeholder when
+          // email isn't configured. GRAPH_CLIENT_ID stays empty in that case, so
+          // email_configured() is False and no mail is attempted anyway.
+          value: empty(graphClientSecret) ? 'not-configured' : graphClientSecret
         }
       ]
       registries: [
