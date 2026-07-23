@@ -175,3 +175,11 @@ cython_debug/
 .vscode
 .claude/
 nul
+
+# --- Frontend (React/Vite) source overrides ---
+# The generic Python packaging patterns above (notably `lib/`) are unanchored and
+# would otherwise swallow the frontend's SOURCE directory Frontend/src/lib/,
+# leaving api.ts/utils.ts out of the repo and breaking the CI `vite build`.
+# Re-include the frontend source lib tree explicitly.
+!Frontend/src/lib/
+!Frontend/src/lib/**
