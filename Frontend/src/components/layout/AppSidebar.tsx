@@ -36,15 +36,19 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r-0">
       <SidebarHeader className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sidebar-primary">
-            <Clock className="h-5 w-5 text-sidebar-primary-foreground" />
-          </div>
-          {!isCollapsed && (
-            <div className="flex flex-col animate-fade-in">
-              <span className="text-lg font-bold text-sidebar-foreground">Impact Hours Tracker</span>
-              <span className="text-xs text-sidebar-muted">Time Tracking</span>
-            </div>
+        <div className="flex items-center justify-center">
+          {isCollapsed ? (
+            <img
+              src="/small_logo.jpg"
+              alt="Impact Hours Tracker"
+              className="h-10 w-10 rounded-xl object-cover"
+            />
+          ) : (
+            <img
+              src="/logo_ipc.png"
+              alt="Impact Hours Tracker"
+              className="h-10 w-auto animate-fade-in"
+            />
           )}
         </div>
       </SidebarHeader>
