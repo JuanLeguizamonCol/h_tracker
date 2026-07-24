@@ -26,7 +26,7 @@ def _build_html(name: str, link: str) -> str:
     return f"""\
 <div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;color:#1a1a1a;line-height:1.5">
   <p>Hola {safe_name},</p>
-  <p>Se ha creado tu cuenta en <strong>Horas+</strong> (Impact Point Hours Tracker).</p>
+  <p>Se ha creado tu cuenta en <strong>Impact Hours Tracker</strong>.</p>
   <p>Para activarla, define tu contraseña haciendo clic en el siguiente enlace:</p>
   <p style="margin:24px 0">
     <a href="{link}"
@@ -50,7 +50,7 @@ def send_password_setup_invitation(emp: Employee) -> bool:
     link = f"{_frontend_base_url()}/set-password?token={token}"
     return send_email(
         to_email=emp.email,
-        subject="Activa tu cuenta en Horas+ — establece tu contraseña",
+        subject="Activa tu cuenta en Impact Hours Tracker — establece tu contraseña",
         html_body=_build_html(emp.name, link),
         to_name=emp.name,
     )

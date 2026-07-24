@@ -57,7 +57,7 @@ export default function Register() {
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">Create Account</CardTitle>
-          <CardDescription>Register to access Horas+</CardDescription>
+          <CardDescription>Register to access Impact Hours Tracker</CardDescription>
         </CardHeader>
 
         <CardContent className="pt-4 pb-8">

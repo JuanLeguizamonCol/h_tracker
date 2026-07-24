@@ -42,7 +42,7 @@ export function AppSidebar() {
           </div>
           {!isCollapsed && (
             <div className="flex flex-col animate-fade-in">
-              <span className="text-lg font-bold text-sidebar-foreground">Horas+</span>
+              <span className="text-lg font-bold text-sidebar-foreground">Impact Hours Tracker</span>
               <span className="text-xs text-sidebar-muted">Time Tracking</span>
             </div>
           )}

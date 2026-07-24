@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserCircle, Search, MoreHorizontal, Edit, Shield, Loader2, FolderKanban, UserPlus, Eye, KeyRound, AlertTriangle, Lock } from 'lucide-react';
-import { useEmployees } from '@/hooks/useEmployees';
+import { useEmployees, useCreateEmployee } from '@/hooks/useEmployees';
 import { useAssignedProjects } from '@/hooks/useAssignedProjects';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppRole, Employee } from '@/types';
@@ -126,8 +126,13 @@ export default function Employees() {
   const { employee: currentUser } = useAuth();
   const updateRole = useUpdateRole();
   const resetPassword = useAdminResetPassword();
+  const createEmployee = useCreateEmployee();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickName, setQuickName] = useState('');
+  const [quickEmail, setQuickEmail] = useState('');
+  const [quickError, setQuickError] = useState('');
   const [roleChangeTarget, setRoleChangeTarget] = useState<Employee | null>(null);
   const [isResetPasswordDialogOpen, setIsResetPasswordDialogOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<Employee | null>(null);
@@ -158,6 +163,37 @@ export default function Employees() {
       toast.error('Failed to update role. Please try again.');
     } finally {
       setRoleChangeTarget(null);
+    }
+  };
+
+  const openQuickAdd = () => {
+    setQuickName('');
+    setQuickEmail('');
+    setQuickError('');
+    setQuickAddOpen(true);
+  };
+
+  const handleQuickAdd = async () => {
+    const name = quickName.trim();
+    const email = quickEmail.trim();
+    if (!name) {
+      setQuickError('El nombre es obligatorio.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setQuickError('Ingresa un correo corporativo válido.');
+      return;
+    }
+    try {
+      const created = await createEmployee.mutateAsync({ name, email });
+      toast.success(`${created.name} fue creado. Se le envió un correo para configurar su contraseña.`);
+      setQuickAddOpen(false);
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message.includes('409')
+          ? 'Ya existe un empleado con ese correo.'
+          : 'No se pudo crear el empleado. Intenta de nuevo.';
+      setQuickError(msg);
     }
   };
 
@@ -223,7 +259,7 @@ export default function Employees() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input placeholder="Search employees..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
             </div>
-            <Button size="sm" onClick={() => navigate('/employees/new')}>
+            <Button size="sm" onClick={openQuickAdd}>
               <UserPlus className="h-4 w-4 mr-2" />New Employee
             </Button>
           </div>
@@ -309,6 +345,59 @@ export default function Employees() {
           )}
         </CardContent>
       </Card>
+
+      {/* Quick Add Employee Dialog */}
+      <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Employee</DialogTitle>
+            <DialogDescription>
+              Crea un empleado rápidamente con solo nombre y correo corporativo. Recibirá un correo
+              para configurar su contraseña, y podrás completar el resto de los datos más tarde.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="quick-name">Nombre completo</Label>
+              <Input
+                id="quick-name"
+                value={quickName}
+                onChange={e => { setQuickName(e.target.value); setQuickError(''); }}
+                placeholder="John Smith"
+                autoFocus
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="quick-email">Correo corporativo</Label>
+              <Input
+                id="quick-email"
+                type="email"
+                value={quickEmail}
+                onChange={e => { setQuickEmail(e.target.value); setQuickError(''); }}
+                onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd(); }}
+                placeholder="john@impactpoint.com"
+                autoComplete="off"
+              />
+            </div>
+            {quickError && <p className="text-xs text-destructive">{quickError}</p>}
+          </div>
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+            <Button
+              variant="link"
+              className="px-0 text-muted-foreground"
+              onClick={() => { setQuickAddOpen(false); navigate('/employees/new'); }}
+            >
+              Agregar todos los detalles…
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setQuickAddOpen(false)}>Cancelar</Button>
+              <Button onClick={handleQuickAdd} disabled={createEmployee.isPending}>
+                {createEmployee.isPending ? 'Creando…' : 'Crear empleado'}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Role Change Confirmation Dialog */}
       <Dialog open={!!roleChangeTarget} onOpenChange={open => { if (!open) setRoleChangeTarget(null); }}>

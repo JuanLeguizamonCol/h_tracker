@@ -47,8 +47,7 @@ export default function Auth() {
               <Clock className="h-8 w-8 text-primary-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold">Horas+</CardTitle>
-          <CardDescription>Impact Point Hours Tracker</CardDescription>
+          <CardTitle className="text-2xl font-bold">Impact Hours Tracker</CardTitle>
         </CardHeader>
 
         <CardContent className="pt-4 pb-8">

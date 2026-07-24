@@ -136,7 +136,7 @@ export default function SetPasswordPage() {
               <CardHeader className="text-center pb-4">
                 <CardTitle className="text-2xl font-bold">Set your password</CardTitle>
                 <CardDescription className="text-sm mt-1">
-                  Welcome to Horas+{accountEmail ? ` — ${accountEmail}` : ''}. Create a password to activate your account.
+                  Welcome to Impact Hours Tracker{accountEmail ? ` — ${accountEmail}` : ''}. Create a password to activate your account.
                 </CardDescription>
               </CardHeader>
 
