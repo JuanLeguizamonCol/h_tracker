@@ -132,7 +132,10 @@ resource pgServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview'
   location: location
   tags: tags
   sku: {
-    name: 'Standard_B1ms'
+    // Burstable 2 vCore / 4 GiB. Compute can be scaled up/down freely later
+    // (a brief restart, no data migration); only storageSizeGB is one-way (grow
+    // only), so it is left as-is here.
+    name: 'Standard_B2s'
     tier: 'Burstable'
   }
   properties: {
