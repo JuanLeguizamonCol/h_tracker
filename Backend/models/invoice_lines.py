@@ -10,7 +10,7 @@ class InvoiceLine(Base):
     __tablename__ = "invoice_lines"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    invoice_id = Column(String, ForeignKey("invoices.id"), nullable=False)
+    invoice_id = Column(String, ForeignKey("invoices.id"), nullable=False, index=True)
     user_id = Column(String, nullable=True)  # nullable — no FK, allows manual lines without an employee
     employee_name = Column(String, nullable=False)
     role_name = Column(String, nullable=True)

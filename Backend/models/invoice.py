@@ -22,8 +22,8 @@ class Invoice(Base):
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
-    status = Column(String, nullable=False, default="draft")
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    status = Column(String, nullable=False, default="draft", index=True)
     subtotal = Column(Numeric(12, 2), nullable=False, default=0)
     discount = Column(Numeric(12, 2), nullable=False, default=0)
     total = Column(Numeric(12, 2), nullable=False, default=0)

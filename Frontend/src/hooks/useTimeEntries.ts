@@ -22,12 +22,14 @@ export function useTimeEntriesByDateRange(
   endDate: Date,
   userId?: string,
   projectId?: string,
+  opts?: { enabled?: boolean },
 ) {
   const gte = format(startDate, 'yyyy-MM-dd');
   const lte = format(endDate, 'yyyy-MM-dd');
 
   return useQuery({
     queryKey: ['time-entries', 'range', gte, lte, userId ?? null, projectId ?? null],
+    enabled: opts?.enabled ?? true,
     queryFn: () => {
       let url = `/time-entries?date_gte=${gte}&date_lte=${lte}`;
       if (userId) url += `&user_id=${userId}`;
@@ -37,12 +39,17 @@ export function useTimeEntriesByDateRange(
   });
 }
 
-export function useAllTimeEntriesByDateRange(startDate: Date, endDate: Date) {
+export function useAllTimeEntriesByDateRange(
+  startDate: Date,
+  endDate: Date,
+  opts?: { enabled?: boolean },
+) {
   const gte = format(startDate, 'yyyy-MM-dd');
   const lte = format(endDate, 'yyyy-MM-dd');
 
   return useQuery({
     queryKey: ['time-entries', 'range-all', gte, lte],
+    enabled: opts?.enabled ?? true,
     queryFn: () => api.get<TimeEntry[]>(`/time-entries?date_gte=${gte}&date_lte=${lte}`),
   });
 }

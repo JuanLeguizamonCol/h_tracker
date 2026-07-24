@@ -4,7 +4,6 @@ import { format, startOfWeek, endOfWeek } from 'date-fns';
 import { Clock, TrendingUp, Briefcase, AlertTriangle, ArrowRight, Loader2, FileText, DollarSign } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useActiveProjects } from '@/hooks/useProjects';
-import { useClients } from '@/hooks/useClients';
 import { useTimeEntriesByWeek } from '@/hooks/useTimeEntries';
 import { useAssignedProjectsWithDetails } from '@/hooks/useAssignedProjects';
 import { useInvoices } from '@/hooks/useInvoices';
@@ -19,10 +18,11 @@ export default function Dashboard() {
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
 
   const { data: allProjects = [] } = useActiveProjects();
-  const { data: clients = [] } = useClients();
   const { data: assignedProjects = [] } = useAssignedProjectsWithDetails(employee?.id);
   const { data: weekEntries = [], isLoading } = useTimeEntriesByWeek(weekStart, employee?.id);
-  const { data: invoices = [] } = useInvoices();
+  // Invoice stats are only rendered for admins (draft/unpaid cards + alerts),
+  // so only admins need to fetch the full invoice list.
+  const { data: invoices = [] } = useInvoices({ enabled: isAdmin });
 
   const stats = useMemo(() => {
     const billableHours = weekEntries.filter(e => e.billable).reduce((sum, e) => sum + Number(e.hours), 0);

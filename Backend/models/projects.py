@@ -10,7 +10,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    client_id = Column(String, ForeignKey("clients.id"), nullable=False)
+    client_id = Column(String, ForeignKey("clients.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)

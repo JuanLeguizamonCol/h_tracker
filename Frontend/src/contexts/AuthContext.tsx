@@ -24,9 +24,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadProfile = useCallback(async () => {
     setIsLoading(true);
     try {
-      const emp = await api.get<Employee>('/employees/me');
+      // These two are independent (roles are matched client-side by emp.id), so
+      // fetch them in parallel — this gate blocks the first render of the whole
+      // app, so a serial waterfall here adds a full round-trip to every load.
+      const [emp, roles] = await Promise.all([
+        api.get<Employee>('/employees/me'),
+        api.get<{ id: string; user_id: string; role: AppRole }[]>('/user-roles'),
+      ]);
       setEmployee(emp);
-      const roles = await api.get<{ id: string; user_id: string; role: AppRole }[]>('/user-roles');
       const found = roles.find(r => r.user_id === emp.id);
       setRole(found?.role ?? 'employee');
     } catch {

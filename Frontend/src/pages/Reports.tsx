@@ -189,8 +189,13 @@ export default function Reports() {
   const { data: clients = [] } = useClients();
   const { data: employees = [] } = useEmployees();
 
-  const { data: allEntries = [], isLoading: allLoading } = useAllTimeEntriesByDateRange(f.startDate, f.endDate);
-  const { data: myEntries = [], isLoading: myLoading } = useTimeEntriesByDateRange(f.startDate, f.endDate, employee?.id);
+  // Only fetch the dataset the current role actually uses: admins see the whole
+  // org, everyone else sees just their own entries. Without these guards a
+  // non-admin also downloaded the org-wide dataset just to discard it.
+  const { data: allEntries = [], isLoading: allLoading } =
+    useAllTimeEntriesByDateRange(f.startDate, f.endDate, { enabled: isAdmin });
+  const { data: myEntries = [], isLoading: myLoading } =
+    useTimeEntriesByDateRange(f.startDate, f.endDate, employee?.id, undefined, { enabled: !isAdmin });
 
   const rawEntries = isAdmin ? allEntries : myEntries;
   const isLoading = isAdmin ? allLoading : myLoading;
