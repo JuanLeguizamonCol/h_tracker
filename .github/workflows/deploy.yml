@@ -161,8 +161,19 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Update backend CORS_ORIGINS
         run: |
+          # Retry: `az containerapp` calls occasionally hit transient network
+          # resets (ConnectionResetError) mid-operation; a flake shouldn't fail
+          # the whole deploy.
+          retry() {
+            local n=1 max=4 delay=15
+            until "$@"; do
+              if [ "$n" -ge "$max" ]; then echo "FAILED after $n attempts: $*"; return 1; fi
+              echo "Attempt $n failed; retrying in ${delay}s..."; sleep "$delay"
+              n=$((n+1)); delay=$((delay*2))
+            done
+          }
           FRONTEND_FQDN="${{ steps.bicep.outputs.frontend-fqdn }}"
-          az containerapp update \
+          retry az containerapp update \
             --name ${{ env.BACKEND_APP }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --set-env-vars "CORS_ORIGINS=https://${FRONTEND_FQDN}" "FRONTEND_URL=https://${FRONTEND_FQDN}"
@@ -173,7 +184,15 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Update backend Container App image
         run: |
-          az containerapp update \
+          retry() {
+            local n=1 max=4 delay=15
+            until "$@"; do
+              if [ "$n" -ge "$max" ]; then echo "FAILED after $n attempts: $*"; return 1; fi
+              echo "Attempt $n failed; retrying in ${delay}s..."; sleep "$delay"
+              n=$((n+1)); delay=$((delay*2))
+            done
+          }
+          retry az containerapp update \
             --name ${{ env.BACKEND_APP }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.ACR_LOGIN_SERVER }}/backend:${{ needs.build-and-push.outputs.image-tag }}
@@ -183,7 +202,15 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Update frontend Container App image
         run: |
-          az containerapp update \
+          retry() {
+            local n=1 max=4 delay=15
+            until "$@"; do
+              if [ "$n" -ge "$max" ]; then echo "FAILED after $n attempts: $*"; return 1; fi
+              echo "Attempt $n failed; retrying in ${delay}s..."; sleep "$delay"
+              n=$((n+1)); delay=$((delay*2))
+            done
+          }
+          retry az containerapp update \
             --name ${{ env.FRONTEND_APP }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ needs.build-and-push.outputs.image-tag }}
@@ -194,7 +221,15 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Update invoice Job image
         run: |
-          az containerapp job update \
+          retry() {
+            local n=1 max=4 delay=15
+            until "$@"; do
+              if [ "$n" -ge "$max" ]; then echo "FAILED after $n attempts: $*"; return 1; fi
+              echo "Attempt $n failed; retrying in ${delay}s..."; sleep "$delay"
+              n=$((n+1)); delay=$((delay*2))
+            done
+          }
+          retry az containerapp job update \
             --name ${{ env.INVOICE_JOB }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.ACR_LOGIN_SERVER }}/backend:${{ needs.build-and-push.outputs.image-tag }}
