@@ -52,6 +52,10 @@ class SetPasswordRequest(BaseModel):
     new_password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
 @auth_router.post("/login")
 def login(body: LoginRequest, db: Session = Depends(get_db)):
     emp = db.query(Employee).filter(
@@ -140,6 +144,33 @@ def admin_reset_password(
     target.password_hash = hash_password(body.temporary_password)
     target.must_change_password = True
     db.commit()
+
+
+# ── Forgot / reset password (public) ─────────────────────────────────────────
+
+@auth_router.post("/forgot-password")
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Public: email a password-reset link to the account, if it exists.
+
+    Always returns the same generic response so the endpoint can't be used to
+    probe which emails are registered. The reset link reuses the set-password
+    token/flow and expires in 72h; requesting it does NOT change the current
+    password (it stays valid until the user completes the reset).
+    """
+    email = body.email.strip().lower()
+    emp = db.query(Employee).filter(
+        Employee.email == email,
+        Employee.is_active == True,
+    ).first()
+    if emp:
+        try:
+            from services.invitations import send_password_reset_email
+            sent = send_password_reset_email(emp)
+            if not sent:
+                logger.warning("Password reset requested for %s but email is not configured/sending failed.", email)
+        except Exception:  # noqa: BLE001 — never leak internal errors on a public endpoint
+            logger.exception("Failed to send password reset email to %s", email)
+    return {"message": "If an account with that email exists, a reset link has been sent."}
 
 
 # ── Password setup via emailed invitation token (public) ──────────────────────

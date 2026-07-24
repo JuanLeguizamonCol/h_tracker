@@ -54,3 +54,39 @@ def send_password_setup_invitation(emp: Employee) -> bool:
         html_body=_build_html(emp.name, link),
         to_name=emp.name,
     )
+
+
+def _build_reset_html(name: str, link: str) -> str:
+    safe_name = name or "there"
+    return f"""\
+<div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;color:#1a1a1a;line-height:1.5">
+  <p>Hola {safe_name},</p>
+  <p>Recibimos una solicitud para restablecer tu contraseña en <strong>Impact Hours Tracker</strong>.</p>
+  <p>Haz clic en el siguiente enlace para elegir una nueva contraseña:</p>
+  <p style="margin:24px 0">
+    <a href="{link}"
+       style="background:#0d6efd;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;display:inline-block">
+      Restablecer mi contraseña
+    </a>
+  </p>
+  <p style="color:#666;font-size:13px">Si el botón no funciona, copia y pega este enlace en tu navegador:<br>
+    <a href="{link}">{link}</a>
+  </p>
+  <p style="color:#666;font-size:13px">Este enlace expira en 72 horas. Si no solicitaste este cambio, puedes ignorar
+    este correo; tu contraseña actual seguirá funcionando.</p>
+</div>"""
+
+
+def send_password_reset_email(emp: Employee) -> bool:
+    """Email the employee a link to reset a forgotten password. Returns True if sent."""
+    if not email_configured():
+        logger.warning("Email not configured — reset link for %s not sent.", emp.email)
+        return False
+    token = create_password_setup_token(emp.id)
+    link = f"{_frontend_base_url()}/set-password?token={token}"
+    return send_email(
+        to_email=emp.email,
+        subject="Restablece tu contraseña — Impact Hours Tracker",
+        html_body=_build_reset_html(emp.name, link),
+        to_name=emp.name,
+    )

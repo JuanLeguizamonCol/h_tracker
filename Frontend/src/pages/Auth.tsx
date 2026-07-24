@@ -79,6 +79,9 @@ export default function Auth() {
               Sign In
             </Button>
           </form>
+          <p className="text-center text-sm mt-4">
+            <Link to="/forgot-password" className="text-primary hover:underline">Forgot your password?</Link>
+          </p>
           <p className="text-center text-sm text-muted-foreground mt-4">
             Don't have an account?{' '}
             <Link to="/register" className="text-primary hover:underline">Create one</Link>
