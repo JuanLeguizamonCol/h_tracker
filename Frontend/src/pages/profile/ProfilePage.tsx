@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { User, Briefcase, Zap, Edit2, X, Save, Plus, Trash2, Pencil, Star, Lock, Award } from 'lucide-react';
+import { User, Briefcase, Zap, Edit2, X, Save, Plus, Trash2, Pencil, Star, Lock, Award, KeyRound } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile, usePatchProfile, useMySkills, useAddSkill, useUpdateSkill, useDeleteSkill } from '@/hooks/useProfile';
+import { ChangePasswordForm } from '@/components/ChangePasswordForm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -504,6 +505,28 @@ function SkillsTab() {
   );
 }
 
+// ── Security Tab ──────────────────────────────────────────────────────────────
+
+function SecurityTab() {
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+            <KeyRound className="h-3.5 w-3.5" /> Change Password
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="max-w-md">
+          <p className="text-xs text-muted-foreground mb-4">
+            Update your password at any time. You'll need your current password to confirm the change.
+          </p>
+          <ChangePasswordForm variant="settings" />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ── Main Profile Page ─────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
@@ -559,6 +582,9 @@ export default function ProfilePage() {
           <TabsTrigger value="skills" className="flex-1 gap-1.5">
             <Zap className="h-4 w-4" /> Skills
           </TabsTrigger>
+          <TabsTrigger value="security" className="flex-1 gap-1.5">
+            <KeyRound className="h-4 w-4" /> Security
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="personal" className="mt-4">
@@ -569,6 +595,9 @@ export default function ProfilePage() {
         </TabsContent>
         <TabsContent value="skills" className="mt-4">
           <SkillsTab />
+        </TabsContent>
+        <TabsContent value="security" className="mt-4">
+          <SecurityTab />
         </TabsContent>
       </Tabs>
     </div>
