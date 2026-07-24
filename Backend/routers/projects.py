@@ -62,14 +62,18 @@ def _suggest_role(skill_names: List[str]) -> Optional[str]:
     return best_role if best_count > 0 else None
 
 
-def _with_manager_name(project, db: Session) -> ProjectOut:
+def _project_out(project, manager_name: Optional[str]) -> ProjectOut:
     data = {c.name: getattr(project, c.name) for c in project.__table__.columns}
+    data["manager_name"] = manager_name
+    return ProjectOut.model_validate(data)
+
+
+def _with_manager_name(project, db: Session) -> ProjectOut:
+    manager_name = None
     if project.manager_id:
         manager = db.query(Employee).filter(Employee.id == project.manager_id).first()
-        data["manager_name"] = manager.name if manager else None
-    else:
-        data["manager_name"] = None
-    return ProjectOut.model_validate(data)
+        manager_name = manager.name if manager else None
+    return _project_out(project, manager_name)
 
 
 # ── Categories (must come before /{project_id}) ───────────────────────────────
@@ -103,7 +107,12 @@ def list_projects(
     db: Session = Depends(get_db),
 ):
     projects = get_projects(db, active=active, client_id=client_id, status=status)
-    return [_with_manager_name(p, db) for p in projects]
+    # Batch-load manager names in one query instead of one per project (N+1).
+    manager_ids = {p.manager_id for p in projects if p.manager_id}
+    name_by_id = dict(
+        db.query(Employee.id, Employee.name).filter(Employee.id.in_(manager_ids)).all()
+    ) if manager_ids else {}
+    return [_project_out(p, name_by_id.get(p.manager_id) if p.manager_id else None) for p in projects]
 
 
 # ── Project sub-resources (before /{project_id} catch-all) ───────────────────
@@ -111,10 +120,19 @@ def list_projects(
 @projects_router.get("/{project_id}/assignments", response_model=List[ProjectAssignmentOut])
 def get_project_assignments(project_id: str, db: Session = Depends(get_db)):
     assignments = db.query(EmployeeProject).filter(EmployeeProject.project_id == project_id).all()
+    # Batch employee + role lookups instead of querying per assignment (N+1).
+    emp_ids = {a.user_id for a in assignments}
+    role_ids = {a.role_id for a in assignments if a.role_id}
+    emp_by_id = {
+        e.id: e for e in db.query(Employee).filter(Employee.id.in_(emp_ids)).all()
+    } if emp_ids else {}
+    role_by_id = {
+        r.id: r for r in db.query(ProjectRole).filter(ProjectRole.id.in_(role_ids)).all()
+    } if role_ids else {}
     result = []
     for a in assignments:
-        employee = db.query(Employee).filter(Employee.id == a.user_id).first()
-        role = db.query(ProjectRole).filter(ProjectRole.id == a.role_id).first() if a.role_id else None
+        employee = emp_by_id.get(a.user_id)
+        role = role_by_id.get(a.role_id) if a.role_id else None
         result.append(ProjectAssignmentOut(
             id=a.id,
             user_id=a.user_id,

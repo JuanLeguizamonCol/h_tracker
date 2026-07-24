@@ -175,26 +175,33 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
     project = db.query(Project).filter(Project.id == invoice.project_id).first()
     client = db.query(Client).filter(Client.id == project.client_id).first() if project else None
 
+    # Batch the per-line lookups to avoid N+1 queries (one role query + one
+    # hours-aggregate query per line). Roles for all line employees in one go…
+    line_user_ids = {ln.user_id for ln in invoice.lines if ln.user_id}
+    role_by_user = dict(
+        db.query(UserRole.user_id, UserRole.role).filter(UserRole.user_id.in_(line_user_ids)).all()
+    ) if line_user_ids else {}
+    # …and the original (linked) hours per employee for this invoice in one
+    # grouped query instead of one aggregate per line.
+    hours_by_user = dict(
+        db.query(TimeEntry.user_id, func.coalesce(func.sum(TimeEntry.hours), 0))
+        .join(InvoiceTimeEntry, InvoiceTimeEntry.time_entry_id == TimeEntry.id)
+        .filter(InvoiceTimeEntry.invoice_id == invoice.id)
+        .group_by(TimeEntry.user_id)
+        .all()
+    ) if line_user_ids else {}
+
     lines_out = []
     for line in invoice.lines:
-        user_role = db.query(UserRole).filter(UserRole.user_id == line.user_id).first()
-        # Compute original hours from linked time entries for this employee
-        if line.user_id:
-            original_hours = db.query(func.coalesce(func.sum(TimeEntry.hours), 0)).join(
-                InvoiceTimeEntry, InvoiceTimeEntry.time_entry_id == TimeEntry.id
-            ).filter(
-                InvoiceTimeEntry.invoice_id == invoice.id,
-                TimeEntry.user_id == line.user_id,
-            ).scalar()
-            original_hours = float(original_hours or line.hours)
-        else:
-            original_hours = float(line.hours)
+        # Preserve prior semantics: fall back to the line's own hours when there
+        # are no linked entries (sum is 0/absent) or the line has no employee.
+        original_hours = float(hours_by_user.get(line.user_id, 0) or line.hours)
         lines_out.append({
             "id": line.id,
             "user_id": line.user_id,
             "employee_name": line.employee_name,
             "title": line.role_name,
-            "role": user_role.role if user_role else None,
+            "role": role_by_user.get(line.user_id),
             "hours": float(line.hours),
             "hourly_rate": float(line.rate_snapshot),
             "discount_type": line.discount_type,
