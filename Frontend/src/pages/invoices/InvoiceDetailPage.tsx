@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ArrowLeft, Edit, FileDown, FileSpreadsheet, CheckCircle, Send, Ban, RotateCcw, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Edit, FileDown, FileSpreadsheet, CheckCircle, Send, Ban, RotateCcw, Loader2, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useInvoiceEditData, usePatchInvoice } from '@/hooks/useInvoices';
@@ -206,12 +206,10 @@ export default function InvoiceDetailPage() {
             {xlsxLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
             {xlsxLoading ? 'Generating…' : 'Excel'}
           </Button>
-          {status === 'draft' && (
-            <Button size="sm" className="gap-1.5" onClick={() => navigate(`/invoices/${invoice.id}/edit`)}>
-              <Edit className="h-4 w-4" />
-              Edit
-            </Button>
-          )}
+          <Button size="sm" className="gap-1.5" onClick={() => navigate(`/invoices/${invoice.id}/edit`)}>
+            <Edit className="h-4 w-4" />
+            Edit
+          </Button>
         </div>
       </div>
 
@@ -277,6 +275,54 @@ export default function InvoiceDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Expenses — always shown (below Billable Hours) so it's a clear place to
+          add team expenses; adding/editing happens in the invoice editor. */}
+      <Card>
+        <CardHeader className="pb-3 flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Expenses</CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => navigate(`/invoices/${invoice.id}/edit`)}
+          >
+            <Plus className="h-4 w-4" /> Add / edit expenses
+          </Button>
+        </CardHeader>
+        <CardContent className="p-0">
+          {expenses.length === 0 ? (
+            <p className="text-muted-foreground text-sm px-6 pb-4">
+              No expenses recorded. Use “Add / edit expenses” to add your team’s expenses.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Vendor</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {expenses.map(exp => (
+                  <TableRow key={exp.id}>
+                    <TableCell className="text-sm whitespace-nowrap">
+                      {exp.date ? format(new Date(exp.date), 'MMM d, yyyy') : '—'}
+                    </TableCell>
+                    <TableCell className="text-sm">{exp.description ?? '—'}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{exp.category}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{exp.vendor ?? '—'}</TableCell>
+                    <TableCell className="text-right font-medium">${fmt(exp.amount_usd)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Hours on Hold */}
       {onHoldEntries.length > 0 && (
@@ -360,41 +406,6 @@ export default function InvoiceDetailPage() {
                     <TableCell className="text-right">{fee.quantity}</TableCell>
                     <TableCell className="text-right">${fmt(fee.unit_price_usd)}</TableCell>
                     <TableCell className="text-right font-medium">${fmt(fee.fee_total)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Expenses */}
-      {expenses.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Expenses</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {expenses.map(exp => (
-                  <TableRow key={exp.id}>
-                    <TableCell className="text-sm whitespace-nowrap">
-                      {exp.date ? format(new Date(exp.date), 'MMM d, yyyy') : '—'}
-                    </TableCell>
-                    <TableCell className="text-sm">{exp.description ?? '—'}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{exp.category}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{exp.vendor ?? '—'}</TableCell>
-                    <TableCell className="text-right font-medium">${fmt(exp.amount_usd)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
