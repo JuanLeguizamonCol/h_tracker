@@ -183,3 +183,5 @@ nul
 # Re-include the frontend source lib tree explicitly.
 !Frontend/src/lib/
 !Frontend/src/lib/**
+# Local-only reusable infra template (not part of this app)
+infra-template/
