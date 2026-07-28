@@ -1,19 +1,24 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, DollarSign, ChevronRight, Loader2, CheckCircle, Calendar, RefreshCw, Download } from 'lucide-react';
-import { format } from 'date-fns';
+import { Plus, FileText, DollarSign, ChevronRight, Loader2, CheckCircle, Calendar, RefreshCw, Download, Zap, X } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { toast } from 'sonner';
-import { useInvoices } from '@/hooks/useInvoices';
+import { useInvoices, useGenerateMonthlyInvoices } from '@/hooks/useInvoices';
 import { useProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
+import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { Invoice, InvoiceStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
 
 const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string }> = {
   draft: { label: 'Draft', color: 'bg-muted text-muted-foreground' },
@@ -23,14 +28,22 @@ const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string }> = {
   voided: { label: 'Voided', color: 'bg-muted text-muted-foreground' },
 };
 
+const fmtDate = (d: Date) => format(d, 'yyyy-MM-dd');
+
 export default function Invoices() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { data: invoices = [], isLoading, refetch, isRefetching } = useInvoices();
   const { data: projects = [] } = useProjects();
   const { data: clients = [] } = useClients();
+  const generateInvoices = useGenerateMonthlyInvoices();
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
+  const [clientFilter, setClientFilter] = useState<string>('all');
+  const [projectFilter, setProjectFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
 
   type SchedulerStatus = {
     last_run: string | null;
@@ -40,8 +53,41 @@ export default function Invoices() {
     status?: string;
   };
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  // ── Generate-invoices dialog ────────────────────────────────────────────────
+  const [genOpen, setGenOpen] = useState(false);
+  const [genStart, setGenStart] = useState('');
+  const [genEnd, setGenEnd] = useState('');
+
+  const openGenerate = (mode: 'this-month' | 'last-month') => {
+    const today = new Date();
+    if (mode === 'last-month') {
+      const prev = subMonths(today, 1);
+      setGenStart(fmtDate(startOfMonth(prev)));
+      setGenEnd(fmtDate(endOfMonth(prev)));
+    } else {
+      setGenStart(fmtDate(startOfMonth(today)));
+      setGenEnd(fmtDate(today));
+    }
+    setGenOpen(true);
+  };
+
+  const handleGenerate = async () => {
+    if (!genStart || !genEnd) { toast.error('Please choose a start and end date.'); return; }
+    if (genStart > genEnd) { toast.error('Start date must be before end date.'); return; }
+    try {
+      const result = await generateInvoices.mutateAsync({ period_start: genStart, period_end: genEnd });
+      const parts = [`${result.generated} generated`, `${result.skipped} skipped`];
+      if (result.errors?.length) parts.push(`${result.errors.length} errors`);
+      toast.success(`Invoices: ${parts.join(', ')}.`);
+      if (result.errors?.length) result.errors.forEach(e => console.warn('[generate]', e));
+      setGenOpen(false);
+      api.get<SchedulerStatus>('/invoices/scheduler-status').then(setSchedulerStatus).catch(() => {});
+    } catch {
+      toast.error('Failed to generate invoices.');
+    }
+  };
 
   const handleExportReport = async () => {
     setIsExporting(true);
@@ -70,39 +116,42 @@ export default function Invoices() {
   const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
   const prevMonthName = prevMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
 
-  const handleGenerateNow = async () => {
-    setIsGenerating(true);
-    try {
-      const periodEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-      const periodStart = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), 1);
-      const fmt = (d: Date) => d.toISOString().split('T')[0];
-      await api.post('/invoices/generate-monthly', {
-        period_start: fmt(periodStart),
-        period_end: fmt(periodEnd),
-      });
-      toast.success('Invoice generation triggered successfully.');
-      const status = await api.get<SchedulerStatus>('/invoices/scheduler-status');
-      setSchedulerStatus(status);
-    } catch {
-      toast.error('Failed to trigger invoice generation.');
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   const projectMap = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
   const clientMap = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
+
+  // Projects available in the filter — narrowed to the selected client, if any.
+  const projectOptions = useMemo(() => {
+    const list = clientFilter === 'all' ? projects : projects.filter(p => p.client_id === clientFilter);
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [projects, clientFilter]);
+
+  const activeFilterCount = [
+    statusFilter !== 'all', companyFilter !== 'all', clientFilter !== 'all',
+    projectFilter !== 'all', !!dateFrom, !!dateTo,
+  ].filter(Boolean).length;
+
+  const clearFilters = () => {
+    setStatusFilter('all'); setCompanyFilter('all'); setClientFilter('all');
+    setProjectFilter('all'); setDateFrom(''); setDateTo('');
+  };
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter(inv => {
       if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
-      if (companyFilter !== 'all') {
-        const company = inv.owner_company || 'IPC';
-        if (company !== companyFilter) return false;
+      if (companyFilter !== 'all' && (inv.owner_company || 'IPC') !== companyFilter) return false;
+      if (projectFilter !== 'all' && inv.project_id !== projectFilter) return false;
+      if (clientFilter !== 'all') {
+        const project = projectMap.get(inv.project_id);
+        if (!project || project.client_id !== clientFilter) return false;
+      }
+      if (dateFrom || dateTo) {
+        const d = inv.created_at.slice(0, 10);
+        if (dateFrom && d < dateFrom) return false;
+        if (dateTo && d > dateTo) return false;
       }
       return true;
     });
-  }, [invoices, statusFilter, companyFilter, projectMap]);
+  }, [invoices, statusFilter, companyFilter, clientFilter, projectFilter, dateFrom, dateTo, projectMap]);
 
   const getProjectName = useCallback(
     (projectId: string) => projectMap.get(projectId)?.name || 'Unknown',
@@ -113,15 +162,13 @@ export default function Invoices() {
     return project ? clientMap.get(project.client_id)?.name || 'No client' : 'No client';
   }, [projectMap, clientMap]);
 
+  // Stats reflect the current filtered view so grouped selections show their totals.
   const stats = useMemo(() => {
-    const base = companyFilter === 'all' ? invoices : invoices.filter(inv =>
-      (inv.owner_company || 'IPC') === companyFilter
-    );
-    const draft = base.filter(i => i.status === 'draft').length;
-    const unpaid = base.filter(i => i.status === 'sent').reduce((sum, i) => sum + Number(i.total), 0);
-    const paid = base.filter(i => i.status === 'paid').reduce((sum, i) => sum + Number(i.total), 0);
+    const draft = filteredInvoices.filter(i => i.status === 'draft').length;
+    const unpaid = filteredInvoices.filter(i => i.status === 'sent').reduce((sum, i) => sum + Number(i.total), 0);
+    const paid = filteredInvoices.filter(i => i.status === 'paid').reduce((sum, i) => sum + Number(i.total), 0);
     return { draft, unpaid, paid };
-  }, [invoices, companyFilter, projectMap]);
+  }, [filteredInvoices]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -134,7 +181,7 @@ export default function Invoices() {
           <h1 className="text-2xl font-bold text-foreground">Invoices</h1>
           <p className="text-muted-foreground">Create and manage project invoices</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isRefetching} title="Refresh invoices">
             <RefreshCw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
           </Button>
@@ -147,6 +194,11 @@ export default function Invoices() {
             {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Excel Report
           </Button>
+          {isAdmin && (
+            <Button variant="outline" className="gap-2" onClick={() => openGenerate('this-month')}>
+              <Zap className="h-4 w-4" />Generate Invoices
+            </Button>
+          )}
           <Button className="gap-2" onClick={() => navigate('/invoices/new')}>
             <Plus className="h-4 w-4" />New Invoice
           </Button>
@@ -203,16 +255,16 @@ export default function Invoices() {
             <Calendar className="h-4 w-4" />
             <span>Invoices for <strong>{prevMonthName}</strong> will be auto-generated on the 3rd.</span>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300"
-            onClick={handleGenerateNow}
-            disabled={isGenerating}
-          >
-            {isGenerating && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-            Generate Now
-          </Button>
+          {isAdmin && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300"
+              onClick={() => openGenerate('last-month')}
+            >
+              Generate Now
+            </Button>
+          )}
         </div>
       )}
       {schedulerStatus?.last_run && schedulerStatus.invoices_generated > 0 && (
@@ -225,34 +277,81 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Label className="text-sm text-muted-foreground">Status:</Label>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="sent">Sent</SelectItem>
-              <SelectItem value="paid">Paid</SelectItem>
-              <SelectItem value="cancelled">Cancelled</SelectItem>
-              <SelectItem value="voided">Voided</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-sm text-muted-foreground">Company:</Label>
-          <Select value={companyFilter} onValueChange={setCompanyFilter}>
-            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="IPC">IPC</SelectItem>
-              <SelectItem value="PI">PI</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      {/* Search / filter panel */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Client</Label>
+              <Select value={clientFilter} onValueChange={(v) => { setClientFilter(v); setProjectFilter('all'); }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All clients</SelectItem>
+                  {[...clients].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Project</Label>
+              <Select value={projectFilter} onValueChange={setProjectFilter}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All projects</SelectItem>
+                  {projectOptions.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">From (invoice date)</Label>
+              <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">To (invoice date)</Label>
+              <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Status</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="sent">Sent</SelectItem>
+                  <SelectItem value="paid">Paid</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                  <SelectItem value="voided">Voided</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Company</Label>
+              <Select value={companyFilter} onValueChange={setCompanyFilter}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="IPC">IPC</SelectItem>
+                  <SelectItem value="PI">PI</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {activeFilterCount > 0 && (
+            <div className="mt-3 flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Showing <strong>{filteredInvoices.length}</strong> of {invoices.length} invoices
+                {' '}· {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active
+              </p>
+              <Button variant="ghost" size="sm" className="h-7 gap-1 text-muted-foreground" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5" />Clear filters
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Invoice Table */}
       <Card className="card-elevated">
@@ -323,11 +422,46 @@ export default function Invoices() {
           {filteredInvoices.length === 0 && (
             <div className="text-center py-12">
               <FileText className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground">No invoices yet. Create one to get started!</p>
+              <p className="text-muted-foreground">
+                {invoices.length === 0 ? 'No invoices yet. Create one to get started!' : 'No invoices match the current filters.'}
+              </p>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Generate invoices dialog */}
+      <Dialog open={genOpen} onOpenChange={setGenOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Generate invoices</DialogTitle>
+            <DialogDescription>
+              Auto-generate draft invoices for all active (non-internal) projects with unbilled
+              hours in the selected period. Runs on demand — no need to wait for the billing day.
+              Already-generated periods are skipped, so it's safe to run again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="gen-start">Period start</Label>
+              <Input id="gen-start" type="date" value={genStart} onChange={e => setGenStart(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="gen-end">Period end</Label>
+              <Input id="gen-end" type="date" value={genEnd} onChange={e => setGenEnd(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGenOpen(false)} disabled={generateInvoices.isPending}>
+              Cancel
+            </Button>
+            <Button onClick={handleGenerate} disabled={generateInvoices.isPending} className="gap-2">
+              {generateInvoices.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+              Generate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
