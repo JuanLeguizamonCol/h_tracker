@@ -43,6 +43,15 @@ const PROJECT_COLORS = [
 const NO_LOCATION = '__none__';
 const NO_LOCATION_LABEL = 'No location';
 
+// Parse a 'yyyy-MM-dd' string as a LOCAL date. `new Date("2026-08-01")` parses the
+// string as UTC midnight, which in negative-offset timezones (e.g. UTC-5 Colombia)
+// renders as the PREVIOUS day — pushing Friday/weekend entries onto the wrong day
+// (or week) in charts and tables. Building from parts keeps the calendar day intact.
+function parseLocalDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 // ─── Filter state ─────────────────────────────────────────────────────────────
 
 type Filters = {
@@ -397,7 +406,7 @@ export default function Reports() {
     const map: Record<string, { date: string; Billable: number; 'Non-billable': number }> = {};
     filteredEntries.forEach(e => {
       const key = timeGroup === 'weekly'
-        ? format(startOfWeek(new Date(e.date), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+        ? format(startOfWeek(parseLocalDate(e.date), { weekStartsOn: 1 }), 'yyyy-MM-dd')
         : e.date;
       if (!map[key]) map[key] = { date: key, Billable: 0, 'Non-billable': 0 };
       if (e.billable) map[key].Billable += Number(e.hours);
@@ -405,7 +414,7 @@ export default function Reports() {
     });
     return Object.values(map)
       .sort((a, b) => a.date.localeCompare(b.date))
-      .map(d => ({ ...d, date: format(new Date(d.date), timeGroup === 'weekly' ? 'MMM d' : 'MMM d') }));
+      .map(d => ({ ...d, date: format(parseLocalDate(d.date), 'MMM d') }));
   }, [filteredEntries, timeGroup]);
 
   // ── Tables ────────────────────────────────────────────────────────────────────
@@ -425,7 +434,7 @@ export default function Reports() {
   }, [filteredEntries, projectMap, clientMap]);
 
   const sortedEntries = useMemo(() =>
-    [...filteredEntries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [...filteredEntries].sort((a, b) => parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime()),
     [filteredEntries]
   );
 
@@ -446,11 +455,8 @@ export default function Reports() {
     // Build userId → weekKey → hours map
     const hoursMap: Record<string, Record<string, number>> = {};
     filteredEntries.forEach(e => {
-      // Parse date string as a local date to avoid UTC midnight shifting the day
-      // across a week boundary in negative-offset timezones (e.g. UTC-5 in Colombia).
-      // new Date("2026-04-06") → UTC midnight → Apr 5 local → wrong week bucket.
-      const [ey, em, ed] = e.date.split('-').map(Number);
-      const weekStart = startOfWeek(new Date(ey, em - 1, ed), { weekStartsOn: 1 });
+      // Local parse so a Sun/Mon boundary entry isn't shifted into the wrong week.
+      const weekStart = startOfWeek(parseLocalDate(e.date), { weekStartsOn: 1 });
       const weekKey = format(weekStart, 'yyyy-MM-dd');
       if (!hoursMap[e.user_id]) hoursMap[e.user_id] = {};
       hoursMap[e.user_id][weekKey] = (hoursMap[e.user_id][weekKey] ?? 0) + Number(e.hours);
@@ -938,7 +944,7 @@ export default function Reports() {
                     <TableBody>
                       {sortedEntries.slice(0, 100).map(entry => (
                         <TableRow key={entry.id}>
-                          <TableCell className="text-sm">{format(new Date(entry.date), 'MMM d')}</TableCell>
+                          <TableCell className="text-sm">{format(parseLocalDate(entry.date), 'MMM d')}</TableCell>
                           {isAdmin && (
                             <TableCell className="text-sm">
                               {employeeMap.get(entry.user_id)?.name ?? 'Deleted Employee'}
