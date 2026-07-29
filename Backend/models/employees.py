@@ -34,6 +34,7 @@ class Employee(Base):
     emergency_contact_phone = Column(String, nullable=True)
 
     # Location
+    location = Column(String, nullable=True)
     country = Column(String, nullable=True)
     state = Column(String, nullable=True)
     city = Column(String, nullable=True)

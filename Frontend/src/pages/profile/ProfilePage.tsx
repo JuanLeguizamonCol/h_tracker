@@ -61,6 +61,7 @@ function PersonalInfoTab({ editing, setEditing }: { editing: boolean; setEditing
     personal_phone: '',
     date_of_birth: '',
     gender: '',
+    location: '',
     country: '',
     state: '',
     city: '',
@@ -81,6 +82,7 @@ function PersonalInfoTab({ editing, setEditing }: { editing: boolean; setEditing
         personal_phone: profile.personal_phone || '',
         date_of_birth: profile.date_of_birth || '',
         gender: profile.gender || '',
+        location: profile.location || '',
         country: profile.country || '',
         state: profile.state || '',
         city: profile.city || '',
@@ -169,6 +171,7 @@ function PersonalInfoTab({ editing, setEditing }: { editing: boolean; setEditing
           <CardTitle className="text-sm font-medium text-muted-foreground">Location</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">{field('Location', 'location')}</div>
           {field('Country', 'country')}
           {field('State / Province', 'state')}
           {field('City', 'city')}

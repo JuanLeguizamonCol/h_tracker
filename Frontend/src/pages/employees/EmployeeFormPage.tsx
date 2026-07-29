@@ -66,6 +66,7 @@ type FormData = {
   emergency_contact_name: string;
   emergency_contact_phone: string;
   // Location
+  location: string;
   country: string;
   state: string;
   city: string;
@@ -93,7 +94,7 @@ const EMPTY: FormData = {
   first_name: '', last_name: '', date_of_birth: '', gender: '',
   personal_email: '', personal_phone: '', id_number: '',
   emergency_contact_name: '', emergency_contact_phone: '',
-  country: '', state: '', city: '', timezone: '', street_address: '', zip_code: '', work_mode: '',
+  location: '', country: '', state: '', city: '', timezone: '', street_address: '', zip_code: '', work_mode: '',
   corporate_phone: '', employee_code: '', employment_type: '', start_date: '', end_date: '',
   employment_status: '', notes: '',
 };
@@ -116,6 +117,7 @@ function employeeToForm(e: Employee): FormData {
     id_number: e.id_number || '',
     emergency_contact_name: e.emergency_contact_name || '',
     emergency_contact_phone: e.emergency_contact_phone || '',
+    location: e.location || '',
     country: e.country || '',
     state: e.state || '',
     city: e.city || '',
@@ -153,6 +155,7 @@ function toPayload(f: FormData): Partial<Employee> & { name: string; email: stri
     id_number: f.id_number || null,
     emergency_contact_name: f.emergency_contact_name || null,
     emergency_contact_phone: f.emergency_contact_phone || null,
+    location: f.location || null,
     country: f.country || null,
     state: f.state || null,
     city: f.city || null,
@@ -406,6 +409,10 @@ export default function EmployeeFormPage() {
 
       {/* Location */}
       <Section title="Location">
+        <Field label="Location" full>
+          <Input value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. Bogotá HQ, Remote — US, Mexico City" />
+          <p className="text-xs text-muted-foreground">Grouping label used to segment employees in reports.</p>
+        </Field>
         <Field label="Country">
           <Input value={form.country} onChange={e => set('country', e.target.value)} placeholder="United States" />
         </Field>

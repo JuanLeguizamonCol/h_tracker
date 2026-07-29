@@ -262,6 +262,7 @@ export default function EmployeeProfilePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-3">
+                <InfoRow label="Location" value={employee.location} />
                 <InfoRow label="Country" value={employee.country} />
                 <InfoRow label="State / Province" value={employee.state} />
                 <InfoRow label="City" value={employee.city} />

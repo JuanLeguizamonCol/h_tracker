@@ -368,6 +368,235 @@ def generate_invoice_xlsx(edit_data: dict) -> bytes:
     return buf.getvalue()
 
 
+def generate_time_entries_report_xlsx(rows: list[dict], meta: dict) -> bytes:
+    """
+    Generate a detailed .xlsx of worked hours per employee. Returns raw bytes.
+
+    `rows` — one dict per time entry with keys:
+        date, employee_name, email, location, department, business_unit, title,
+        client_name, project_name, project_code, role_name, hours (float),
+        billable (bool), rate (float|None), amount (float), status, notes,
+        created_at.
+    `meta` — {date_from, date_to, scope, filters (list[str]), generated}.
+
+    Sheets:
+        1. Detail       — flat table, one row per time entry (all detail)
+        2. By Employee  — per-employee aggregation (totals, billable split)
+        3. By Location  — per-location aggregation (grouping introduced in reports)
+        4. Summary      — applied filters + grand totals
+    """
+    HOURS_FMT = '#,##0.00'
+
+    def _yesno(v) -> str:
+        return "Yes" if v else "No"
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    # ═══════════════════════ Sheet 1: Detail ══════════════════════════════════
+    ws = wb.create_sheet("Detail")
+    ws.sheet_view.showGridLines = False
+
+    headers = [
+        "Date", "Employee", "Corporate Email", "Location", "Department",
+        "Business Unit", "Title", "Client", "Project", "Project Code",
+        "Role", "Hours", "Billable", "Rate (USD)", "Amount (USD)",
+        "Status", "Notes", "Created At",
+    ]
+    _header_row(ws, 1, headers)
+
+    total_hours = 0.0
+    billable_hours = 0.0
+    billable_amount = 0.0
+    for i, r in enumerate(rows, 2):
+        hours = _money(r.get("hours", 0))
+        rate = r.get("rate")
+        amount = _money(r.get("amount", 0))
+        total_hours += hours
+        if r.get("billable"):
+            billable_hours += hours
+            billable_amount += amount
+        status_label = "On Hold" if r.get("status") == "on_hold" else "Normal"
+        _data_row(ws, i, [
+            str(r.get("date") or ""),
+            r.get("employee_name") or "",
+            r.get("email") or "",
+            r.get("location") or "",
+            r.get("department") or "",
+            r.get("business_unit") or "",
+            r.get("title") or "",
+            r.get("client_name") or "",
+            r.get("project_name") or "",
+            r.get("project_code") or "",
+            r.get("role_name") or "",
+            hours,
+            _yesno(r.get("billable")),
+            _money(rate) if rate is not None else "",
+            amount,
+            status_label,
+            r.get("notes") or "",
+            str(r.get("created_at") or ""),
+        ], stripe=i % 2 == 0)
+        # Hours use a plain numeric format, not currency.
+        ws.cell(row=i, column=12).number_format = HOURS_FMT
+
+    # Totals row
+    totals_row = len(rows) + 2
+    ws.cell(row=totals_row, column=1, value="TOTALS").font = LABEL_FONT
+    for col, val, fmt in [(12, total_hours, HOURS_FMT), (15, billable_amount, MONEY_FMT)]:
+        c = ws.cell(row=totals_row, column=col, value=_money(val))
+        c.font = TOTAL_FONT
+        c.number_format = fmt
+        c.alignment = RIGHT
+        c.fill = LIGHT_BLUE_FILL
+
+    _set_col_widths(ws, {
+        "A": 12, "B": 22, "C": 26, "D": 18, "E": 16,
+        "F": 16, "G": 20, "H": 22, "I": 24, "J": 14,
+        "K": 18, "L": 9, "M": 9, "N": 11, "O": 12,
+        "P": 10, "Q": 30, "R": 20,
+    })
+    ws.freeze_panes = "A2"
+
+    # ═══════════════════════ Sheet 2: By Employee ═════════════════════════════
+    ws_emp = wb.create_sheet("By Employee")
+    ws_emp.sheet_view.showGridLines = False
+    _header_row(ws_emp, 1, [
+        "Employee", "Corporate Email", "Location", "Department", "Title",
+        "Entries", "Total Hours", "Billable Hours", "Non-billable Hours",
+        "Billable Amount (USD)",
+    ])
+
+    emp_agg: dict[str, dict] = {}
+    for r in rows:
+        key = r.get("email") or r.get("employee_name") or "—"
+        if key not in emp_agg:
+            emp_agg[key] = {
+                "name": r.get("employee_name") or "",
+                "email": r.get("email") or "",
+                "location": r.get("location") or "",
+                "department": r.get("department") or "",
+                "title": r.get("title") or "",
+                "entries": 0, "hours": 0.0, "billable_hours": 0.0,
+                "nonbillable_hours": 0.0, "amount": 0.0,
+            }
+        a = emp_agg[key]
+        h = _money(r.get("hours", 0))
+        a["entries"] += 1
+        a["hours"] += h
+        if r.get("billable"):
+            a["billable_hours"] += h
+            a["amount"] += _money(r.get("amount", 0))
+        else:
+            a["nonbillable_hours"] += h
+
+    for i, a in enumerate(sorted(emp_agg.values(), key=lambda x: x["hours"], reverse=True), 2):
+        _data_row(ws_emp, i, [
+            a["name"], a["email"], a["location"], a["department"], a["title"],
+            a["entries"], a["hours"], a["billable_hours"],
+            a["nonbillable_hours"], a["amount"],
+        ], stripe=i % 2 == 0)
+        for col in (7, 8, 9):
+            ws_emp.cell(row=i, column=col).number_format = HOURS_FMT
+
+    _set_col_widths(ws_emp, {
+        "A": 22, "B": 26, "C": 18, "D": 16, "E": 20,
+        "F": 9, "G": 12, "H": 13, "I": 16, "J": 20,
+    })
+    ws_emp.freeze_panes = "A2"
+
+    # ═══════════════════════ Sheet 3: By Location ═════════════════════════════
+    ws_loc = wb.create_sheet("By Location")
+    ws_loc.sheet_view.showGridLines = False
+    _header_row(ws_loc, 1, [
+        "Location", "Employees", "Entries", "Total Hours",
+        "Billable Hours", "Billable Amount (USD)",
+    ])
+
+    loc_agg: dict[str, dict] = {}
+    for r in rows:
+        loc = (r.get("location") or "").strip() or "No location"
+        if loc not in loc_agg:
+            loc_agg[loc] = {"employees": set(), "entries": 0, "hours": 0.0,
+                            "billable_hours": 0.0, "amount": 0.0}
+        a = loc_agg[loc]
+        h = _money(r.get("hours", 0))
+        a["employees"].add(r.get("email") or r.get("employee_name"))
+        a["entries"] += 1
+        a["hours"] += h
+        if r.get("billable"):
+            a["billable_hours"] += h
+            a["amount"] += _money(r.get("amount", 0))
+
+    for i, (loc, a) in enumerate(
+        sorted(loc_agg.items(), key=lambda kv: kv[1]["hours"], reverse=True), 2
+    ):
+        _data_row(ws_loc, i, [
+            loc, len(a["employees"]), a["entries"],
+            a["hours"], a["billable_hours"], a["amount"],
+        ], stripe=i % 2 == 0)
+        for col in (4, 5):
+            ws_loc.cell(row=i, column=col).number_format = HOURS_FMT
+
+    _set_col_widths(ws_loc, {"A": 22, "B": 12, "C": 10, "D": 12, "E": 14, "F": 20})
+    ws_loc.freeze_panes = "A2"
+
+    # ═══════════════════════ Sheet 4: Summary ═════════════════════════════════
+    ws_sum = wb.create_sheet("Summary")
+    ws_sum.sheet_view.showGridLines = False
+    ws_sum.merge_cells("A1:B1")
+    c = ws_sum["A1"]
+    c.value = "Worked Hours Report"
+    c.font = TITLE_FONT
+
+    summary_rows = [
+        ("Date Range", f"{meta.get('date_from', '')}  →  {meta.get('date_to', '')}"),
+        ("Scope", meta.get("scope", "")),
+        ("Generated", str(meta.get("generated", ""))),
+        (None, None),
+        ("Total Entries", float(len(rows))),
+        ("Employees", float(len(emp_agg))),
+        ("Total Hours", _money(total_hours)),
+        ("Billable Hours", _money(billable_hours)),
+        ("Non-billable Hours", _money(total_hours - billable_hours)),
+        ("Billable Amount (USD)", _money(billable_amount)),
+    ]
+    row_i = 3
+    for label, val in summary_rows:
+        if label is None:
+            row_i += 1
+            continue
+        lc = ws_sum.cell(row=row_i, column=1, value=label)
+        vc = ws_sum.cell(row=row_i, column=2, value=val)
+        lc.font = LABEL_FONT
+        if isinstance(val, float):
+            vc.font = BODY_FONT
+            vc.number_format = MONEY_FMT if "Amount" in label else HOURS_FMT
+            if label in ("Total Entries", "Employees"):
+                vc.number_format = '#,##0'
+            vc.alignment = RIGHT
+        else:
+            vc.font = BODY_FONT
+        row_i += 1
+
+    # Applied filters block
+    filters = meta.get("filters") or []
+    if filters:
+        row_i += 1
+        ws_sum.cell(row=row_i, column=1, value="Applied Filters").font = TITLE_FONT
+        row_i += 1
+        for filt in filters:
+            ws_sum.cell(row=row_i, column=1, value=filt).font = GREY_FONT
+            row_i += 1
+
+    _set_col_widths(ws_sum, {"A": 26, "B": 30})
+    ws_sum.row_dimensions[1].height = 22
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def generate_invoices_report_xlsx(invoices_data: list) -> bytes:
     """
     Generate a multi-invoice report .xlsx. Returns raw bytes.

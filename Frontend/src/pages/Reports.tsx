@@ -3,8 +3,10 @@ import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks } from 'date-fn
 import {
   CalendarIcon, Search, Loader2, Filter, X,
   Clock, TrendingUp, Activity, BarChart2, Table as TableIcon,
-  LayoutDashboard,
+  LayoutDashboard, Download,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { api } from '@/lib/api';
 import {
   ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
@@ -36,6 +38,11 @@ const PROJECT_COLORS = [
   '#F97316', '#6366F1',
 ];
 
+// Sentinel value used when an employee has no `location` set, so it can still
+// be selected in the Location filter and appear as its own group.
+const NO_LOCATION = '__none__';
+const NO_LOCATION_LABEL = 'No location';
+
 // ─── Filter state ─────────────────────────────────────────────────────────────
 
 type Filters = {
@@ -44,6 +51,7 @@ type Filters = {
   employeeId: string;
   projectId: string;
   clientId: string;
+  location: string;
   status: string;
   billing: string;
   search: string;
@@ -55,6 +63,7 @@ const INIT: Filters = {
   employeeId: 'all',
   projectId: 'all',
   clientId: 'all',
+  location: 'all',
   status: 'all',
   billing: 'all',
   search: '',
@@ -184,6 +193,7 @@ export default function Reports() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('both');
   const [timeGroup, setTimeGroup] = useState<TimeGroup>('daily');
+  const [isExporting, setIsExporting] = useState(false);
 
   const { data: projects = [] } = useProjects();
   const { data: clients = [] } = useClients();
@@ -205,33 +215,58 @@ export default function Reports() {
   const clientMap   = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
   const employeeMap = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees]);
 
+  // Location grouping key for an entry's employee (falls back to a sentinel so
+  // employees without a location still form their own selectable group).
+  const locationKeyOf = useMemo(
+    () => (userId: string) => employeeMap.get(userId)?.location?.trim() || NO_LOCATION,
+    [employeeMap]
+  );
+
   // ── Cascade: available options ────────────────────────────────────────────────
   const availableProjects = useMemo(() => {
     const ids = new Set(rawEntries
       .filter(e =>
         (f.clientId === 'all' || projectMap.get(e.project_id)?.client_id === f.clientId) &&
-        (f.employeeId === 'all' || e.user_id === f.employeeId)
+        (f.employeeId === 'all' || e.user_id === f.employeeId) &&
+        (f.location === 'all' || locationKeyOf(e.user_id) === f.location)
       ).map(e => e.project_id));
     return projects.filter(p => ids.has(p.id));
-  }, [rawEntries, projects, f.clientId, f.employeeId, projectMap]);
+  }, [rawEntries, projects, f.clientId, f.employeeId, f.location, projectMap, locationKeyOf]);
 
   const availableClients = useMemo(() => {
     const ids = new Set(rawEntries
       .filter(e =>
         (f.projectId === 'all' || e.project_id === f.projectId) &&
-        (f.employeeId === 'all' || e.user_id === f.employeeId)
+        (f.employeeId === 'all' || e.user_id === f.employeeId) &&
+        (f.location === 'all' || locationKeyOf(e.user_id) === f.location)
       ).map(e => projectMap.get(e.project_id)?.client_id).filter((id): id is string => !!id));
     return clients.filter(c => ids.has(c.id));
-  }, [rawEntries, clients, f.projectId, f.employeeId, projectMap]);
+  }, [rawEntries, clients, f.projectId, f.employeeId, f.location, projectMap, locationKeyOf]);
 
   const availableEmployees = useMemo(() => {
     const ids = new Set(rawEntries
       .filter(e =>
         (f.projectId === 'all' || e.project_id === f.projectId) &&
-        (f.clientId === 'all' || projectMap.get(e.project_id)?.client_id === f.clientId)
+        (f.clientId === 'all' || projectMap.get(e.project_id)?.client_id === f.clientId) &&
+        (f.location === 'all' || locationKeyOf(e.user_id) === f.location)
       ).map(e => e.user_id));
     return employees.filter(e => ids.has(e.id));
-  }, [rawEntries, employees, f.projectId, f.clientId, projectMap]);
+  }, [rawEntries, employees, f.projectId, f.clientId, f.location, projectMap, locationKeyOf]);
+
+  // Distinct locations present in the currently-cascaded entries.
+  const availableLocations = useMemo(() => {
+    const keys = new Set<string>();
+    rawEntries
+      .filter(e =>
+        (f.projectId === 'all' || e.project_id === f.projectId) &&
+        (f.clientId === 'all' || projectMap.get(e.project_id)?.client_id === f.clientId) &&
+        (f.employeeId === 'all' || e.user_id === f.employeeId)
+      )
+      .forEach(e => keys.add(locationKeyOf(e.user_id)));
+    return [...keys]
+      .sort((a, b) => (a === NO_LOCATION ? 1 : b === NO_LOCATION ? -1 : a.localeCompare(b)))
+      .map(k => ({ value: k, label: k === NO_LOCATION ? NO_LOCATION_LABEL : k }));
+  }, [rawEntries, f.projectId, f.clientId, f.employeeId, projectMap, locationKeyOf]);
 
   // ── Project auto-fill client ─────────────────────────────────────────────────
   const handleProjectChange = (val: string) => {
@@ -245,14 +280,38 @@ export default function Reports() {
     });
   };
 
-  const clearAll = () => setF(prev => ({ ...prev, employeeId: 'all', projectId: 'all', clientId: 'all', status: 'all', billing: 'all', search: '' }));
-  const hasActiveFilters = f.employeeId !== 'all' || f.projectId !== 'all' || f.clientId !== 'all' || f.status !== 'all' || f.billing !== 'all' || !!f.search;
+  const clearAll = () => setF(prev => ({ ...prev, employeeId: 'all', projectId: 'all', clientId: 'all', location: 'all', status: 'all', billing: 'all', search: '' }));
+
+  // ── Excel export (server-generated, honours the current filters) ───────────────
+  const handleExportExcel = async () => {
+    setIsExporting(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('date_gte', format(f.startDate, 'yyyy-MM-dd'));
+      params.set('date_lte', format(f.endDate, 'yyyy-MM-dd'));
+      if (f.employeeId !== 'all') params.set('user_id', f.employeeId);
+      if (f.projectId !== 'all') params.set('project_id', f.projectId);
+      if (f.clientId !== 'all') params.set('client_id', f.clientId);
+      if (f.location !== 'all') params.set('location', f.location);
+      if (f.status !== 'all') params.set('status', f.status);
+      if (f.billing !== 'all') params.set('billing', f.billing);
+      if (f.search) params.set('search', f.search);
+      const filename = `worked-hours_${format(f.startDate, 'yyyy-MM-dd')}_${format(f.endDate, 'yyyy-MM-dd')}.xlsx`;
+      await api.download(`/reports/time-entries/export/xlsx?${params.toString()}`, filename);
+    } catch {
+      toast.error('No se pudo generar el Excel. Intenta de nuevo.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+  const hasActiveFilters = f.employeeId !== 'all' || f.projectId !== 'all' || f.clientId !== 'all' || f.location !== 'all' || f.status !== 'all' || f.billing !== 'all' || !!f.search;
 
   // ── Filtered entries (single source of truth) ─────────────────────────────────
   const filteredEntries = useMemo(() => rawEntries.filter(e => {
     if (f.employeeId !== 'all' && e.user_id !== f.employeeId) return false;
     if (f.projectId !== 'all' && e.project_id !== f.projectId) return false;
     if (f.clientId !== 'all' && projectMap.get(e.project_id)?.client_id !== f.clientId) return false;
+    if (f.location !== 'all' && locationKeyOf(e.user_id) !== f.location) return false;
     if (f.status === 'normal' && e.status !== 'normal') return false;
     if (f.status === 'on_hold' && e.status !== 'on_hold') return false;
     if (f.billing === 'billable' && !e.billable) return false;
@@ -294,6 +353,21 @@ export default function Reports() {
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
   }, [filteredEntries, employeeMap]);
+
+  // ── Chart: hours by location ──────────────────────────────────────────────────
+  const locationChartData = useMemo(() => {
+    const map: Record<string, { key: string; name: string; Billable: number; 'Non-billable': number; employees: Set<string> }> = {};
+    filteredEntries.forEach(e => {
+      const key = locationKeyOf(e.user_id);
+      if (!map[key]) map[key] = { key, name: key === NO_LOCATION ? NO_LOCATION_LABEL : key, Billable: 0, 'Non-billable': 0, employees: new Set() };
+      map[key].employees.add(e.user_id);
+      if (e.billable) map[key].Billable += Number(e.hours);
+      else map[key]['Non-billable'] += Number(e.hours);
+    });
+    return Object.values(map)
+      .map(d => ({ key: d.key, name: d.name, Billable: d.Billable, 'Non-billable': d['Non-billable'], total: d.Billable + d['Non-billable'], employeeCount: d.employees.size }))
+      .sort((a, b) => b.total - a.total);
+  }, [filteredEntries, locationKeyOf]);
 
   // ── Chart: hours by project (donut) ──────────────────────────────────────────
   const projectPieData = useMemo(() => {
@@ -404,6 +478,7 @@ export default function Reports() {
     if (f.employeeId !== 'all') c.push({ key: 'emp',  label: `Employee: ${employeeMap.get(f.employeeId)?.name ?? f.employeeId}`, onClear: () => set('employeeId', 'all') });
     if (f.projectId !== 'all')  c.push({ key: 'proj', label: `Project: ${projectMap.get(f.projectId)?.name ?? f.projectId}`,    onClear: () => set('projectId', 'all') });
     if (f.clientId !== 'all')   c.push({ key: 'cli',  label: `Client: ${clientMap.get(f.clientId)?.name ?? f.clientId}`,        onClear: () => set('clientId', 'all') });
+    if (f.location !== 'all')   c.push({ key: 'loc',  label: `Location: ${f.location === NO_LOCATION ? NO_LOCATION_LABEL : f.location}`, onClear: () => set('location', 'all') });
     if (f.status !== 'all')     c.push({ key: 'st',   label: `Status: ${f.status === 'on_hold' ? 'On Hold' : 'Normal'}`,        onClear: () => set('status', 'all') });
     if (f.billing !== 'all')    c.push({ key: 'bi',   label: f.billing === 'billable' ? 'Billable only' : 'Non-billable only',   onClear: () => set('billing', 'all') });
     if (f.search)               c.push({ key: 'q',    label: `"${f.search}"`,                                                   onClear: () => set('search', '') });
@@ -432,6 +507,10 @@ export default function Reports() {
               <X className="h-3.5 w-3.5" />Clear All
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={handleExportExcel} disabled={isExporting} className="gap-1.5">
+            {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Export Excel
+          </Button>
           {/* View toggle */}
           <div className="flex rounded-md border overflow-hidden text-sm">
             {([['charts', LayoutDashboard], ['both', BarChart2], ['tables', TableIcon]] as [ViewMode, React.ElementType][]).map(([mode, Icon]) => (
@@ -497,6 +576,12 @@ export default function Reports() {
                 options={availableEmployees.map(e => ({ value: e.id, label: e.name }))}
                 isFiltered={availableEmployees.length < employees.length}
                 onChange={v => set('employeeId', v)} onClear={() => set('employeeId', 'all')} />
+            )}
+            {isAdmin && (
+              <FilterSelect label="Location" value={f.location} allLabel="All Locations"
+                options={availableLocations}
+                isFiltered={f.location !== 'all'}
+                onChange={v => set('location', v)} onClear={() => set('location', 'all')} />
             )}
             <FilterSelect label="Status" value={f.status} allLabel="All Statuses"
               options={[{ value: 'normal', label: 'Normal' }, { value: 'on_hold', label: 'On Hold' }]}
@@ -605,6 +690,65 @@ export default function Reports() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Hours by Location ─────────────────────────────────────────────── */}
+      {isAdmin && (
+        <Card className="card-elevated">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Hours by Location</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Employees grouped by their location · Click a bar to filter
+            </p>
+          </CardHeader>
+          <CardContent>
+            {locationChartData.length === 0 ? (
+              <div className="h-[200px] flex items-center justify-center"><ChartEmpty /></div>
+            ) : (
+              <div className="space-y-4">
+                <ResponsiveContainer width="100%" height={Math.max(180, locationChartData.length * 46)}>
+                  <BarChart
+                    data={locationChartData}
+                    layout="vertical"
+                    margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
+                    onClick={data => {
+                      const key = data?.activePayload?.[0]?.payload?.key;
+                      if (key) set('location', key);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
+                    <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'hsl(var(--muted)/0.5)' }} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                    <Bar dataKey="Billable" stackId="a" fill={BILLABLE_COLOR} radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="Non-billable" stackId="a" fill={NON_BILLABLE_COLOR} radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 pt-1 border-t">
+                  {locationChartData.map(loc => (
+                    <button
+                      key={loc.key}
+                      onClick={() => set('location', loc.key)}
+                      className={`flex items-center justify-between p-2.5 rounded-lg text-left transition-colors ${
+                        f.location === loc.key ? 'bg-primary/10 border border-primary/40' : 'bg-muted/30 hover:bg-muted/60'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">{loc.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {loc.employeeCount} {loc.employeeCount === 1 ? 'employee' : 'employees'}
+                        </p>
+                      </div>
+                      <span className="font-bold text-primary text-sm whitespace-nowrap ml-2">{loc.total.toFixed(1)}h</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {showCharts && (
         <>

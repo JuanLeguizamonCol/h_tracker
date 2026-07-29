@@ -23,6 +23,7 @@ export interface Employee {
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
   // Location
+  location: string | null;
   country: string | null;
   state: string | null;
   city: string | null;

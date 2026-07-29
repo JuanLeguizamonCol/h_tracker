@@ -28,6 +28,7 @@ from routers.skill_catalog import skill_catalog_router
 from routers.notifications import notifications_router
 from routers.invoice_hours_on_hold import on_hold_router
 from routers.profile import profile_router
+from routers.reports import reports_router
 
 # Import all models so Base.metadata sees them
 import models  # noqa - imports all models via __init__.py
@@ -81,6 +82,7 @@ app.include_router(skill_catalog_router, dependencies=auth_deps)
 app.include_router(notifications_router, dependencies=auth_deps)
 app.include_router(on_hold_router, dependencies=auth_deps)
 app.include_router(profile_router, dependencies=auth_deps)
+app.include_router(reports_router, dependencies=auth_deps)
 
 
 # ---------- Health check ----------
