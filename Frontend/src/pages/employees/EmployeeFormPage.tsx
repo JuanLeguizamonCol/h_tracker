@@ -21,6 +21,7 @@ const DEPARTMENTS = ['Engineering', 'Design', 'Sales', 'Finance', 'HR', 'Operati
 const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Contractor', 'Freelance'];
 const GENDERS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
 const WORK_MODES = ['Remote', 'On-site', 'Hybrid'];
+const LOCATIONS = ['USA', 'Colombia', 'Ecuador'];
 const EMPLOYMENT_STATUSES = ['Active', 'Inactive', 'On Leave'];
 const COST_TYPES = ['hourly', 'monthly', 'project'];
 const COST_CURRENCIES = ['USD', 'EUR', 'COP', 'MXN', 'GBP', 'CAD'];
@@ -403,8 +404,14 @@ export default function EmployeeFormPage() {
       {/* Location */}
       <Section title="Location">
         <Field label="Location" full>
-          <Input value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. Bogotá HQ, Remote — US, Mexico City" />
-          <p className="text-xs text-muted-foreground">Grouping label used to segment employees in reports.</p>
+          <Select value={form.location || '_none'} onValueChange={v => set('location', v === '_none' ? '' : v)}>
+            <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_none">—</SelectItem>
+              {LOCATIONS.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">Used to segment employees in reports.</p>
         </Field>
         <Field label="Country">
           <Input value={form.country} onChange={e => set('country', e.target.value)} placeholder="United States" />

@@ -15,6 +15,7 @@ import { EmployeeSkill } from '@/types';
 
 const GENDERS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
 const WORK_MODES = ['Remote', 'On-site', 'Hybrid'];
+const LOCATIONS = ['USA', 'Colombia', 'Ecuador'];
 const SKILL_CATEGORIES = ['Frontend', 'Backend', 'Cloud', 'Data', 'Design', 'DevOps', 'Management', 'Other'];
 
 const PROFICIENCY = [
@@ -170,7 +171,20 @@ function PersonalInfoTab({ editing, setEditing }: { editing: boolean; setEditing
           <CardTitle className="text-sm font-medium text-muted-foreground">Location</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">{field('Location', 'location')}</div>
+          <div className="col-span-2 space-y-1.5">
+            <Label className="text-xs">Location</Label>
+            {editing ? (
+              <Select value={form.location || '_none'} onValueChange={v => setForm(f => ({ ...f, location: v === '_none' ? '' : v }))}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">—</SelectItem>
+                  {LOCATIONS.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-sm py-1">{form.location || <span className="text-muted-foreground">—</span>}</p>
+            )}
+          </div>
           {field('Country', 'country')}
           {field('State / Province', 'state')}
           {field('City', 'city')}
