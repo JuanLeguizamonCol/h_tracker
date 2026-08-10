@@ -58,8 +58,12 @@ param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY')
 param adminPassword = readEnvironmentVariable('ADMIN_PASSWORD')
 param adminEmail = 'jleguizamon@impactpoint.com'
 
-// Auth is handled entirely by the FastAPI backend (username/password → JWT),
-// so no Entra ID / App Registration parameters are required here.
+// Auth is username/password → JWT by default. "Sign in with Microsoft" (Entra ID)
+// is additionally enabled when these are set (App Registration created once via
+// az cli — see project docs). Not secret — the client id is public by design for
+// a SPA, and the tenant id is not sensitive.
+param entraTenantId = readEnvironmentVariable('ENTRA_TENANT_ID', '')
+param entraClientId = readEnvironmentVariable('ENTRA_CLIENT_ID', '')
 
 // ---------------------------------------------------------------------------
 // Exchange rates (adjust as needed without redeploying code)

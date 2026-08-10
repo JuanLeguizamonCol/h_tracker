@@ -13,9 +13,11 @@
 set -e
 
 : "${BACKEND_URL:=}"
+: "${ENTRA_CLIENT_ID:=}"
+: "${ENTRA_TENANT_ID:=}"
 
 cat > /usr/share/nginx/html/config.js <<EOF
-window.__ENV__ = { API_URL: "${BACKEND_URL}" };
+window.__ENV__ = { API_URL: "${BACKEND_URL}", ENTRA_CLIENT_ID: "${ENTRA_CLIENT_ID}", ENTRA_TENANT_ID: "${ENTRA_TENANT_ID}" };
 EOF
 
-echo "[config] config.js written with API_URL=\"${BACKEND_URL}\""
+echo "[config] config.js written with API_URL=\"${BACKEND_URL}\" ENTRA_CLIENT_ID=\"${ENTRA_CLIENT_ID}\""

@@ -90,8 +90,10 @@ AZURE_STORAGE_CONNECTION_STRING  si está seteada, los adjuntos van a Blob Stora
 AZURE_STORAGE_CONTAINER          invoice-attachments
 COP_TO_USD_RATE / EUR_TO_USD_RATE   4200 / 1.08
 EXPENSIFY_* / FRESHSALES_*        integraciones opcionales
+ENTRA_TENANT_ID / ENTRA_CLIENT_ID  App Registration de Entra ID (SPA, sin secreto) para "Sign in with Microsoft". Vacío = deshabilitado.
 ```
-> No existe `AUTH_MODE`. La auth es siempre usuario/contraseña → JWT.
+> No existe `AUTH_MODE`. La auth base es siempre usuario/contraseña → JWT propio;
+> "Sign in with Microsoft" (Entra ID) es un método adicional (ver abajo), no un reemplazo.
 
 ### Startup del backend
 El `backend.Dockerfile` ejecuta al inicio (sin seed):
@@ -445,9 +447,13 @@ InvoiceNewPage:
 
 ---
 
-## Autenticación (usuario/contraseña → JWT)
+## Autenticación (usuario/contraseña → JWT, + Sign in with Microsoft opcional)
 
-No hay Azure AD ni modo mock. Flujo:
+No hay modo mock. El backend siempre emite su propio JWT (HS256); Entra ID, cuando
+está configurado, es solo un método adicional de acreditación en el login — no
+reemplaza el modelo de roles ni el JWT interno.
+
+### Password (siempre disponible)
 1. `POST /auth/login` con `{email, password}` → JWT (HS256, exp 7 días, `sub` = `employee.id`).
 2. El frontend guarda el token en `localStorage` (`auth_token`) y lo envía como `Bearer`.
 3. `get_current_employee` (en `utils/auth_jwt.py`) valida el token en cada request y
@@ -458,8 +464,26 @@ No hay Azure AD ni modo mock. Flujo:
   desde `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
 - Autoregistro (`/auth/register`) restringido a `ALLOWED_EMAIL_DOMAINS`.
 
+### Sign in with Microsoft (Entra ID, opcional)
+Habilitado solo si `ENTRA_TENANT_ID`/`ENTRA_CLIENT_ID` están seteados (backend y
+frontend); si no, el botón simplemente no aparece en `/auth`. Es un **token
+exchange**, no doble validación en cada request:
+1. Frontend (MSAL, `lib/msal.ts`) hace `loginPopup` contra el tenant de Impact Point
+   y obtiene un `id_token` de Microsoft.
+2. `POST /auth/login/entra` con `{id_token}` → `utils/auth_entra.py` lo valida
+   (firma RS256 contra el JWKS del tenant, `aud`/`iss`/`tid`), saca el email
+   (`preferred_username`), y si pasa `ALLOWED_EMAIL_DOMAINS`:
+   - Busca `Employee` por email; si no existe, lo autoprovisiona con rol `employee`
+     (un admin lo asciende después desde `/employees`, igual que hoy).
+   - Emite el **mismo JWT interno** (`create_access_token`) → respuesta idéntica a
+     `/auth/login`. Todo lo demás (`get_current_employee`, roles, `ProtectedRoute`)
+     no sabe ni le importa cómo se autenticó el usuario.
+- App Registration: SPA pública (sin client secret, PKCE), single-tenant. Se crea
+  una sola vez vía `az cli` (ver comentarios en `infra/main.bicepparam`).
+
 En `AuthContext.tsx`:
-- `login(email, password)` → guarda token → `GET /auth/me` retorna el Employee.
+- `login(email, password)` / `loginWithEntra()` → ambos terminan guardando el mismo
+  token y llamando `GET /auth/me` para cargar el Employee.
 - `employee.id` = UUID interno; `employee.user_id` = identificador interno propio.
 
 **IMPORTANTE:** Al crear `TimeEntry`, usar siempre `employee.id` como `user_id`,

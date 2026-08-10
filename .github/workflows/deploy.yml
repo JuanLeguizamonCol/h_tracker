@@ -135,6 +135,11 @@ jobs:
           # email stays disabled and the deploy still succeeds.
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
           GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+          # Optional — "Sign in with Microsoft" (Entra ID). Not secret (a SPA's
+          # client id is public by design), so these are repo variables, not
+          # secrets. Empty if unset; Microsoft sign-in stays disabled.
+          ENTRA_TENANT_ID: ${{ vars.ENTRA_TENANT_ID }}
+          ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
         run: |
           set -o pipefail   # otherwise `| tee` masks an az failure as success
           az deployment group create \

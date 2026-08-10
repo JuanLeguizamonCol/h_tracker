@@ -1,6 +1,7 @@
 import { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
 import { Employee, AppRole } from '@/types';
 import { api, getStoredToken, setStoredToken, clearStoredToken } from '@/lib/api';
+import { msalInstance, ensureMsalInitialized } from '@/lib/msal';
 
 interface AuthContextType {
   employee: Employee | null;
@@ -10,6 +11,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   mustChangePassword: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithEntra: () => Promise<void>;
   signOut: () => void;
   refreshProfile: () => Promise<void>;
 }
@@ -61,6 +63,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await loadProfile();
   };
 
+  const loginWithEntra = async () => {
+    await ensureMsalInitialized();
+    const popupResult = await msalInstance.loginPopup({ scopes: ['openid', 'profile', 'email'] });
+    const result = await api.post<{ access_token: string; token_type: string }>(
+      '/auth/login/entra',
+      { id_token: popupResult.idToken },
+    );
+    setStoredToken(result.access_token);
+    await loadProfile();
+  };
+
   const signOut = () => {
     clearStoredToken();
     setEmployee(null);
@@ -77,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: !!employee,
       mustChangePassword: !!employee?.must_change_password,
       login,
+      loginWithEntra,
       signOut,
       refreshProfile: loadProfile,
     }}>

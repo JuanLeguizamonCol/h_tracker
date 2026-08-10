@@ -7,12 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Clock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { isEntraConfigured } from '@/lib/msal';
 
 export default function Auth() {
-  const { isAuthenticated, isLoading, login } = useAuth();
+  const { isAuthenticated, isLoading, login, loginWithEntra } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [entraSubmitting, setEntraSubmitting] = useState(false);
 
   if (isLoading) {
     return (
@@ -38,6 +40,17 @@ export default function Auth() {
     }
   };
 
+  const handleEntraLogin = async () => {
+    setEntraSubmitting(true);
+    try {
+      await loginWithEntra();
+    } catch {
+      toast.error('Could not sign in with Microsoft.');
+    } finally {
+      setEntraSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <Card className="w-full max-w-sm shadow-lg">
@@ -51,6 +64,28 @@ export default function Auth() {
         </CardHeader>
 
         <CardContent className="pt-4 pb-8">
+          {isEntraConfigured && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full h-11 mb-4"
+                disabled={entraSubmitting}
+                onClick={handleEntraLogin}
+              >
+                {entraSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Sign in with Microsoft
+              </Button>
+              <div className="relative mb-4">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">or</span>
+                </div>
+              </div>
+            </>
+          )}
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>

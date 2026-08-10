@@ -62,6 +62,12 @@ param graphClientSecret string = ''
 @description('From address for invitation emails — must be a real M365 mailbox.')
 param graphSender string = ''
 
+@description('Entra ID (Azure AD) tenant id for "Sign in with Microsoft". Empty disables it.')
+param entraTenantId string = ''
+
+@description('Entra ID app (client) id of the SPA App Registration. Empty disables Microsoft sign-in.')
+param entraClientId string = ''
+
 // ---------------------------------------------------------------------------
 // Variables — naming
 // ---------------------------------------------------------------------------
@@ -407,6 +413,15 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'GRAPH_SENDER'
               value: graphSender
             }
+            // Entra ID (Azure AD) sign-in. Empty values disable Microsoft login.
+            {
+              name: 'ENTRA_TENANT_ID'
+              value: entraTenantId
+            }
+            {
+              name: 'ENTRA_CLIENT_ID'
+              value: entraClientId
+            }
           ]
           probes: [
             {
@@ -500,6 +515,16 @@ resource frontendApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'BACKEND_URL'
               value: 'https://${backendApp.properties.configuration.ingress.fqdn}'
+            }
+            // Also read by the entrypoint hook, written into /config.js so the
+            // SPA can initialize MSAL for "Sign in with Microsoft".
+            {
+              name: 'ENTRA_CLIENT_ID'
+              value: entraClientId
+            }
+            {
+              name: 'ENTRA_TENANT_ID'
+              value: entraTenantId
             }
           ]
           probes: [

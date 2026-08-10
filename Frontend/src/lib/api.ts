@@ -8,7 +8,7 @@ const TOKEN_KEY = 'auth_token';
 // then to the relative `/api` path (local dev / same-origin, proxied by nginx/vite).
 declare global {
   interface Window {
-    __ENV__?: { API_URL?: string };
+    __ENV__?: { API_URL?: string; ENTRA_CLIENT_ID?: string; ENTRA_TENANT_ID?: string };
   }
 }
 const runtimeApiUrl =

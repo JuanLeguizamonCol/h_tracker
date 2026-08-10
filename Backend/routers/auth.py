@@ -13,6 +13,7 @@ from utils.auth_jwt import (
     verify_password, create_access_token, get_current_employee, hash_password,
     verify_password_setup_token,
 )
+from utils.auth_entra import verify_entra_id_token
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,10 @@ ALLOWED_EMAIL_DOMAINS = [
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class EntraLoginRequest(BaseModel):
+    id_token: str
 
 
 class RegisterRequest(BaseModel):
@@ -71,13 +76,55 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer"}
 
 
+def _is_allowed_domain(email: str) -> bool:
+    domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+    return bool(ALLOWED_EMAIL_DOMAINS) and domain in ALLOWED_EMAIL_DOMAINS
+
+
+@auth_router.post("/login/entra")
+def login_entra(body: EntraLoginRequest, db: Session = Depends(get_db)):
+    """Login via Microsoft Entra ID (Impact Point tenant).
+
+    Verifies the id_token against Entra's JWKS, then finds-or-creates the
+    matching Employee by email and issues our own internal JWT — same
+    response shape as password login, so nothing downstream changes."""
+    claims = verify_entra_id_token(body.id_token)
+    email = (claims.get("preferred_username") or claims.get("email") or "").strip().lower()
+    if not email or not _is_allowed_domain(email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Microsoft sign-in is restricted to authorized company emails",
+        )
+
+    emp = db.query(Employee).filter(Employee.email == email).first()
+    if emp is None:
+        emp_id = str(uuid.uuid4())
+        emp = Employee(
+            id=emp_id,
+            user_id=emp_id,
+            name=claims.get("name") or email.split("@", 1)[0],
+            email=email,
+            is_active=True,
+            must_change_password=False,
+        )
+        db.add(emp)
+        db.flush()
+        db.add(UserRole(id=str(uuid.uuid4()), user_id=emp.id, role="employee"))
+        db.commit()
+        db.refresh(emp)
+    elif not emp.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
+
+    token = create_access_token(emp.id, emp.email)
+    return {"access_token": token, "token_type": "bearer"}
+
+
 @auth_router.post("/register", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
 def register(body: RegisterRequest, db: Session = Depends(get_db)):
     """Self-registration, restricted to authorized company email domains.
     Creates a new employee with role 'employee'."""
     email = body.email.strip().lower()
-    domain = email.rsplit("@", 1)[-1] if "@" in email else ""
-    if not ALLOWED_EMAIL_DOMAINS or domain not in ALLOWED_EMAIL_DOMAINS:
+    if not _is_allowed_domain(email):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Registration is restricted to authorized company emails",
