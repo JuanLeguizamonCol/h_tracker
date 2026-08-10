@@ -12,8 +12,6 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -213,11 +211,16 @@ export default function Timesheet() {
     if (prevWeekKeyRef.current === weekKey) return;
     prevWeekKeyRef.current = weekKey;
 
+    // Keyed by project + billable type, NOT project alone — a project can carry
+    // both billable and non-billable hours at once, and merging them into a
+    // single row would silently flatten one type into the other on save.
+    const rowKey = (projectId: string, billable: boolean) => `${projectId}::${billable}`;
     const rowMap = new Map<string, ProjectRow>();
     weekEntries.forEach(entry => {
       const proj = availableProjects.find(p => p.id === entry.project_id);
-      if (!rowMap.has(entry.project_id)) {
-        rowMap.set(entry.project_id, {
+      const key = rowKey(entry.project_id, entry.billable);
+      if (!rowMap.has(key)) {
+        rowMap.set(key, {
           projectId: entry.project_id,
           projectName: proj?.name ?? entry.project_id,
           clientName: proj?.clientName ?? '',
@@ -226,7 +229,7 @@ export default function Timesheet() {
           days: {},
         });
       }
-      rowMap.get(entry.project_id)!.days[entry.date] = {
+      rowMap.get(key)!.days[entry.date] = {
         id: entry.id,
         hours: Number(entry.hours),
         notes: entry.notes || '',
@@ -234,7 +237,28 @@ export default function Timesheet() {
       };
     });
 
-    setRows(Array.from(rowMap.values()));
+    // Every non-internal project always gets both a billable and a non-billable
+    // row (even empty), so both types of hours can be logged for it at any time.
+    Array.from(rowMap.values()).forEach(row => {
+      if (row.isInternal) return;
+      const counterKey = rowKey(row.projectId, !row.billable);
+      if (!rowMap.has(counterKey)) {
+        rowMap.set(counterKey, {
+          projectId: row.projectId,
+          projectName: row.projectName,
+          clientName: row.clientName,
+          isInternal: false,
+          billable: !row.billable,
+          days: {},
+        });
+      }
+    });
+
+    setRows(Array.from(rowMap.values()).sort((a, b) =>
+      a.projectName === b.projectName
+        ? Number(b.billable) - Number(a.billable) // billable row first within a project
+        : a.projectName.localeCompare(b.projectName)
+    ));
     setPendingDeletions([]);
   }, [isLoading, weekKey, weekEntries, availableProjects]);
 
@@ -278,19 +302,28 @@ export default function Timesheet() {
   const handleAddProject = (projectId: string) => {
     const proj = availableProjects.find(p => p.id === projectId);
     if (!proj) return;
-    setRows(prev => [...prev, {
-      projectId: proj.id,
-      projectName: proj.name,
-      clientName: proj.clientName,
-      isInternal: proj.isInternal,
-      billable: !proj.isInternal,
-      days: {},
-    }]);
+    if (proj.isInternal) {
+      setRows(prev => [...prev, {
+        projectId: proj.id,
+        projectName: proj.name,
+        clientName: proj.clientName,
+        isInternal: true,
+        billable: false,
+        days: {},
+      }]);
+      return;
+    }
+    // Non-internal projects can carry both billable and non-billable hours, so
+    // add both lanes up front — no need to add the project twice or toggle.
+    setRows(prev => [...prev,
+      { projectId: proj.id, projectName: proj.name, clientName: proj.clientName, isInternal: false, billable: true, days: {} },
+      { projectId: proj.id, projectName: proj.name, clientName: proj.clientName, isInternal: false, billable: false, days: {} },
+    ]);
   };
 
-  const handleUpdateHours = (projectId: string, dateStr: string, hours: number) => {
+  const handleUpdateHours = (projectId: string, billable: boolean, dateStr: string, hours: number) => {
     setRows(prev => prev.map(row => {
-      if (row.projectId !== projectId) return row;
+      if (row.projectId !== projectId || row.billable !== billable) return row;
       const existing = row.days[dateStr];
       return {
         ...row,
@@ -302,9 +335,9 @@ export default function Timesheet() {
     }));
   };
 
-  const handleUpdateNotes = (projectId: string, dateStr: string, notes: string) => {
+  const handleUpdateNotes = (projectId: string, billable: boolean, dateStr: string, notes: string) => {
     setRows(prev => prev.map(row => {
-      if (row.projectId !== projectId) return row;
+      if (row.projectId !== projectId || row.billable !== billable) return row;
       const existing = row.days[dateStr];
       return {
         ...row,
@@ -316,24 +349,15 @@ export default function Timesheet() {
     }));
   };
 
-  const handleUpdateBillable = (projectId: string, billable: boolean) => {
-    setRows(prev => prev.map(row => {
-      if (row.projectId !== projectId) return row;
-      // Mark all persisted days as dirty so they get updated on save
-      const updatedDays = Object.fromEntries(
-        Object.entries(row.days).map(([d, e]) => [d, { ...e, dirty: true }]),
-      );
-      return { ...row, billable, days: updatedDays };
-    }));
-  };
-
   const handleRemoveRow = (projectId: string) => {
-    const row = rows.find(r => r.projectId === projectId);
-    if (row) {
-      const idsToDelete = Object.values(row.days).filter(d => d.id).map(d => d.id!);
-      if (idsToDelete.length > 0) {
-        setPendingDeletions(prev => [...prev, ...idsToDelete]);
-      }
+    // A project can have both a billable and non-billable row — remove BOTH and
+    // queue every persisted entry across them for deletion (previously only the
+    // first matching row's entries were queued, orphaning the other type's rows).
+    const idsToDelete = rows
+      .filter(r => r.projectId === projectId)
+      .flatMap(r => Object.values(r.days).filter(d => d.id).map(d => d.id!));
+    if (idsToDelete.length > 0) {
+      setPendingDeletions(prev => [...prev, ...idsToDelete]);
     }
     setRows(prev => prev.filter(r => r.projectId !== projectId));
   };
@@ -519,7 +543,7 @@ export default function Timesheet() {
 
                 return (
                   <div
-                    key={row.projectId}
+                    key={`${row.projectId}-${row.billable}`}
                     className={`grid items-stretch border-b last:border-b-0 group ${isOdd ? 'bg-muted/20' : ''}`}
                     style={{ gridTemplateColumns: GRID_COLS }}
                   >
@@ -542,14 +566,13 @@ export default function Timesheet() {
                       )}
                       {!row.isInternal && (
                         <div className="flex items-center gap-1.5 mt-1">
-                          <Switch
-                            checked={row.billable}
-                            onCheckedChange={v => handleUpdateBillable(row.projectId, v)}
-                            className="h-5 w-9"
-                          />
-                          <Label className={`text-[10px] cursor-pointer ${row.billable ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`}>
-                            {row.billable ? 'Billable' : 'Non-bill.'}
-                          </Label>
+                          <span className={`inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-semibold ${
+                            row.billable
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                              : 'bg-muted text-muted-foreground'
+                          }`}>
+                            {row.billable ? 'Billable' : 'Non-billable'}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -561,7 +584,7 @@ export default function Timesheet() {
                       const dayEntry = row.days[dateStr];
                       const hours = dayEntry?.hours ?? 0;
                       const notes = dayEntry?.notes ?? '';
-                      const noteKey = `${row.projectId}:${dateStr}`;
+                      const noteKey = `${row.projectId}:${row.billable}:${dateStr}`;
 
                       return (
                         <div
@@ -575,7 +598,7 @@ export default function Timesheet() {
                             placeholder="—"
                             aria-invalid={hours > MAX_HOURS_PER_DAY}
                             title={hours > MAX_HOURS_PER_DAY ? `Max ${MAX_HOURS_PER_DAY} hours per day` : undefined}
-                            onChange={e => handleUpdateHours(row.projectId, dateStr, parseFloat(e.target.value) || 0)}
+                            onChange={e => handleUpdateHours(row.projectId, row.billable, dateStr, parseFloat(e.target.value) || 0)}
                             className={`w-full h-8 text-center text-sm px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
                               hours > MAX_HOURS_PER_DAY ? 'border-destructive text-destructive focus-visible:ring-destructive' : ''
                             }`}
@@ -604,7 +627,7 @@ export default function Timesheet() {
                               <Textarea
                                 placeholder="Notes for this day…"
                                 value={notes}
-                                onChange={e => handleUpdateNotes(row.projectId, dateStr, e.target.value)}
+                                onChange={e => handleUpdateNotes(row.projectId, row.billable, dateStr, e.target.value)}
                                 rows={3}
                                 className="text-xs resize-none"
                                 autoFocus
