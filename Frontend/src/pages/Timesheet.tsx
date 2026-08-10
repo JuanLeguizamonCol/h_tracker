@@ -153,6 +153,9 @@ interface ProjectRow {
 const DAY_ABBRS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const GRID_COLS = '200px repeat(7, minmax(80px, 1fr)) 56px 36px';
 
+// Maximum hours allowed in a single day cell — a day only has 24 hours.
+const MAX_HOURS_PER_DAY = 24;
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Timesheet() {
@@ -263,6 +266,13 @@ export default function Timesheet() {
     [rows, pendingDeletions],
   );
 
+  // A single day's entry can't exceed 24 hours. Flag any offending cell and block
+  // saving until it's fixed.
+  const hasInvalidHours = useMemo(
+    () => rows.some(row => Object.values(row.days).some(d => d.hours > MAX_HOURS_PER_DAY)),
+    [rows],
+  );
+
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleAddProject = (projectId: string) => {
@@ -330,6 +340,10 @@ export default function Timesheet() {
 
   const handleSave = async () => {
     if (!employee) return;
+    if (hasInvalidHours) {
+      toast.error(`Hours per day can't exceed ${MAX_HOURS_PER_DAY}. Fix the highlighted cells before saving.`);
+      return;
+    }
     setIsSaving(true);
     try {
       const promises: Promise<unknown>[] = [];
@@ -413,7 +427,12 @@ export default function Timesheet() {
           <Badge variant="outline" className="text-base px-3 py-1.5 font-bold">
             {weeklyTotal}h this week
           </Badge>
-          <Button onClick={handleSave} className="gap-2" disabled={isSaving || !hasChanges}>
+          <Button
+            onClick={handleSave}
+            className="gap-2"
+            disabled={isSaving || !hasChanges || hasInvalidHours}
+            title={hasInvalidHours ? `Hours per day can't exceed ${MAX_HOURS_PER_DAY}` : undefined}
+          >
             {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save Changes
           </Button>
@@ -551,12 +570,19 @@ export default function Timesheet() {
                         >
                           <Input
                             type="number"
-                            min="0" max="24" step="0.5"
+                            min="0" max={MAX_HOURS_PER_DAY} step="0.5"
                             value={hours === 0 ? '' : hours}
                             placeholder="—"
+                            aria-invalid={hours > MAX_HOURS_PER_DAY}
+                            title={hours > MAX_HOURS_PER_DAY ? `Max ${MAX_HOURS_PER_DAY} hours per day` : undefined}
                             onChange={e => handleUpdateHours(row.projectId, dateStr, parseFloat(e.target.value) || 0)}
-                            className="w-full h-8 text-center text-sm px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            className={`w-full h-8 text-center text-sm px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                              hours > MAX_HOURS_PER_DAY ? 'border-destructive text-destructive focus-visible:ring-destructive' : ''
+                            }`}
                           />
+                          {hours > MAX_HOURS_PER_DAY && (
+                            <span className="text-[10px] leading-tight text-destructive">max {MAX_HOURS_PER_DAY}h</span>
+                          )}
                           <Popover
                             open={openNoteKey === noteKey}
                             onOpenChange={open => setOpenNoteKey(open ? noteKey : null)}

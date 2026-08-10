@@ -1,7 +1,11 @@
 # schemas/time_entries.py
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import date, datetime
+
+# A single day's entry can't exceed 24 hours. Enforced on the input schemas only
+# (not on Base/Out) so reading any pre-existing out-of-range rows still works.
+MAX_HOURS_PER_DAY = 24
 
 
 class TimeEntryBase(BaseModel):
@@ -16,7 +20,7 @@ class TimeEntryBase(BaseModel):
 
 
 class TimeEntryCreate(TimeEntryBase):
-    pass
+    hours: float = Field(..., ge=0, le=MAX_HOURS_PER_DAY)
 
 
 class TimeEntryUpdate(BaseModel):
@@ -24,7 +28,7 @@ class TimeEntryUpdate(BaseModel):
     project_id: Optional[str] = None
     role_id: Optional[str] = None
     date: Optional[date] = None
-    hours: Optional[float] = None
+    hours: Optional[float] = Field(None, ge=0, le=MAX_HOURS_PER_DAY)
     billable: Optional[bool] = None
     notes: Optional[str] = None
     status: Optional[str] = None
