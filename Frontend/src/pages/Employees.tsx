@@ -55,14 +55,19 @@ const ROLE_BADGE_VARIANT: Record<AppRole, 'default' | 'secondary' | 'outline'> =
 interface RoleCellProps {
   emp: Employee;
   role: AppRole;
+  /** Only true Admins can assign roles (incl. Manager) — Managers can view this
+   * page (they have admin-level access to everything except Invoices) but the
+   * backend rejects role changes from anyone but an admin, so the picker is
+   * hidden rather than shown-then-rejected. */
+  canEditRole: boolean;
   isCurrentUser: boolean;
   isProtected: boolean;
   isLastAdmin: boolean;
   onRequestChange: (emp: Employee, currentRole: AppRole, newRole: AppRole) => void;
 }
 
-function RoleCell({ emp, role, isCurrentUser, isProtected, isLastAdmin, onRequestChange }: RoleCellProps) {
-  const isLocked = isCurrentUser || isProtected || (role === 'admin' && isLastAdmin);
+function RoleCell({ emp, role, canEditRole, isCurrentUser, isProtected, isLastAdmin, onRequestChange }: RoleCellProps) {
+  const isLocked = !canEditRole || isCurrentUser || isProtected || (role === 'admin' && isLastAdmin);
 
   const badge = (
     <Badge variant={ROLE_BADGE_VARIANT[role]} className="gap-1 select-none">
@@ -82,7 +87,9 @@ function RoleCell({ emp, role, isCurrentUser, isProtected, isLastAdmin, onReques
             </span>
           </TooltipTrigger>
           <TooltipContent side="top">
-            {isProtected
+            {!canEditRole
+              ? 'Only admins can change roles'
+              : isProtected
               ? 'Protected account — role cannot be changed'
               : isCurrentUser
               ? 'You cannot change your own role'
@@ -114,7 +121,7 @@ export default function Employees() {
   const { data: employees = [], isLoading } = useEmployees();
   const { data: allAssignments = [] } = useAssignedProjects();
   const { data: roles = [] } = useEmployeeRoles();
-  const { employee: currentUser } = useAuth();
+  const { employee: currentUser, isAdmin } = useAuth();
   const updateRole = useUpdateRole();
   const createEmployee = useCreateEmployee();
 
@@ -270,6 +277,7 @@ export default function Employees() {
                       <RoleCell
                         emp={emp}
                         role={role}
+                        canEditRole={isAdmin}
                         isCurrentUser={isCurrentUser}
                         isProtected={isProtected}
                         isLastAdmin={isLastAdmin}
