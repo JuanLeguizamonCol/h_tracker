@@ -246,7 +246,6 @@ function PersonalInfoTab({ editing, setEditing }: { editing: boolean; setEditing
 
 function CorporateTab() {
   const { data: profile } = useProfile();
-  const { isAdmin } = useAuth();
 
   const rows: [string, string | null | undefined][] = [
     ['Corporate Email', profile?.email],
@@ -524,7 +523,7 @@ function SkillsTab() {
 // ── Main Profile Page ─────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const { employee, isAdmin } = useAuth();
+  const { employee, isAdmin, isManager } = useAuth();
   const { data: profile, isLoading } = useProfile();
   const [editing, setEditing] = useState(false);
 
@@ -552,8 +551,8 @@ export default function ProfilePage() {
             {profile.work_mode && (
               <Badge variant="outline" className="text-xs">{profile.work_mode}</Badge>
             )}
-            <Badge variant={isAdmin ? 'default' : 'secondary'} className="text-xs">
-              {isAdmin ? 'Administrator' : 'Employee'}
+            <Badge variant={isAdmin || isManager ? 'default' : 'secondary'} className="text-xs">
+              {isAdmin ? 'Administrator' : isManager ? 'Manager' : 'Employee'}
             </Badge>
           </div>
         </div>

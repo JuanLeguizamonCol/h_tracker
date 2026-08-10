@@ -18,8 +18,8 @@ from models.employees import Employee
 from models.projects import Project
 from models.clients import Client
 from models.project_roles import ProjectRole
-from models.user_roles import UserRole
 from utils.auth_jwt import get_current_employee
+from utils.roles import get_role
 from services.export_excel import generate_time_entries_report_xlsx
 
 reports_router = APIRouter(prefix="/reports", tags=["reports"])
@@ -28,9 +28,8 @@ reports_router = APIRouter(prefix="/reports", tags=["reports"])
 NO_LOCATION = "__none__"
 
 
-def _is_admin(emp: Employee, db: Session) -> bool:
-    role = db.query(UserRole).filter(UserRole.user_id == emp.id).first()
-    return role is not None and role.role == "admin"
+def _is_manager_or_admin(emp: Employee, db: Session) -> bool:
+    return get_role(db, emp.id) in ("admin", "manager")
 
 
 @reports_router.get("/time-entries/export/xlsx")
@@ -47,8 +46,8 @@ def export_time_entries_xlsx(
     db: Session = Depends(get_db),
     current_employee: Employee = Depends(get_current_employee),
 ):
-    is_admin = _is_admin(current_employee, db)
-    # Non-admins can only ever export their own entries, regardless of params.
+    is_admin = _is_manager_or_admin(current_employee, db)
+    # Regular employees can only ever export their own entries, regardless of params.
     if not is_admin:
         user_id = current_employee.id
 

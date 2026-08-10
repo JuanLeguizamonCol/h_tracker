@@ -19,6 +19,9 @@ const adminNavigationItems = [
   { title: 'Reports', url: '/reports', icon: BarChart3 },
 ];
 
+// Manager = everything Admin has EXCEPT Invoices.
+const managerNavigationItems = adminNavigationItems.filter(item => item.title !== 'Invoices');
+
 const employeeNavigationItems = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboard },
   { title: 'Weekly Log', url: '/timesheet', icon: Clock },
@@ -29,9 +32,13 @@ const employeeNavigationItems = [
 
 export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar();
-  const { isAdmin, employee, signOut } = useAuth();
+  const { isAdmin, isManager, employee, signOut } = useAuth();
   const isCollapsed = state === 'collapsed';
-  const navigationItems = isAdmin ? adminNavigationItems : employeeNavigationItems;
+  const navigationItems = isAdmin
+    ? adminNavigationItems
+    : isManager
+    ? managerNavigationItems
+    : employeeNavigationItems;
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -84,7 +91,7 @@ export function AppSidebar() {
         {!isCollapsed && employee && (
           <div className="px-3 py-2 text-sm text-sidebar-muted">
             <p className="font-medium text-sidebar-foreground">{employee.name}</p>
-            <p className="text-xs">{isAdmin ? 'Administrator' : 'Employee'}</p>
+            <p className="text-xs">{isAdmin ? 'Administrator' : isManager ? 'Manager' : 'Employee'}</p>
           </div>
         )}
         <Button variant="ghost" size={isCollapsed ? 'icon' : 'default'} onClick={signOut} className="w-full text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent">

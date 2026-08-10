@@ -14,7 +14,7 @@ import { Progress } from '@/components/ui/progress';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { employee, isAdmin } = useAuth();
+  const { employee, isAdmin, canManage } = useAuth();
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
 
   const { data: allProjects = [] } = useActiveProjects();
@@ -28,11 +28,11 @@ export default function Dashboard() {
     const billableHours = weekEntries.filter(e => e.billable).reduce((sum, e) => sum + Number(e.hours), 0);
     const nonBillableHours = weekEntries.filter(e => !e.billable).reduce((sum, e) => sum + Number(e.hours), 0);
     const totalHours = billableHours + nonBillableHours;
-    const projectCount = isAdmin ? allProjects.length : assignedProjects.length;
+    const projectCount = canManage ? allProjects.length : assignedProjects.length;
     const draftInvoices = invoices.filter(i => i.status === 'draft').length;
     const unpaidTotal = invoices.filter(i => i.status === 'sent').reduce((sum, i) => sum + Number(i.total), 0);
     return { billableHours, nonBillableHours, totalHours, projectCount, draftInvoices, unpaidTotal };
-  }, [weekEntries, allProjects, assignedProjects, invoices, isAdmin]);
+  }, [weekEntries, allProjects, assignedProjects, invoices, canManage]);
 
   const projectBreakdown = useMemo(() => {
     const breakdown: Record<string, { name: string; hours: number; billable: number }> = {};

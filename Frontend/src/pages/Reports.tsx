@@ -195,7 +195,7 @@ type ViewMode = 'charts' | 'tables' | 'both';
 type TimeGroup = 'daily' | 'weekly';
 
 export default function Reports() {
-  const { employee, isAdmin } = useAuth();
+  const { employee, canManage } = useAuth();
   const [f, setF] = useState<Filters>(INIT);
   const set = <K extends keyof Filters>(key: K, val: Filters[K]) =>
     setF(prev => ({ ...prev, [key]: val }));
@@ -212,12 +212,12 @@ export default function Reports() {
   // org, everyone else sees just their own entries. Without these guards a
   // non-admin also downloaded the org-wide dataset just to discard it.
   const { data: allEntries = [], isLoading: allLoading } =
-    useAllTimeEntriesByDateRange(f.startDate, f.endDate, { enabled: isAdmin });
+    useAllTimeEntriesByDateRange(f.startDate, f.endDate, { enabled: canManage });
   const { data: myEntries = [], isLoading: myLoading } =
-    useTimeEntriesByDateRange(f.startDate, f.endDate, employee?.id, undefined, { enabled: !isAdmin });
+    useTimeEntriesByDateRange(f.startDate, f.endDate, employee?.id, undefined, { enabled: !canManage });
 
-  const rawEntries = isAdmin ? allEntries : myEntries;
-  const isLoading = isAdmin ? allLoading : myLoading;
+  const rawEntries = canManage ? allEntries : myEntries;
+  const isLoading = canManage ? allLoading : myLoading;
 
   // ── Lookup maps ──────────────────────────────────────────────────────────────
   const projectMap  = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
@@ -577,13 +577,13 @@ export default function Reports() {
               options={availableProjects.map(p => ({ value: p.id, label: p.name }))}
               isFiltered={availableProjects.length < projects.length}
               onChange={handleProjectChange} onClear={() => set('projectId', 'all')} />
-            {isAdmin && (
+            {canManage && (
               <FilterSelect label="Employee" value={f.employeeId} allLabel="All Employees"
                 options={availableEmployees.map(e => ({ value: e.id, label: e.name }))}
                 isFiltered={availableEmployees.length < employees.length}
                 onChange={v => set('employeeId', v)} onClear={() => set('employeeId', 'all')} />
             )}
-            {isAdmin && (
+            {canManage && (
               <FilterSelect label="Location" value={f.location} allLabel="All Locations"
                 options={availableLocations}
                 isFiltered={f.location !== 'all'}
@@ -698,7 +698,7 @@ export default function Reports() {
       </Card>
 
       {/* ── Hours by Location ─────────────────────────────────────────────── */}
-      {isAdmin && (
+      {canManage && (
         <Card className="card-elevated">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Hours by Location</CardTitle>
@@ -935,7 +935,7 @@ export default function Reports() {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="table-header">Date</TableHead>
-                        {isAdmin && <TableHead className="table-header">Employee</TableHead>}
+                        {canManage && <TableHead className="table-header">Employee</TableHead>}
                         <TableHead className="table-header">Project</TableHead>
                         <TableHead className="table-header text-right">Hours</TableHead>
                         <TableHead className="table-header">Status</TableHead>
@@ -945,7 +945,7 @@ export default function Reports() {
                       {sortedEntries.slice(0, 100).map(entry => (
                         <TableRow key={entry.id}>
                           <TableCell className="text-sm">{format(parseLocalDate(entry.date), 'MMM d')}</TableCell>
-                          {isAdmin && (
+                          {canManage && (
                             <TableCell className="text-sm">
                               {employeeMap.get(entry.user_id)?.name ?? 'Deleted Employee'}
                             </TableCell>
@@ -966,7 +966,7 @@ export default function Reports() {
                       ))}
                       {sortedEntries.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={isAdmin ? 5 : 4} className="text-center text-muted-foreground py-8">
+                          <TableCell colSpan={canManage ? 5 : 4} className="text-center text-muted-foreground py-8">
                             No entries match the selected filters.
                           </TableCell>
                         </TableRow>

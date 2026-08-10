@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { AdminGuard } from "@/components/AdminGuard";
+import { InvoiceGuard } from "@/components/InvoiceGuard";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { lazy, Suspense } from "react";
 
@@ -66,11 +67,11 @@ const App = () => (
               <Route path="/employees/new" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/employees/:employeeId" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeProfilePage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/employees/:employeeId/edit" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices" element={<ProtectedRoute><MainLayout><Invoices /></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices/new" element={<ProtectedRoute><MainLayout><InvoiceNewPage /></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices/new/manual" element={<ProtectedRoute><MainLayout><InvoiceManualPage /></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices/:invoiceId/edit" element={<ProtectedRoute><MainLayout><InvoiceEditPage /></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices/:invoiceId" element={<ProtectedRoute><MainLayout><InvoiceDetailPage /></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices" element={<ProtectedRoute><MainLayout><InvoiceGuard><Invoices /></InvoiceGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices/new" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceNewPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices/new/manual" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceManualPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices/:invoiceId/edit" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceEditPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices/:invoiceId" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceDetailPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/reports" element={<ProtectedRoute><MainLayout><Reports /></MainLayout></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><MainLayout><ProfilePage /></MainLayout></ProtectedRoute>} />
               {/* Legacy routes */}

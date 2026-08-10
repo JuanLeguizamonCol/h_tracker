@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from utils.auth_jwt import get_current_employee
+from utils.roles import require_admin
 
 # Import routers
 from routers.auth import auth_router
@@ -60,6 +61,12 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 # JWT auth dependency applied to all protected routers
 auth_deps = [Depends(get_current_employee)]
 
+# Invoices module: admin ONLY — Manager gets elevated access everywhere else,
+# but Invoices is explicitly excluded, so it's gated here at registration
+# (previously these routers had no role check at all; any authenticated
+# employee could hit the invoice APIs directly, just not see the nav link).
+invoice_deps = [Depends(get_current_employee), Depends(require_admin)]
+
 # ---------- Routers ----------
 app.include_router(auth_router)  # public — login / register
 app.include_router(clients_router, dependencies=auth_deps)
@@ -69,18 +76,20 @@ app.include_router(project_roles_router, dependencies=auth_deps)
 app.include_router(user_roles_router, dependencies=auth_deps)
 app.include_router(employee_projects_router, dependencies=auth_deps)
 app.include_router(time_entries_router, dependencies=auth_deps)
-app.include_router(invoice_router, dependencies=auth_deps)
-app.include_router(invoice_lines_router, dependencies=auth_deps)
-app.include_router(invoice_manual_lines_router, dependencies=auth_deps)
-app.include_router(invoice_fees_router, dependencies=auth_deps)
-app.include_router(invoice_fee_attachments_router, dependencies=auth_deps)
-app.include_router(invoice_time_entries_router, dependencies=auth_deps)
-app.include_router(invoice_expenses_router, dependencies=auth_deps)
-app.include_router(expensify_router, dependencies=auth_deps)
+app.include_router(invoice_router, dependencies=invoice_deps)
+app.include_router(invoice_lines_router, dependencies=invoice_deps)
+app.include_router(invoice_manual_lines_router, dependencies=invoice_deps)
+app.include_router(invoice_fees_router, dependencies=invoice_deps)
+app.include_router(invoice_fee_attachments_router, dependencies=invoice_deps)
+app.include_router(invoice_time_entries_router, dependencies=invoice_deps)
+app.include_router(invoice_expenses_router, dependencies=invoice_deps)
+# Expensify sync writes InvoiceExpense rows directly onto an invoice — part of
+# the Invoices workflow, gated the same way.
+app.include_router(expensify_router, dependencies=invoice_deps)
 app.include_router(freshsales_router, dependencies=auth_deps)
 app.include_router(skill_catalog_router, dependencies=auth_deps)
 app.include_router(notifications_router, dependencies=auth_deps)
-app.include_router(on_hold_router, dependencies=auth_deps)
+app.include_router(on_hold_router, dependencies=invoice_deps)
 app.include_router(profile_router, dependencies=auth_deps)
 app.include_router(reports_router, dependencies=auth_deps)
 

@@ -19,6 +19,7 @@ import {
 import {
   Tooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -44,7 +45,12 @@ function useUpdateRole() {
   });
 }
 
-// ── Role cell with clickable toggle icon ─────────────────────────────────────
+// ── Role cell — 3-way picker (Employee / Manager / Admin) ────────────────────
+
+const ROLE_LABELS: Record<AppRole, string> = { admin: 'Admin', manager: 'Manager', employee: 'Employee' };
+const ROLE_BADGE_VARIANT: Record<AppRole, 'default' | 'secondary' | 'outline'> = {
+  admin: 'default', manager: 'secondary', employee: 'outline',
+};
 
 interface RoleCellProps {
   emp: Employee;
@@ -52,56 +58,52 @@ interface RoleCellProps {
   isCurrentUser: boolean;
   isProtected: boolean;
   isLastAdmin: boolean;
-  onRequestChange: (emp: Employee) => void;
+  onRequestChange: (emp: Employee, currentRole: AppRole, newRole: AppRole) => void;
 }
 
 function RoleCell({ emp, role, isCurrentUser, isProtected, isLastAdmin, onRequestChange }: RoleCellProps) {
   const isLocked = isCurrentUser || isProtected || (role === 'admin' && isLastAdmin);
 
   const badge = (
-    <Badge variant={role === 'admin' ? 'default' : 'outline'} className="gap-1 select-none">
+    <Badge variant={ROLE_BADGE_VARIANT[role]} className="gap-1 select-none">
       {isProtected ? <Lock className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
-      {role === 'admin' ? 'Admin' : 'Employee'}
+      {ROLE_LABELS[role]}
     </Badge>
   );
 
-  const toggleBtn = isLocked ? (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex items-center justify-center h-6 w-6 rounded text-muted-foreground/40 cursor-default">
-          <Shield className="h-3.5 w-3.5" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        {isProtected
-          ? 'Protected account — role cannot be changed'
-          : isCurrentUser
-          ? 'You cannot change your own role'
-          : 'At least one admin is required'}
-      </TooltipContent>
-    </Tooltip>
-  ) : (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          className="inline-flex items-center justify-center h-6 w-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-          onClick={e => { e.stopPropagation(); onRequestChange(emp); }}
-          aria-label={`Change role for ${emp.name}`}
-        >
-          <Shield className="h-3.5 w-3.5" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        Change to {role === 'admin' ? 'Employee' : 'Admin'}
-      </TooltipContent>
-    </Tooltip>
-  );
+  if (isLocked) {
+    return (
+      <div className="flex items-center gap-1.5">
+        {badge}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center justify-center h-6 w-6 rounded text-muted-foreground/40 cursor-default">
+              <Shield className="h-3.5 w-3.5" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {isProtected
+              ? 'Protected account — role cannot be changed'
+              : isCurrentUser
+              ? 'You cannot change your own role'
+              : 'At least one admin is required'}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-center gap-1.5">
-      {badge}
-      {toggleBtn}
-    </div>
+    <Select value={role} onValueChange={v => onRequestChange(emp, role, v as AppRole)}>
+      <SelectTrigger className="h-7 w-[128px] text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="employee">Employee</SelectItem>
+        <SelectItem value="manager">Manager</SelectItem>
+        <SelectItem value="admin">Admin</SelectItem>
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -121,7 +123,9 @@ export default function Employees() {
   const [quickName, setQuickName] = useState('');
   const [quickEmail, setQuickEmail] = useState('');
   const [quickError, setQuickError] = useState('');
-  const [roleChangeTarget, setRoleChangeTarget] = useState<Employee | null>(null);
+  const [roleChangeTarget, setRoleChangeTarget] = useState<
+    { emp: Employee; currentRole: AppRole; newRole: AppRole } | null
+  >(null);
 
   const getRole = (employeeId: string): AppRole => roles.find(r => r.user_id === employeeId)?.role || 'employee';
   const adminCount = roles.filter(r => r.role === 'admin').length;
@@ -132,17 +136,17 @@ export default function Employees() {
 
   const getAssignedProjectsCount = (employeeId: string): number => allAssignments.filter(a => a.user_id === employeeId).length;
 
-  const handleRequestRoleChange = (emp: Employee) => {
-    setRoleChangeTarget(emp);
+  const handleRequestRoleChange = (emp: Employee, currentRole: AppRole, newRole: AppRole) => {
+    if (newRole === currentRole) return;
+    setRoleChangeTarget({ emp, currentRole, newRole });
   };
 
   const handleRoleConfirm = async () => {
     if (!roleChangeTarget) return;
-    const currentRole = getRole(roleChangeTarget.id);
-    const newRole: AppRole = currentRole === 'admin' ? 'employee' : 'admin';
+    const { emp, newRole } = roleChangeTarget;
     try {
-      await updateRole.mutateAsync({ userId: roleChangeTarget.id, newRole });
-      toast.success(`${roleChangeTarget.name} is now ${newRole === 'admin' ? 'an Admin' : 'an Employee'}.`);
+      await updateRole.mutateAsync({ userId: emp.id, newRole });
+      toast.success(`${emp.name} is now ${ROLE_LABELS[newRole]}.`);
     } catch {
       toast.error('Failed to update role. Please try again.');
     } finally {
@@ -358,9 +362,14 @@ export default function Employees() {
           <DialogHeader>
             <DialogTitle>Change Role</DialogTitle>
             <DialogDescription>
-              Change <strong>{roleChangeTarget?.name}</strong> from{' '}
-              <strong>{roleChangeTarget ? getRole(roleChangeTarget.id) === 'admin' ? 'Admin' : 'Employee' : ''}</strong> to{' '}
-              <strong>{roleChangeTarget ? getRole(roleChangeTarget.id) === 'admin' ? 'Employee' : 'Admin' : ''}</strong>?
+              Change <strong>{roleChangeTarget?.emp.name}</strong> from{' '}
+              <strong>{roleChangeTarget ? ROLE_LABELS[roleChangeTarget.currentRole] : ''}</strong> to{' '}
+              <strong>{roleChangeTarget ? ROLE_LABELS[roleChangeTarget.newRole] : ''}</strong>?
+              {roleChangeTarget?.newRole === 'manager' && (
+                <span className="block mt-2 text-xs text-muted-foreground">
+                  Managers get admin-level access to everything except Invoices.
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

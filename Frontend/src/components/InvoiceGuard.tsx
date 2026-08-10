@@ -4,18 +4,19 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
-// Gates admin-level sections (e.g. Employees) to Admin AND Manager — Manager
-// has elevated access everywhere except Invoices (see InvoiceGuard).
-export function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { canManage, isLoading } = useAuth();
+// Invoices is Admin-only — explicitly excluded from Manager's otherwise
+// full access (see AdminGuard). Previously these routes had no guard at all;
+// any authenticated employee could navigate straight to them.
+export function InvoiceGuard({ children }: { children: React.ReactNode }) {
+  const { isAdmin, isLoading } = useAuth();
   const toasted = useRef(false);
 
   useEffect(() => {
-    if (!isLoading && !canManage && !toasted.current) {
+    if (!isLoading && !isAdmin && !toasted.current) {
       toasted.current = true;
       toast.error("You don't have permission to access this section");
     }
-  }, [canManage, isLoading]);
+  }, [isAdmin, isLoading]);
 
   if (isLoading) {
     return (
@@ -25,7 +26,7 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!canManage) return <Navigate to="/" replace />;
+  if (!isAdmin) return <Navigate to="/" replace />;
 
   return <>{children}</>;
 }

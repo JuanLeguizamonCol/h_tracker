@@ -8,6 +8,11 @@ interface AuthContextType {
   role: AppRole;
   isLoading: boolean;
   isAdmin: boolean;
+  /** True for the 'manager' role only. */
+  isManager: boolean;
+  /** Admin OR manager — elevated access to everything EXCEPT Invoices, which
+   * stays gated behind `isAdmin` alone. */
+  canManage: boolean;
   isAuthenticated: boolean;
   loginWithEntra: () => Promise<void>;
   signOut: () => void;
@@ -76,6 +81,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role,
       isLoading,
       isAdmin: role === 'admin',
+      isManager: role === 'manager',
+      canManage: role === 'admin' || role === 'manager',
       isAuthenticated: !!employee,
       loginWithEntra,
       signOut,

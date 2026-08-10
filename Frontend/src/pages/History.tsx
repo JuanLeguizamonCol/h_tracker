@@ -17,7 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export default function History() {
-  const { employee, isAdmin } = useAuth();
+  const { employee, canManage } = useAuth();
   const [searchParams] = useSearchParams();
 
   // Pre-populate from query params (e.g., from InvoiceEditPage "View in Hours Tracker")
@@ -33,7 +33,7 @@ export default function History() {
 
   // Employee filter — only relevant for admins
   const [selectedUserId, setSelectedUserId] = useState<string>(() => {
-    return isAdmin ? 'all' : (employee?.id || '');
+    return canManage ? 'all' : (employee?.id || '');
   });
 
   // Project filter
@@ -54,10 +54,10 @@ export default function History() {
 
   // Resolve which user_id to filter by (always employees.id — FK used in time_entries)
   const filterUserId = useMemo(() => {
-    if (!isAdmin) return employee?.id;
+    if (!canManage) return employee?.id;
     if (selectedUserId === 'all') return undefined;
     return selectedUserId;
-  }, [isAdmin, employee, selectedUserId]);
+  }, [canManage, employee, selectedUserId]);
 
   const filterProjectId = selectedProjectId || undefined;
 
@@ -101,7 +101,7 @@ export default function History() {
   const getEmployeeName = (userId: string) => employees.find(e => e.id === userId)?.name || 'Unknown Employee';
   const getRoleName = (roleId: string | null) => (roleId ? roleMap.get(roleId) ?? null : null);
 
-  const hasActiveFilters = selectedProjectId || (isAdmin && selectedUserId !== 'all');
+  const hasActiveFilters = selectedProjectId || (canManage && selectedUserId !== 'all');
 
   if (isLoading) {
     return (<div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
@@ -146,7 +146,7 @@ export default function History() {
         </div>
 
         {/* Employee filter (admin only) */}
-        {isAdmin && (
+        {canManage && (
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">Employee</Label>
             <Select value={selectedUserId} onValueChange={setSelectedUserId}>
@@ -190,7 +190,7 @@ export default function History() {
             size="sm"
             className="text-muted-foreground h-9 self-end"
             onClick={() => {
-              setSelectedUserId(isAdmin ? 'all' : (employee?.id || ''));
+              setSelectedUserId(canManage ? 'all' : (employee?.id || ''));
               setSelectedProjectId('');
             }}
           >
@@ -276,7 +276,7 @@ export default function History() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="table-header">Date</TableHead>
-                    {isAdmin && selectedUserId === 'all' && (
+                    {canManage && selectedUserId === 'all' && (
                       <TableHead className="table-header">Employee</TableHead>
                     )}
                     <TableHead className="table-header">Project</TableHead>
@@ -287,7 +287,7 @@ export default function History() {
                   {sortedEntries.map(entry => (
                     <TableRow key={entry.id}>
                       <TableCell>{format(new Date(entry.date), 'MMM d')}</TableCell>
-                      {isAdmin && selectedUserId === 'all' && (
+                      {canManage && selectedUserId === 'all' && (
                         <TableCell>
                           <span className="text-sm font-medium text-foreground">
                             {getEmployeeName(entry.user_id)}
@@ -306,7 +306,7 @@ export default function History() {
                   {sortedEntries.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={isAdmin && selectedUserId === 'all' ? 4 : 3}
+                        colSpan={canManage && selectedUserId === 'all' ? 4 : 3}
                         className="text-center text-muted-foreground py-8"
                       >
                         No entries this month
