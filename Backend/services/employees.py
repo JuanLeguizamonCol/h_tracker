@@ -5,13 +5,11 @@ import uuid
 from models.employees import Employee
 from models.user_roles import UserRole
 from schemas.employees import EmployeeCreate, EmployeeUpdate
-from utils.auth_jwt import hash_password
 
 
 def create_employee(db: Session, employee_in: EmployeeCreate) -> Employee:
     data = employee_in.model_dump(exclude_unset=True)
-    # password / user_role are not columns on Employee — handle them separately.
-    password = data.pop("password", None)
+    # user_role is not a column on Employee — handle it separately.
     role = (data.pop("user_role", None) or "employee").strip().lower()
     # Normalize email to match how login() looks it up (strip + lowercase).
     if data.get("email"):
@@ -26,9 +24,6 @@ def create_employee(db: Session, employee_in: EmployeeCreate) -> Employee:
     if not data.get("user_id"):
         data["user_id"] = data["id"]
     db_employee = Employee(**data)
-    if password:
-        db_employee.password_hash = hash_password(password)
-        db_employee.must_change_password = True
     db.add(db_employee)
     db.flush()
     # Every employee gets an app role so login/authorization works out of the box.

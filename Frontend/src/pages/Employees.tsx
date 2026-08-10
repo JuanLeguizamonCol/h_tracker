@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UserCircle, Search, MoreHorizontal, Edit, Shield, Loader2, FolderKanban, UserPlus, Eye, KeyRound, AlertTriangle, Lock } from 'lucide-react';
+import { UserCircle, Search, MoreHorizontal, Edit, Shield, Loader2, FolderKanban, UserPlus, Eye, Lock } from 'lucide-react';
 import { useEmployees, useCreateEmployee } from '@/hooks/useEmployees';
 import { useAssignedProjects } from '@/hooks/useAssignedProjects';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,7 +14,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
   Tooltip, TooltipContent, TooltipTrigger,
@@ -40,17 +40,6 @@ function useUpdateRole() {
       api.put(`/user-roles/${userId}`, { role: newRole }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-roles'] });
-    },
-  });
-}
-
-function useAdminResetPassword() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ employeeId, temporaryPassword }: { employeeId: string; temporaryPassword: string }) =>
-      api.post(`/auth/admin-reset-password/${employeeId}`, { temporary_password: temporaryPassword }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['employees'] });
     },
   });
 }
@@ -125,7 +114,6 @@ export default function Employees() {
   const { data: roles = [] } = useEmployeeRoles();
   const { employee: currentUser } = useAuth();
   const updateRole = useUpdateRole();
-  const resetPassword = useAdminResetPassword();
   const createEmployee = useCreateEmployee();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -134,10 +122,6 @@ export default function Employees() {
   const [quickEmail, setQuickEmail] = useState('');
   const [quickError, setQuickError] = useState('');
   const [roleChangeTarget, setRoleChangeTarget] = useState<Employee | null>(null);
-  const [isResetPasswordDialogOpen, setIsResetPasswordDialogOpen] = useState(false);
-  const [resetTarget, setResetTarget] = useState<Employee | null>(null);
-  const [temporaryPassword, setTemporaryPassword] = useState('');
-  const [resetPasswordError, setResetPasswordError] = useState('');
 
   const getRole = (employeeId: string): AppRole => roles.find(r => r.user_id === employeeId)?.role || 'employee';
   const adminCount = roles.filter(r => r.role === 'admin').length;
@@ -186,7 +170,7 @@ export default function Employees() {
     }
     try {
       const created = await createEmployee.mutateAsync({ name, email });
-      toast.success(`${created.name} fue creado. Se le envió un correo para configurar su contraseña.`);
+      toast.success(`${created.name} fue creado. Ya puede iniciar sesión con su cuenta de Microsoft.`);
       setQuickAddOpen(false);
     } catch (err) {
       const msg =
@@ -194,28 +178,6 @@ export default function Employees() {
           ? 'Ya existe un empleado con ese correo.'
           : 'No se pudo crear el empleado. Intenta de nuevo.';
       setQuickError(msg);
-    }
-  };
-
-  const handleOpenResetPasswordDialog = (emp: Employee) => {
-    setResetTarget(emp);
-    setTemporaryPassword('');
-    setResetPasswordError('');
-    setIsResetPasswordDialogOpen(true);
-  };
-
-  const handleResetPassword = async () => {
-    if (!resetTarget) return;
-    if (temporaryPassword.length < 8) {
-      setResetPasswordError('Password must be at least 8 characters.');
-      return;
-    }
-    try {
-      await resetPassword.mutateAsync({ employeeId: resetTarget.id, temporaryPassword });
-      toast.success(`Password reset for ${resetTarget.name}. They will be prompted to change it on next login.`);
-      setIsResetPasswordDialogOpen(false);
-    } catch {
-      toast.error('Failed to reset password. Please try again.');
     }
   };
 
@@ -294,11 +256,6 @@ export default function Employees() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-medium">{emp.name}</span>
-                            {emp.must_change_password && (
-                              <Badge variant="outline" className="gap-1 border-amber-400 text-amber-600 dark:text-amber-400 text-xs py-0">
-                                <AlertTriangle className="h-3 w-3" />Password pending
-                              </Badge>
-                            )}
                           </div>
                           {emp.title && <p className="text-xs text-muted-foreground">{emp.title}</p>}
                         </div>
@@ -328,10 +285,6 @@ export default function Employees() {
                           <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}/edit`)}>
                             <Edit className="h-4 w-4 mr-2" />Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleOpenResetPasswordDialog(emp)}>
-                            <KeyRound className="h-4 w-4 mr-2" />Reset Password
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -352,8 +305,8 @@ export default function Employees() {
           <DialogHeader>
             <DialogTitle>New Employee</DialogTitle>
             <DialogDescription>
-              Crea un empleado rápidamente con solo nombre y correo corporativo. Recibirá un correo
-              para configurar su contraseña, y podrás completar el resto de los datos más tarde.
+              Crea un empleado rápidamente con solo nombre y correo corporativo. Podrá iniciar
+              sesión con su cuenta de Microsoft, y podrás completar el resto de los datos más tarde.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
@@ -414,37 +367,6 @@ export default function Employees() {
             <Button variant="outline" onClick={() => setRoleChangeTarget(null)}>Cancel</Button>
             <Button onClick={handleRoleConfirm} disabled={updateRole.isPending}>
               {updateRole.isPending ? 'Saving...' : 'Confirm'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reset Password Dialog */}
-      <Dialog open={isResetPasswordDialogOpen} onOpenChange={setIsResetPasswordDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Reset Password</DialogTitle>
-            <DialogDescription>
-              Set a temporary password for <strong>{resetTarget?.name}</strong>. They will be required to change it on their next login.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="temp-password">Temporary Password</Label>
-              <Input
-                id="temp-password"
-                type="text"
-                value={temporaryPassword}
-                onChange={e => { setTemporaryPassword(e.target.value); setResetPasswordError(''); }}
-                placeholder="At least 8 characters"
-              />
-              {resetPasswordError && <p className="text-xs text-destructive">{resetPasswordError}</p>}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsResetPasswordDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleResetPassword} disabled={resetPassword.isPending}>
-              {resetPassword.isPending ? 'Resetting...' : 'Reset Password'}
             </Button>
           </DialogFooter>
         </DialogContent>

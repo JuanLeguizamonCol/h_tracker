@@ -2,18 +2,19 @@
 Idempotent admin bootstrap.
 
 Runs at container startup (before uvicorn) so a fresh deployment always has at
-least one admin account to log in with — the app no longer ships seed data.
+least one admin account able to sign in — the app no longer ships seed data.
+Login is via "Sign in with Microsoft" (Entra ID); this job only makes sure the
+Employee record and 'admin' role exist so ADMIN_EMAIL's Entra ID account
+lands as an admin on first login.
 
 Behaviour (safe to run on every boot):
-  - If ADMIN_EMAIL / ADMIN_PASSWORD are unset  → no-op (logs and returns).
-  - If the employee does not exist             → create it + grant 'admin' role,
-                                                  with must_change_password=True.
-  - If the employee already exists             → ensure it has the 'admin' role;
-                                                  NEVER overwrite an existing password.
+  - If ADMIN_EMAIL is unset             → no-op (logs and returns).
+  - If the employee does not exist      → create it + grant 'admin' role.
+  - If the employee already exists      → ensure it has the 'admin' role.
 
 Env vars:
-    ADMIN_EMAIL       Admin login email (required to do anything).
-    ADMIN_PASSWORD    Initial password, min 8 chars (required to do anything).
+    ADMIN_EMAIL       Admin account email (required to do anything). Must
+                       match the Entra ID account that should have admin access.
     ADMIN_NAME        Display name (optional; defaults to the email local-part).
 
 Run:
@@ -36,18 +37,13 @@ def run() -> int:
     from config.database import SessionLocal
     from models.employees import Employee
     from models.user_roles import UserRole
-    from utils.auth_jwt import hash_password
 
     email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
-    password = os.getenv("ADMIN_PASSWORD") or ""
     name = (os.getenv("ADMIN_NAME") or "").strip()
 
-    if not email or not password:
-        logger.info("ADMIN_EMAIL / ADMIN_PASSWORD not set — skipping admin bootstrap.")
+    if not email:
+        logger.info("ADMIN_EMAIL not set — skipping admin bootstrap.")
         return 0
-    if len(password) < 8:
-        logger.error("ADMIN_PASSWORD must be at least 8 characters — skipping admin bootstrap.")
-        return 1
 
     if not name:
         name = email.split("@", 1)[0]
@@ -63,9 +59,7 @@ def run() -> int:
                 user_id=emp_id,
                 name=name,
                 email=email,
-                password_hash=hash_password(password),
                 is_active=True,
-                must_change_password=True,   # force a change on first login
             )
             db.add(emp)
             try:

@@ -10,7 +10,6 @@
 #   AZURE_SUBSCRIPTION_ID — Azure subscription ID
 #   DB_PASSWORD           — PostgreSQL admin password (passed to Bicep)
 #   JWT_SECRET_KEY        — FastAPI JWT signing key (passed to Bicep)
-#   ADMIN_PASSWORD        — Initial admin account password (passed to Bicep)
 #
 # The backend URL is injected into the frontend at RUNTIME (via /config.js from
 # the BACKEND_URL env var), not baked in at build time — so a single deploy is
@@ -130,7 +129,6 @@ jobs:
           # main.bicepparam (mixing bicepparam + inline --parameters fails BCP258).
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           # Optional — invitation emails via Microsoft Graph. Empty if unset;
           # email stays disabled and the deploy still succeeds.
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}

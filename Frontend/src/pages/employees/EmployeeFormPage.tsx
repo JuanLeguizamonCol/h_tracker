@@ -83,13 +83,12 @@ type FormData = {
   employment_status: string;
   notes: string;
   // Account access (create-only)
-  password: string;
   user_role: string;
 };
 
 const EMPTY: FormData = {
   name: '', email: '', is_active: true,
-  password: '', user_role: 'employee',
+  user_role: 'employee',
   title: '', department: '', business_unit: '', supervisor_id: '',
   first_name: '', last_name: '', date_of_birth: '', gender: '',
   personal_email: '', personal_phone: '', id_number: '',
@@ -132,7 +131,6 @@ function employeeToForm(e: Employee): FormData {
     end_date: e.end_date || '',
     employment_status: e.employment_status || '',
     notes: e.notes || '',
-    password: '',
     user_role: 'employee',
   };
 }
@@ -279,10 +277,6 @@ export default function EmployeeFormPage() {
       toast.error('Name and email are required.');
       return;
     }
-    if (!isEdit && form.password && form.password.length < 8) {
-      toast.error('Temporary password must be at least 8 characters.');
-      return;
-    }
     setIsSaving(true);
     try {
       let savedId = employeeId;
@@ -292,7 +286,6 @@ export default function EmployeeFormPage() {
         const payload = {
           ...toPayload(form),
           user_role: form.user_role || 'employee',
-          ...(form.password ? { password: form.password } : {}),
         };
         const created = await createEmployee.mutateAsync(payload);
         savedId = created.id;
@@ -525,19 +518,6 @@ export default function EmployeeFormPage() {
                 <SelectItem value="admin">Admin</SelectItem>
               </SelectContent>
             </Select>
-          </Field>
-          <Field label="Temporary Password">
-            <Input
-              type="password"
-              value={form.password}
-              onChange={e => set('password', e.target.value)}
-              placeholder="Min. 8 characters"
-              autoComplete="new-password"
-            />
-            <p className="text-xs text-muted-foreground">
-              Optional. If set, the employee must change it on first login. Leave blank to set a
-              password later via “Reset Password”.
-            </p>
           </Field>
         </Section>
       )}

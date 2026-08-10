@@ -40,7 +40,6 @@ export interface Employee {
   employment_status: string | null;
   billing_currency: string | null;
   notes: string | null;
-  must_change_password: boolean;
 }
 
 export interface SkillCatalog {

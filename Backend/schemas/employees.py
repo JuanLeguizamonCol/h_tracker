@@ -44,8 +44,6 @@ class EmployeeBase(BaseModel):
 
 class EmployeeCreate(EmployeeBase):
     user_id: Optional[str] = None
-    # Optional initial credentials / app role set by an admin at creation time.
-    password: Optional[str] = None
     user_role: Optional[str] = "employee"
 
 
@@ -95,4 +93,3 @@ class EmployeeOut(EmployeeBase):
     user_id: str
     created_at: datetime
     updated_at: datetime
-    must_change_password: bool = True

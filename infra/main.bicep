@@ -39,12 +39,8 @@ param jwtSecretKey string
 @description('Email of the initial admin account created idempotently at startup.')
 param adminEmail string = 'jleguizamon@impactpoint.com'
 
-@description('Comma-separated email domains allowed to self-register. Empty string disables self-registration.')
+@description('Comma-separated email domains allowed to sign in via Entra ID. Empty string disables sign-in entirely.')
 param allowedEmailDomains string = 'impactpoint.com'
-
-@description('Initial password for the admin account (min 8 chars). Passed at deploy time; never stored in source.')
-@secure()
-param adminPassword string
 
 @description('COP to USD exchange rate.')
 param copToUsdRate string = '4200'
@@ -294,10 +290,6 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
           value: jwtSecretKey
         }
         {
-          name: 'admin-password'
-          value: adminPassword
-        }
-        {
           name: 'storage-connection-string'
           value: storageConnectionString
         }
@@ -361,10 +353,6 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'ADMIN_EMAIL'
               value: adminEmail
-            }
-            {
-              name: 'ADMIN_PASSWORD'
-              secretRef: 'admin-password'
             }
             {
               name: 'ALLOWED_EMAIL_DOMAINS'

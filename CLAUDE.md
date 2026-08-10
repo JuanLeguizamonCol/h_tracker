@@ -39,19 +39,20 @@ H_Tracker/
 │   │   ├── bootstrap_admin.py     #   crea el admin inicial (idempotente, al arranque)
 │   │   └── generate_invoices.py   #   generación programada de facturas (Container Apps Job)
 │   ├── utils/
-│   │   ├── auth_jwt.py            # hash/verify password, create/verify JWT
+│   │   ├── auth_jwt.py            # create/verify internal JWT (get_current_employee)
+│   │   ├── auth_entra.py          # valida id_token de Entra ID contra el JWKS del tenant
 │   │   └── blob_storage.py       # Azure Blob (upload/SAS/delete) con fallback local
-│   ├── alembic/versions/          # 25 migraciones (001–025)
-│   ├── reset_all_passwords.py     # Utilidad admin (manual)
+│   ├── alembic/versions/          # 30 migraciones (001–030)
 │   └── requirements.txt
 ├── Frontend/
-│   ├── public/config.js          # Config runtime (window.__ENV__.API_URL) — reescrito al arranque
+│   ├── public/config.js          # Config runtime (window.__ENV__.{API_URL, ENTRA_CLIENT_ID, ENTRA_TENANT_ID}) — reescrito al arranque
 │   ├── src/
 │   │   ├── App.tsx                # Rutas React Router (lazy loading)
 │   │   ├── pages/                 # ~14 páginas
 │   │   ├── hooks/                 # ~15 archivos de hooks (React Query)
 │   │   ├── components/ui/         # Shadcn/ui components
-│   │   ├── contexts/AuthContext.tsx  # login(email,password) → JWT en localStorage
+│   │   ├── lib/msal.ts            # PublicClientApplication (MSAL) para Sign in with Microsoft
+│   │   ├── contexts/AuthContext.tsx  # loginWithEntra() → JWT en localStorage
 │   │   ├── lib/api.ts             # Cliente HTTP (fetch + Bearer token)
 │   │   └── types/index.ts         # Tipos TypeScript globales
 ├── infra/                         # IaC de Azure
@@ -81,9 +82,10 @@ frontend  → puerto 3000:80
 ```
 DATABASE_URL                     postgresql://hours_user:hours_pass@postgres:5432/hours_tracker
 JWT_SECRET_KEY                   clave de firma de tokens (obligatoria en prod)
-ADMIN_EMAIL / ADMIN_PASSWORD     admin inicial creado idempotentemente al arranque
+ENTRA_TENANT_ID / ENTRA_CLIENT_ID  App Registration (SPA, sin secreto) para Sign in with Microsoft — obligatorios para poder loguearse
+ADMIN_EMAIL                      admin inicial (debe coincidir con su cuenta de Entra ID), creado idempotentemente al arranque
 ADMIN_NAME                       (opcional) nombre del admin
-ALLOWED_EMAIL_DOMAINS            dominios permitidos para /auth/register (default: impactpoint.com)
+ALLOWED_EMAIL_DOMAINS            dominios permitidos para iniciar sesión (default: impactpoint.com)
 CORS_ORIGINS                     http://localhost:8080,http://localhost:3000
 UPLOAD_DIR                       /app/uploads (fallback si no hay Blob)
 AZURE_STORAGE_CONNECTION_STRING  si está seteada, los adjuntos van a Blob Storage
@@ -121,7 +123,7 @@ Los principales (hay más: skills, costos internos, secuencias de numeración, o
 
 | Modelo | Tabla | Descripción |
 |--------|-------|-------------|
-| Employee | employees | Perfil de empleado + credenciales (email, password_hash, must_change_password, title, department, business_unit) |
+| Employee | employees | Perfil de empleado (email, title, department, business_unit) — sin credenciales, login es vía Entra ID |
 | Client | clients | Cliente con campos de facturación extendidos |
 | Project | projects | Proyecto con client_id, manager_id, status, is_internal, project_code |
 | ProjectCategory | project_categories | Categorías (area_category / business_unit) |
@@ -392,7 +394,7 @@ según `billing_period` (monthly/bimonthly/quarterly/weekly/biweekly/custom).
 
 ## Migraciones Alembic
 
-25 migraciones (001–025). Hitos:
+30 migraciones (001–030). Hitos:
 
 | Revisión | Descripción |
 |----------|-------------|
@@ -402,8 +404,9 @@ según `billing_period` (monthly/bimonthly/quarterly/weekly/biweekly/custom).
 | 006 | Tabla scheduler_log |
 | 010 | Notifications |
 | 017–022 | Numeración de facturas por empresa (secuencias, normalización) |
-| 023–024 | Auth por contraseña (`password_hash`, `must_change_password`) |
+| 023–024 | Auth por contraseña (`password_hash`, `must_change_password`) — reemplazado por Entra ID |
 | 025 | `invoices.auto_generated` + índice único parcial anti-duplicados |
+| 030 | Elimina `password_hash`/`must_change_password` (login exclusivo por Entra ID) |
 
 Para correr migraciones:
 ```bash
@@ -447,43 +450,38 @@ InvoiceNewPage:
 
 ---
 
-## Autenticación (usuario/contraseña → JWT, + Sign in with Microsoft opcional)
+## Autenticación (exclusivamente Sign in with Microsoft — Entra ID)
 
-No hay modo mock. El backend siempre emite su propio JWT (HS256); Entra ID, cuando
-está configurado, es solo un método adicional de acreditación en el login — no
-reemplaza el modelo de roles ni el JWT interno.
+No hay Azure AD mock ni login por contraseña — se eliminó por completo (endpoints,
+columnas `password_hash`/`must_change_password`, UI de reset/cambio/invitación).
+El único método de acceso es la cuenta de Microsoft (Entra ID) del tenant de
+Impact Point. Requiere `ENTRA_TENANT_ID`/`ENTRA_CLIENT_ID` configurados (backend
+y frontend) — sin ellos, nadie puede iniciar sesión.
 
-### Password (siempre disponible)
-1. `POST /auth/login` con `{email, password}` → JWT (HS256, exp 7 días, `sub` = `employee.id`).
-2. El frontend guarda el token en `localStorage` (`auth_token`) y lo envía como `Bearer`.
-3. `get_current_employee` (en `utils/auth_jwt.py`) valida el token en cada request y
-   carga el `Employee` activo. Es dependencia global de todos los routers salvo `/auth`.
-
-- Contraseñas hasheadas con bcrypt (passlib). `must_change_password` fuerza cambio en el primer login.
-- Admin inicial: creado idempotentemente al arranque por `jobs/bootstrap_admin.py`
-  desde `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
-- Autoregistro (`/auth/register`) restringido a `ALLOWED_EMAIL_DOMAINS`.
-
-### Sign in with Microsoft (Entra ID, opcional)
-Habilitado solo si `ENTRA_TENANT_ID`/`ENTRA_CLIENT_ID` están seteados (backend y
-frontend); si no, el botón simplemente no aparece en `/auth`. Es un **token
-exchange**, no doble validación en cada request:
+Es un **token exchange**, no doble validación en cada request:
 1. Frontend (MSAL, `lib/msal.ts`) hace `loginPopup` contra el tenant de Impact Point
    y obtiene un `id_token` de Microsoft.
 2. `POST /auth/login/entra` con `{id_token}` → `utils/auth_entra.py` lo valida
    (firma RS256 contra el JWKS del tenant, `aud`/`iss`/`tid`), saca el email
    (`preferred_username`), y si pasa `ALLOWED_EMAIL_DOMAINS`:
    - Busca `Employee` por email; si no existe, lo autoprovisiona con rol `employee`
-     (un admin lo asciende después desde `/employees`, igual que hoy).
-   - Emite el **mismo JWT interno** (`create_access_token`) → respuesta idéntica a
-     `/auth/login`. Todo lo demás (`get_current_employee`, roles, `ProtectedRoute`)
-     no sabe ni le importa cómo se autenticó el usuario.
-- App Registration: SPA pública (sin client secret, PKCE), single-tenant. Se crea
+     (un admin lo asciende después desde `/employees`, igual que hoy). Un `Employee`
+     precreado manualmente por un admin (sin cuenta de Microsoft aún) simplemente
+     "activa" ese registro existente en su primer login — mismo matching por email.
+   - Emite el JWT interno de la app (`create_access_token`, HS256, exp 7 días,
+     `sub` = `employee.id`).
+3. El frontend guarda el token en `localStorage` (`auth_token`) y lo envía como
+   `Bearer`. `get_current_employee` (en `utils/auth_jwt.py`) lo valida en cada
+   request y carga el `Employee` activo — dependencia global de todos los routers
+   salvo `/auth`.
+- App Registration: SPA pública (sin client secret, PKCE), single-tenant. Se creó
   una sola vez vía `az cli` (ver comentarios en `infra/main.bicepparam`).
+- Admin inicial: `jobs/bootstrap_admin.py` asegura idempotentemente que exista el
+  `Employee` + rol `admin` para `ADMIN_EMAIL` al arrancar — esa persona entra con
+  su cuenta de Microsoft (mismo email), sin password de por medio.
 
 En `AuthContext.tsx`:
-- `login(email, password)` / `loginWithEntra()` → ambos terminan guardando el mismo
-  token y llamando `GET /auth/me` para cargar el Employee.
+- `loginWithEntra()` → guarda el token y llama `GET /auth/me` para cargar el Employee.
 - `employee.id` = UUID interno; `employee.user_id` = identificador interno propio.
 
 **IMPORTANTE:** Al crear `TimeEntry`, usar siempre `employee.id` como `user_id`,
@@ -515,8 +513,8 @@ docker exec h_tracker-backend-1 alembic upgrade head
 # Ejecutar el job de facturas manualmente (mismo entrypoint que el Container Apps Job)
 docker exec h_tracker-backend-1 python -m jobs.generate_invoices
 
-# Crear/asegurar admin manualmente
-docker exec -e ADMIN_EMAIL=... -e ADMIN_PASSWORD=... h_tracker-backend-1 python -m jobs.bootstrap_admin
+# Crear/asegurar admin manualmente (debe coincidir con su cuenta de Entra ID)
+docker exec -e ADMIN_EMAIL=... h_tracker-backend-1 python -m jobs.bootstrap_admin
 ```
 
 ---
@@ -544,7 +542,10 @@ contenedor Blob, Container Apps Environment, backend app, frontend app y el
 federated credential (OIDC, sin secretos) y roles.
 
 **Secrets de GitHub requeridos:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-`AZURE_SUBSCRIPTION_ID`, `DB_PASSWORD`, `JWT_SECRET_KEY`, `ADMIN_PASSWORD`.
+`AZURE_SUBSCRIPTION_ID`, `DB_PASSWORD`, `JWT_SECRET_KEY`.
+
+**Variables de GitHub requeridas (no secretas):** `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`
+(App Registration de Sign in with Microsoft).
 
 **Pipeline (push a `master`):** build+push de imágenes a ACR → `az deployment group create`
 (Bicep) → update de imágenes al tag SHA (backend, frontend, job) → patch de `CORS_ORIGINS`.

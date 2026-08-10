@@ -52,16 +52,14 @@ param dbAdminPassword = readEnvironmentVariable('DB_PASSWORD')
 // JWT signing key (min 32 chars). Generate with: openssl rand -base64 48
 param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY')
 
-// Initial admin account. Email is safe to keep here; the password comes from the
-// ADMIN_PASSWORD env var (CI secret). The admin is created idempotently at backend
-// startup with must_change_password=true.
-param adminPassword = readEnvironmentVariable('ADMIN_PASSWORD')
+// Initial admin account. Must match the Entra ID (Microsoft) account that
+// should have admin access — the admin is created idempotently at backend
+// startup, no password involved.
 param adminEmail = 'jleguizamon@impactpoint.com'
 
-// Auth is username/password → JWT by default. "Sign in with Microsoft" (Entra ID)
-// is additionally enabled when these are set (App Registration created once via
-// az cli — see project docs). Not secret — the client id is public by design for
-// a SPA, and the tenant id is not sensitive.
+// Auth is exclusively "Sign in with Microsoft" (Entra ID) — App Registration
+// created once via az cli, see project docs. Not secret — the client id is
+// public by design for a SPA, and the tenant id is not sensitive.
 param entraTenantId = readEnvironmentVariable('ENTRA_TENANT_ID', '')
 param entraClientId = readEnvironmentVariable('ENTRA_CLIENT_ID', '')
 

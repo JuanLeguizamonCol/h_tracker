@@ -1,19 +1,14 @@
 import { useState } from 'react';
-import { Navigate, Link } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Clock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { isEntraConfigured } from '@/lib/msal';
 
 export default function Auth() {
-  const { isAuthenticated, isLoading, login, loginWithEntra } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const { isAuthenticated, isLoading, loginWithEntra } = useAuth();
   const [entraSubmitting, setEntraSubmitting] = useState(false);
 
   if (isLoading) {
@@ -27,18 +22,6 @@ export default function Auth() {
   if (isAuthenticated) {
     return <Navigate to="/" replace />;
   }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    try {
-      await login(email.trim().toLowerCase(), password);
-    } catch {
-      toast.error('Incorrect email or password.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const handleEntraLogin = async () => {
     setEntraSubmitting(true);
@@ -64,63 +47,21 @@ export default function Auth() {
         </CardHeader>
 
         <CardContent className="pt-4 pb-8">
-          {isEntraConfigured && (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full h-11 mb-4"
-                disabled={entraSubmitting}
-                onClick={handleEntraLogin}
-              >
-                {entraSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Sign in with Microsoft
-              </Button>
-              <div className="relative mb-4">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">or</span>
-                </div>
-              </div>
-            </>
-          )}
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@impactpoint.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                autoFocus
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full h-11 mt-2" disabled={submitting}>
-              {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Sign In
+          {isEntraConfigured ? (
+            <Button
+              type="button"
+              className="w-full h-11"
+              disabled={entraSubmitting}
+              onClick={handleEntraLogin}
+            >
+              {entraSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Sign in with Microsoft
             </Button>
-          </form>
-          <p className="text-center text-sm mt-4">
-            <Link to="/forgot-password" className="text-primary hover:underline">Forgot your password?</Link>
-          </p>
-          <p className="text-center text-sm text-muted-foreground mt-4">
-            Don't have an account?{' '}
-            <Link to="/register" className="text-primary hover:underline">Create one</Link>
-          </p>
+          ) : (
+            <p className="text-center text-sm text-muted-foreground">
+              Microsoft sign-in is not configured on this server.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

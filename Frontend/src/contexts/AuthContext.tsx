@@ -9,8 +9,6 @@ interface AuthContextType {
   isLoading: boolean;
   isAdmin: boolean;
   isAuthenticated: boolean;
-  mustChangePassword: boolean;
-  login: (email: string, password: string) => Promise<void>;
   loginWithEntra: () => Promise<void>;
   signOut: () => void;
   refreshProfile: () => Promise<void>;
@@ -54,15 +52,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [loadProfile]);
 
-  const login = async (email: string, password: string) => {
-    const result = await api.post<{ access_token: string; token_type: string }>(
-      '/auth/login',
-      { email, password },
-    );
-    setStoredToken(result.access_token);
-    await loadProfile();
-  };
-
   const loginWithEntra = async () => {
     await ensureMsalInitialized();
     const popupResult = await msalInstance.loginPopup({ scopes: ['openid', 'profile', 'email'] });
@@ -88,8 +77,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       isAdmin: role === 'admin',
       isAuthenticated: !!employee,
-      mustChangePassword: !!employee?.must_change_password,
-      login,
       loginWithEntra,
       signOut,
       refreshProfile: loadProfile,
