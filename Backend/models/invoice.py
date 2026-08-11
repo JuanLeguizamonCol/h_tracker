@@ -28,6 +28,13 @@ class Invoice(Base):
     discount = Column(Numeric(12, 2), nullable=False, default=0)
     total = Column(Numeric(12, 2), nullable=False, default=0)
     cap_amount = Column(Numeric(12, 2), nullable=True)
+    # When set, this invoice bills a single flat fee regardless of hours —
+    # subtotal/total are locked to this value instead of being summed from lines.
+    # Used both by Fixed Fee projects and Managed Services projects (where the
+    # amount is computed from a minimum-hours package instead of typed in).
+    fixed_fee_amount = Column(Numeric(12, 2), nullable=True)
+    # Managed Services snapshot — the package minimum in effect for this invoice.
+    managed_services_min_hours = Column(Numeric(10, 2), nullable=True)
     notes = Column(String, nullable=True)
     invoice_number = Column(String, unique=True, nullable=True)
     issue_date = Column(Date, nullable=True)

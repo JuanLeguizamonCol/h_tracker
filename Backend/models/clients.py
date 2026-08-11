@@ -19,6 +19,7 @@ class Client(Base):
     manager_phone = Column(String, nullable=True)
     # Extended billing fields
     client_code = Column(String, nullable=True)
+    client_number = Column(String(20), nullable=True, unique=True)
     salutation = Column(String, nullable=True)
     first_name = Column(String, nullable=True)
     middle_initial = Column(String, nullable=True)

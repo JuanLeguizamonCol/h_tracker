@@ -1,18 +1,28 @@
 from typing import List, Optional
 from datetime import date
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from models.invoice import Invoice
+from models.projects import Project
+from models.clients import Client
 from schemas.invoice import InvoiceCreate, InvoiceUpdate
-from services.invoice_number_service import atomic_generate_number
+from services.invoice_number_service import atomic_generate_number_for_client
 
 
 def create_invoice(db: Session, invoice_in: InvoiceCreate) -> Invoice:
     data = invoice_in.model_dump(exclude_unset=True)
     invoice = Invoice(**data)
+
+    project = db.query(Project).filter(Project.id == invoice.project_id).first()
+    client = db.query(Client).filter(Client.id == project.client_id).first() if project else None
+    if not client or not client.client_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This client has no Client Number set. Add one in the client's record before generating invoices.",
+        )
     # Auto-generate invoice number — never user-supplied
-    company = data.get('owner_company', 'IPC')
-    invoice.invoice_number = atomic_generate_number(db, company)
+    invoice.invoice_number = atomic_generate_number_for_client(db, client.id, client.client_number)
     db.add(invoice)
     db.commit()
     db.refresh(invoice)

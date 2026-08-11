@@ -22,6 +22,7 @@ const CURRENCIES = ['USD', 'EUR', 'COP', 'GBP', 'CAD', 'MXN'];
 
 type FormData = {
   name: string;
+  client_number: string;
   is_active: boolean;
   industry: string;
   website: string;
@@ -51,7 +52,7 @@ type FormData = {
 };
 
 const EMPTY: FormData = {
-  name: '', is_active: true, industry: '', website: '', tax_id: '', notes: '',
+  name: '', client_number: '', is_active: true, industry: '', website: '', tax_id: '', notes: '',
   email: '', phone: '', street_address_1: '', street_address_2: '', city: '', state: '', zip: '', country: '',
   manager_name: '', manager_email: '', manager_phone: '', job_title: '',
   referral_source: '', referred_by: '', acquisition_date: '', contract_start_date: '', contract_end_date: '',
@@ -61,6 +62,7 @@ const EMPTY: FormData = {
 function clientToForm(c: Client): FormData {
   return {
     name: c.name,
+    client_number: c.client_number || '',
     is_active: c.is_active,
     industry: c.industry || '',
     website: c.website || '',
@@ -93,6 +95,7 @@ function clientToForm(c: Client): FormData {
 function toPayload(f: FormData): Partial<Client> & { name: string } {
   return {
     name: f.name,
+    client_number: f.client_number || null,
     is_active: f.is_active,
     industry: f.industry || null,
     website: f.website || null,
@@ -213,8 +216,13 @@ export default function ClientFormPage() {
         navigate('/clients');
         void created;
       }
-    } catch {
-      toast.error('Something went wrong. Please try again.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('already in use')) {
+        toast.error('That Client Number is already in use by another client.');
+      } else {
+        toast.error('Something went wrong. Please try again.');
+      }
     } finally {
       setIsSaving(false);
     }
@@ -283,6 +291,16 @@ export default function ClientFormPage() {
       <Section title="Basic Information">
         <Field label="Name" required full>
           <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. TechCorp Inc." />
+        </Field>
+        <Field label="Client Number">
+          <Input
+            value={form.client_number}
+            onChange={e => set('client_number', e.target.value)}
+            placeholder="e.g. 12"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Used to number this client's invoices (e.g. "{form.client_number || '12'}-1", "{form.client_number || '12'}-2"...). Must be unique.
+          </p>
         </Field>
         <Field label="Industry">
           <Select value={form.industry || '_none'} onValueChange={v => set('industry', v === '_none' ? '' : v)}>
@@ -381,9 +399,9 @@ export default function ClientFormPage() {
         </Field>
       </Section>
 
-      {/* Billing & Commercial */}
-      <Section title="Billing & Commercial">
-        <Field label="Billing Rate">
+      {/* Referall Fees */}
+      <Section title="Referall Fees">
+        <Field label="Referall Rate">
           <div className="flex gap-2">
             <Input
               value={form.billing_rate}

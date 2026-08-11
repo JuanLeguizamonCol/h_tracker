@@ -44,6 +44,10 @@ interface Step1Form {
   billing_day_of_period: string;
   custom_period_days: string;
   billing_anchor_date: string;
+  is_fixed_fee: boolean;
+  fixed_fee_amount: string;
+  is_managed_services: boolean;
+  managed_services_min_hours: string;
 }
 
 // ── Step 2 form state
@@ -96,6 +100,10 @@ export default function ProjectNewPage() {
     billing_day_of_period: '3',
     custom_period_days: '',
     billing_anchor_date: '',
+    is_fixed_fee: false,
+    fixed_fee_amount: '',
+    is_managed_services: false,
+    managed_services_min_hours: '',
   });
 
   const set = (field: keyof Step1Form, value: any) =>
@@ -149,6 +157,14 @@ export default function ProjectNewPage() {
     if (!form.manager_id) { toast.error('Project manager is required.'); return false; }
     if (!form.start_date) { toast.error('Start date is required.'); return false; }
     if (!form.status) { toast.error('Status is required.'); return false; }
+    if (form.is_fixed_fee && (!form.fixed_fee_amount || parseFloat(form.fixed_fee_amount) <= 0)) {
+      toast.error('Enter a fixed fee amount.');
+      return false;
+    }
+    if (form.is_managed_services && (!form.managed_services_min_hours || parseFloat(form.managed_services_min_hours) <= 0)) {
+      toast.error('Enter the minimum hours package.');
+      return false;
+    }
     return true;
   };
 
@@ -184,6 +200,10 @@ export default function ProjectNewPage() {
         billing_day_of_period: form.billing_day_of_period ? parseInt(form.billing_day_of_period) : undefined,
         custom_period_days: form.custom_period_days ? parseInt(form.custom_period_days) : undefined,
         billing_anchor_date: form.billing_anchor_date || undefined,
+        is_fixed_fee: form.is_fixed_fee,
+        fixed_fee_amount: form.is_fixed_fee && form.fixed_fee_amount ? parseFloat(form.fixed_fee_amount) : undefined,
+        is_managed_services: form.is_managed_services,
+        managed_services_min_hours: form.is_managed_services && form.managed_services_min_hours ? parseFloat(form.managed_services_min_hours) : undefined,
       } as any);
 
       // 2. Create roles (collect created role IDs by temp ID)
@@ -478,6 +498,60 @@ export default function ProjectNewPage() {
                   </div>
                 )}
               </div>
+
+              <Separator />
+
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={form.is_fixed_fee}
+                  onCheckedChange={v => { set('is_fixed_fee', v); if (v) set('is_managed_services', false); }}
+                />
+                <div>
+                  <Label>Fixed fee project</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Bills a single flat fee regardless of hours worked. Invoices for this project will only show hours for reference.
+                  </p>
+                </div>
+              </div>
+              {form.is_fixed_fee && (
+                <div className="space-y-1 max-w-xs">
+                  <Label>Fixed Fee Amount ($) *</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.fixed_fee_amount}
+                    onChange={e => set('fixed_fee_amount', e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={form.is_managed_services}
+                  onCheckedChange={v => { set('is_managed_services', v); if (v) set('is_fixed_fee', false); }}
+                />
+                <div>
+                  <Label>Managed Services project</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Bills a minimum hours package. If actual hours fall short, the minimum is still charged; hours above it bill normally.
+                  </p>
+                </div>
+              </div>
+              {form.is_managed_services && (
+                <div className="space-y-1 max-w-xs">
+                  <Label>Minimum Hours Package *</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={form.managed_services_min_hours}
+                    onChange={e => set('managed_services_min_hours', e.target.value)}
+                    placeholder="e.g. 40"
+                  />
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

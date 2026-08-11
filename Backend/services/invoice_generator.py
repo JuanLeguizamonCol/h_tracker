@@ -9,11 +9,12 @@ from models.invoice import Invoice
 from models.invoice_lines import InvoiceLine
 from models.invoice_time_entries import InvoiceTimeEntry
 from models.projects import Project
+from models.clients import Client
 from models.time_entries import TimeEntry
 from models.employee_projects import EmployeeProject
 from models.project_roles import ProjectRole
 from models.employees import Employee
-from services.invoice_number_service import atomic_generate_number
+from services.invoice_number_service import atomic_generate_number_for_client
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +61,28 @@ def generate_invoice_for_project_period(
     ).all()
     entries = [e for e in entries if e.id not in linked_ids]
 
-    if not entries:
+    # Managed Services is a retainer — it still bills the minimum-hours
+    # package even when nobody logged time this period, so it does NOT skip
+    # on zero entries like every other billing mode does.
+    if not entries and not project.is_managed_services:
         return {"generated": False, "skipped": True, "reason": "no_entries", "invoice_number": None}
 
     company = getattr(project, "owner_company", None) or "IPC"
-    issue_year = period_end.year
+
+    client = db.query(Client).filter(Client.id == project.client_id).first()
+    if not client or not client.client_number:
+        logger.warning(
+            f"Skipping project {project.id}: client has no Client Number set — cannot generate invoice number"
+        )
+        return {"generated": False, "skipped": True, "reason": "missing_client_number", "invoice_number": None}
+
+    if project.is_fixed_fee and not project.fixed_fee_amount:
+        logger.warning(f"Skipping project {project.id}: marked fixed-fee but has no fee amount set")
+        return {"generated": False, "skipped": True, "reason": "missing_fixed_fee_amount", "invoice_number": None}
+
+    if project.is_managed_services and not project.managed_services_min_hours:
+        logger.warning(f"Skipping project {project.id}: marked managed-services but has no minimum hours set")
+        return {"generated": False, "skipped": True, "reason": "missing_min_hours", "invoice_number": None}
 
     try:
         invoice = Invoice(
@@ -82,7 +100,7 @@ def generate_invoice_for_project_period(
             notes=f"[Auto-generated] Period: {period_start} to {period_end}",
         )
         db.add(invoice)
-        invoice.invoice_number = atomic_generate_number(db, company, issue_year)
+        invoice.invoice_number = atomic_generate_number_for_client(db, client.id, client.client_number)
         # Flush now so the unique-index race is detected before we build lines.
         db.flush()
 
@@ -110,12 +128,27 @@ def generate_invoice_for_project_period(
             employee_hours[uid]["hours"] += float(entry.hours)
             employee_hours[uid]["entry_ids"].append(entry.id)
 
-        # Invoice lines.
-        subtotal = 0.0
+        # Real (hours x rate) amounts — used as-is for normal hourly projects,
+        # and also used to derive the blended rate for Managed Services.
+        real_subtotal = 0.0
+        total_hours = 0.0
         for uid, data in employee_hours.items():
             role_id = assign_map.get(uid)
             role = role_map.get(role_id) if role_id else None
             rate = float(role.hourly_rate_usd) if role else 0.0
+            real_subtotal += data["hours"] * rate
+            total_hours += data["hours"]
+
+        # Invoice lines. For Fixed Fee / Managed Services projects, hours are
+        # still tracked per employee for reference, but rate/amount are
+        # zeroed out — the invoice total comes from the flat/package amount
+        # below, not from hours x rate.
+        is_flat_billing = project.is_fixed_fee or project.is_managed_services
+        subtotal = 0.0
+        for uid, data in employee_hours.items():
+            role_id = assign_map.get(uid)
+            role = role_map.get(role_id) if role_id else None
+            rate = 0.0 if is_flat_billing else (float(role.hourly_rate_usd) if role else 0.0)
             amount = data["hours"] * rate
             db.add(InvoiceLine(
                 id=str(uuid.uuid4()),
@@ -140,8 +173,34 @@ def generate_invoice_for_project_period(
                     time_entry_id=entry_id,
                 ))
 
-        invoice.subtotal = subtotal
-        invoice.total = subtotal
+        if project.is_fixed_fee:
+            fee_amount = float(project.fixed_fee_amount)
+            invoice.fixed_fee_amount = fee_amount
+            invoice.subtotal = fee_amount
+            invoice.total = fee_amount
+        elif project.is_managed_services:
+            min_hours = float(project.managed_services_min_hours)
+            if total_hours > 0:
+                blended_rate = real_subtotal / total_hours
+            else:
+                # No hours logged this period — fall back to the average rate
+                # across the project's currently assigned roles, so the
+                # minimum package can still be priced.
+                assigned_role_rates = [
+                    float(role_map[rid].hourly_rate_usd)
+                    for rid in assign_map.values()
+                    if rid and rid in role_map
+                ]
+                blended_rate = (sum(assigned_role_rates) / len(assigned_role_rates)) if assigned_role_rates else 0.0
+            billable_hours = max(total_hours, min_hours)
+            fee_amount = billable_hours * blended_rate
+            invoice.managed_services_min_hours = min_hours
+            invoice.fixed_fee_amount = fee_amount
+            invoice.subtotal = fee_amount
+            invoice.total = fee_amount
+        else:
+            invoice.subtotal = subtotal
+            invoice.total = subtotal
 
         if project.manager_id:
             from services.notifications import notify_invoice_generated
@@ -151,7 +210,7 @@ def generate_invoice_for_project_period(
                 invoice_number=invoice.invoice_number,
                 project_name=project.name,
                 manager_id=project.manager_id,
-                total=subtotal,
+                total=float(invoice.total),
             )
 
         db.commit()

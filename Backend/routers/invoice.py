@@ -44,10 +44,23 @@ def list_signatories(company: Optional[str] = None):
 
 
 @invoice_router.get("/preview-number")
-def preview_invoice_number(company: str = "IPC", db: Session = Depends(get_db)):
-    """Preview next invoice number for a company without incrementing the counter."""
-    from services.invoice_number_service import preview_next_number
-    return preview_next_number(db, company)
+def preview_invoice_number(project_id: str, db: Session = Depends(get_db)):
+    """Preview next invoice number for a project's client, without incrementing the counter."""
+    from services.invoice_number_service import preview_next_number_for_client
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    client = db.query(Client).filter(Client.id == project.client_id).first()
+    if not client or not client.client_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This client has no Client Number set. Add one in the client's record before generating invoices.",
+        )
+    return {
+        "invoice_number": preview_next_number_for_client(db, client.id, client.client_number),
+        "client_number": client.client_number,
+        "client_name": client.name,
+    }
 
 
 @invoice_router.post("/", response_model=InvoiceOut, status_code=status.HTTP_201_CREATED)
@@ -235,6 +248,8 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "discount": float(invoice.discount),
             "total": float(invoice.total),
             "cap_amount": float(invoice.cap_amount) if invoice.cap_amount is not None else None,
+            "fixed_fee_amount": float(invoice.fixed_fee_amount) if invoice.fixed_fee_amount is not None else None,
+            "managed_services_min_hours": float(invoice.managed_services_min_hours) if invoice.managed_services_min_hours is not None else None,
             "notes": invoice.notes,
             "invoice_number": invoice.invoice_number,
             "issue_date": invoice.issue_date,
@@ -260,7 +275,13 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "state": client.state,
             "zip": client.zip,
         } if client else None,
-        "project": {"id": project.id, "name": project.name, "client_id": project.client_id, "owner_company": project.owner_company or "IPC"} if project else None,
+        "project": {
+            "id": project.id, "name": project.name, "client_id": project.client_id,
+            "owner_company": project.owner_company or "IPC",
+            "is_fixed_fee": bool(project.is_fixed_fee),
+            "is_managed_services": bool(project.is_managed_services),
+            "managed_services_min_hours": float(project.managed_services_min_hours) if project.managed_services_min_hours is not None else None,
+        } if project else None,
         "lines": lines_out,
         "expenses": expenses_out,
     }
@@ -319,24 +340,17 @@ def patch_invoice(invoice_id: str, patch_in: InvoicePatch, db: Session = Depends
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
-    # Capture current company before any updates
-    current_company = invoice.owner_company or "IPC"
-
     # Update simple invoice fields
+    # Note: owner_company no longer drives invoice numbering — the number is
+    # locked to the client at creation time and never changes.
     simple_fields = [
-        "status", "cap_amount", "issue_date", "due_date",
+        "status", "cap_amount", "fixed_fee_amount", "issue_date", "due_date",
         "period_start", "period_end", "notes", "signatory_name", "signatory_title", "owner_company",
     ]
     for field in simple_fields:
         value = getattr(patch_in, field)
         if value is not None:
             setattr(invoice, field, value)
-
-    # If company changed, assign a new invoice number for the new company
-    new_company = patch_in.owner_company
-    if new_company and new_company != current_company:
-        from services.invoice_number_service import atomic_generate_number
-        invoice.invoice_number = atomic_generate_number(db, new_company)
 
     # Update lines
     if patch_in.lines:
@@ -357,19 +371,26 @@ def patch_invoice(invoice_id: str, patch_in: InvoicePatch, db: Session = Depends
                 # Recompute amount
                 line.amount = float(line.hours) * float(line.rate_snapshot)
 
-    # Recompute invoice subtotal/total from lines
+    # Recompute invoice subtotal/total from lines — unless this invoice bills a
+    # single flat fee, in which case the fee amount IS the subtotal/total and
+    # hours-based line amounts (always 0 for fixed-fee lines) are ignored.
     db.flush()
     db.refresh(invoice)
-    subtotal = sum(float(ln.amount) for ln in invoice.lines)
-    total_discount = sum(
-        (float(ln.amount) * float(ln.discount_value) / 100)
-        if ln.discount_type == "percent"
-        else float(ln.discount_value)
-        for ln in invoice.lines
-    )
-    invoice.subtotal = subtotal
-    invoice.discount = total_discount
-    invoice.total = subtotal - total_discount
+    if invoice.fixed_fee_amount is not None:
+        invoice.subtotal = float(invoice.fixed_fee_amount)
+        invoice.discount = 0
+        invoice.total = float(invoice.fixed_fee_amount)
+    else:
+        subtotal = sum(float(ln.amount) for ln in invoice.lines)
+        total_discount = sum(
+            (float(ln.amount) * float(ln.discount_value) / 100)
+            if ln.discount_type == "percent"
+            else float(ln.discount_value)
+            for ln in invoice.lines
+        )
+        invoice.subtotal = subtotal
+        invoice.discount = total_discount
+        invoice.total = subtotal - total_discount
 
     # Handle expenses (upsert)
     if patch_in.expenses is not None:

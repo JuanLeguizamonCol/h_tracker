@@ -1,69 +1,43 @@
 """
 Invoice number generation service.
 
-Format: {PREFIX}{YEAR}{SEQ}
-  IPC  → IPC202614   (prefix IPC, year 2026, cumulative seq 14)
-  PI   → PIN20261    (prefix PIN, year 2026, cumulative seq 1)
+Format: "{client_number}-{sequence for that client}", e.g. "12-3"
+  (client #12's 3rd invoice).
 
-Sequence is cumulative per company — never resets.
-Year in the number is the invoice creation year.
-Counter stored in invoice_number_sequences using year=0 sentinel row.
-
+Sequence is cumulative per client — never resets, does not depend on year.
+Counter stored in client_invoice_sequences, one row per client.
 Counter is incremented ONLY on actual invoice creation, never on previews.
 """
 import uuid
-import logging
-from datetime import date
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-logger = logging.getLogger(__name__)
 
-_PREFIXES: dict[str, str] = {
-    "IPC": "IPC",
-    "PI":  "PIN",
-}
-
-
-def _format(company: str, year: int, seq: int) -> str:
-    prefix = _PREFIXES.get(company, company)
-    return f"{prefix}{year}{seq}"
-
-
-def preview_next_number(db: Session, company: str) -> dict:
-    """
-    Non-destructive preview of the next invoice number.
-    Reads last_sequence from year=0 row and adds 1.
-    Does NOT increment the counter — safe to call repeatedly.
-    """
+def preview_next_number_for_client(db: Session, client_id: str, client_number: str) -> str:
+    """Non-destructive preview — does NOT increment the counter."""
     row = db.execute(
-        text("SELECT last_sequence FROM invoice_number_sequences WHERE company = :co AND year = 0"),
-        {"co": company},
+        text("SELECT last_sequence FROM client_invoice_sequences WHERE client_id = :cid"),
+        {"cid": client_id},
     ).scalar()
     seq = (int(row) if row is not None else 0) + 1
-    year = date.today().year
-    return {
-        "company": company,
-        "invoice_number": _format(company, year, seq),
-    }
+    return f"{client_number}-{seq}"
 
 
-def atomic_generate_number(db: Session, company: str, issue_year: int | None = None) -> str:
+def atomic_generate_number_for_client(db: Session, client_id: str, client_number: str) -> str:
     """
-    Atomically increment the year=0 counter and return the locked invoice number.
+    Atomically increment the per-client counter and return the locked invoice number.
     Called ONCE at invoice creation — never called again for the same invoice.
     Does NOT commit — caller owns the transaction.
     Thread-safe via INSERT ... ON CONFLICT DO UPDATE ... RETURNING.
     """
-    year = issue_year or date.today().year
     result = db.execute(
         text("""
-            INSERT INTO invoice_number_sequences (id, company, year, last_sequence)
-            VALUES (:id, :company, 0, 1)
-            ON CONFLICT (company, year) DO UPDATE
-                SET last_sequence = invoice_number_sequences.last_sequence + 1
+            INSERT INTO client_invoice_sequences (id, client_id, last_sequence)
+            VALUES (:id, :client_id, 1)
+            ON CONFLICT (client_id) DO UPDATE
+                SET last_sequence = client_invoice_sequences.last_sequence + 1
             RETURNING last_sequence
         """),
-        {"id": str(uuid.uuid4()), "company": company},
+        {"id": str(uuid.uuid4()), "client_id": client_id},
     ).scalar()
-    return _format(company, year, int(result))
+    return f"{client_number}-{int(result)}"

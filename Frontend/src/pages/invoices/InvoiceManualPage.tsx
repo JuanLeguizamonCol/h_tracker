@@ -55,6 +55,7 @@ export default function InvoiceManualPage() {
   const [projectId, setProjectId] = useState(prefilledProjectId);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [invoiceNumberLoading, setInvoiceNumberLoading] = useState(false);
+  const [invoiceNumberError, setInvoiceNumberError] = useState('');
   const abortRef = useRef<AbortController | null>(null);
   const [issueDate, setIssueDate] = useState(todayStr);
   const [dueDate, setDueDate] = useState('');
@@ -92,42 +93,53 @@ export default function InvoiceManualPage() {
     [clients, selectedProject]
   );
 
-  // Fetch preview number — uses AbortController to cancel stale requests
-  function fetchPreviewNumber(company: CompanyCode) {
+  // Fetch preview number for the selected project's client — uses AbortController to cancel stale requests
+  function fetchPreviewNumber(pid: string) {
     abortRef.current?.abort();
+    if (!pid) {
+      setInvoiceNumber('');
+      setInvoiceNumberError('');
+      setInvoiceNumberLoading(false);
+      return;
+    }
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setInvoiceNumberLoading(true);
-    fetch(apiUrl(`/invoices/preview-number?company=${company}`), { signal: ctrl.signal, headers: authHeader() })
-      .then(r => r.json())
-      .then((data: { invoice_number: string }) => {
+    setInvoiceNumberError('');
+    fetch(apiUrl(`/invoices/preview-number?project_id=${pid}`), { signal: ctrl.signal, headers: authHeader() })
+      .then(async r => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.detail || 'Failed to preview invoice number.');
+        return data as { invoice_number: string };
+      })
+      .then(data => {
         setInvoiceNumber(data.invoice_number);
         setInvoiceNumberLoading(false);
       })
       .catch(err => {
-        if (err.name !== 'AbortError') setInvoiceNumberLoading(false);
+        if (err.name !== 'AbortError') {
+          setInvoiceNumber('');
+          setInvoiceNumberError(err.message || 'Failed to preview invoice number.');
+          setInvoiceNumberLoading(false);
+        }
       });
   }
 
-  // Initial fetch on mount
+  // Re-fetch whenever the selected project (and thus its client) changes
   useEffect(() => {
-    fetchPreviewNumber('IPC');
+    fetchPreviewNumber(projectId);
     return () => abortRef.current?.abort();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-set owner company from project and re-fetch number
+  // Auto-set owner company from project (used for signatory/branding only — no longer tied to numbering)
   useEffect(() => {
     if (selectedProject?.owner_company) {
-      const co = (selectedProject.owner_company as CompanyCode) || 'IPC';
-      setOwnerCompany(co);
-      fetchPreviewNumber(co);
+      setOwnerCompany((selectedProject.owner_company as CompanyCode) || 'IPC');
     }
-  }, [selectedProject?.owner_company]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedProject?.owner_company]);
 
-  // Manual company toggle: always re-fetch
   function onCompanyChange(co: CompanyCode) {
     setOwnerCompany(co);
-    fetchPreviewNumber(co);
   }
 
   const subtotal = useMemo(
@@ -292,7 +304,7 @@ export default function InvoiceManualPage() {
             <p className="text-sm text-muted-foreground">Fill in all details manually — saved as Draft</p>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={isSaving || !projectId} className="gap-2">
+        <Button onClick={handleSave} disabled={isSaving || !projectId || !!invoiceNumberError} className="gap-2">
           {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
           Save as Draft
         </Button>
@@ -334,12 +346,16 @@ export default function InvoiceManualPage() {
           {/* Invoice Number — read-only, assigned by server on save */}
           <div className="space-y-1.5">
             <Label>Invoice Number</Label>
-            <div className="flex items-center gap-2 rounded-md border border-input bg-muted/40 px-3 py-2 text-sm min-h-9 cursor-default select-none">
+            <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm min-h-9 cursor-default select-none ${
+              invoiceNumberError ? 'border-destructive/40 bg-destructive/5' : 'border-input bg-muted/40'
+            }`}>
               {invoiceNumberLoading ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
                   <span className="text-muted-foreground">Generating…</span>
                 </>
+              ) : invoiceNumberError ? (
+                <span className="text-destructive text-xs">{invoiceNumberError}</span>
               ) : (
                 <>
                   <span className="font-mono font-semibold">{invoiceNumber || '—'}</span>
@@ -590,7 +606,7 @@ export default function InvoiceManualPage() {
         <Button variant="outline" onClick={() => navigate('/invoices/new')}>
           Cancel
         </Button>
-        <Button onClick={handleSave} disabled={isSaving || !projectId} className="gap-2">
+        <Button onClick={handleSave} disabled={isSaving || !projectId || !!invoiceNumberError} className="gap-2">
           {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
           Save as Draft
         </Button>

@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useInvoiceEditData, usePatchInvoice } from '@/hooks/useInvoices';
 import { InvoiceEditLine, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch } from '@/types';
-import { api, apiUrl, authHeader } from '@/lib/api';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -77,10 +77,7 @@ export default function InvoiceEditPage() {
   const [signatoryName, setSignatoryName] = useState('');
   const [signatoryTitle, setSignatoryTitle] = useState('');
   const [ownerCompany, setOwnerCompany] = useState<CompanyCode>('IPC');
-  const [originalCompany, setOriginalCompany] = useState<CompanyCode>('IPC');
-  const [previewNumber, setPreviewNumber] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const previewAbortRef = useRef<AbortController | null>(null);
+  const [fixedFeeAmount, setFixedFeeAmount] = useState<string>('');
   const [initialized, setInitialized] = useState(false);
 
   // Export state
@@ -133,8 +130,7 @@ export default function InvoiceEditPage() {
     setSignatoryTitle((data.invoice as any).signatory_title || '');
     const company = ((data.invoice as any).owner_company || data.project?.owner_company || 'IPC') as CompanyCode;
     setOwnerCompany(company);
-    setOriginalCompany(company);
-    setPreviewNumber(null);
+    setFixedFeeAmount(data.invoice.fixed_fee_amount != null ? String(data.invoice.fixed_fee_amount) : '');
     setIsDirty(false);
     setInitialized(true);
   }
@@ -162,19 +158,24 @@ export default function InvoiceEditPage() {
 
   // Summary computations
   const summary = useMemo(() => {
+    const isFlatBillingProject = !!data?.project?.is_fixed_fee || !!data?.project?.is_managed_services;
     let totalFees = 0;
     let totalDiscounts = 0;
-    for (const line of lines) {
-      const { total, discountDollars } = computeLineTotals(line);
-      totalFees += total;
-      totalDiscounts += discountDollars;
+    if (isFlatBillingProject) {
+      totalFees = parseFloat(fixedFeeAmount) || 0;
+    } else {
+      for (const line of lines) {
+        const { total, discountDollars } = computeLineTotals(line);
+        totalFees += total;
+        totalDiscounts += discountDollars;
+      }
     }
     const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount_usd || 0), 0);
     const cap = capAmount ? parseFloat(capAmount) : null;
     const subtotalFees = totalFees;
     const totalDue = (cap != null ? Math.min(subtotalFees, cap) : subtotalFees) + totalExpenses;
     return { totalFees, totalDiscounts, totalExpenses, subtotalFees, totalDue, cap };
-  }, [lines, expenses, capAmount]);
+  }, [lines, expenses, capAmount, fixedFeeAmount, data?.project?.is_fixed_fee, data?.project?.is_managed_services]);
 
   // On-hold summary (hours reduced below original)
   const onHoldSummary = useMemo(() => {
@@ -273,6 +274,7 @@ export default function InvoiceEditPage() {
         patch: {
           status,
           cap_amount: capAmount ? parseFloat(capAmount) : null,
+          fixed_fee_amount: isFlatBilling ? (parseFloat(fixedFeeAmount) || 0) : undefined,
           issue_date: issueDate || null,
           due_date: dueDate || null,
           period_start: periodStart || null,
@@ -365,6 +367,11 @@ export default function InvoiceEditPage() {
     : `#${data.invoice.id.slice(0, 8)}`;
 
   const isNonBillable = !['approved'].includes(status.toLowerCase());
+  const isFixedFee = !!data.project?.is_fixed_fee;
+  const isManagedServices = !!data.project?.is_managed_services;
+  const isFlatBilling = isFixedFee || isManagedServices;
+  const workedHours = lines.reduce((sum, l) => sum + l._hours, 0);
+  const minHours = data.project?.managed_services_min_hours ?? data.invoice.managed_services_min_hours ?? 0;
 
   return (
     <div className="space-y-6 pb-12">
@@ -480,23 +487,6 @@ export default function InvoiceEditPage() {
                         setIsDirty(true);
                         setSignatoryName('');
                         setSignatoryTitle('');
-                        if (co !== originalCompany) {
-                          previewAbortRef.current?.abort();
-                          const ctrl = new AbortController();
-                          previewAbortRef.current = ctrl;
-                          setPreviewLoading(true);
-                          fetch(apiUrl(`/invoices/preview-number?company=${co}`), { signal: ctrl.signal, headers: authHeader() })
-                            .then(r => r.json())
-                            .then((d: { invoice_number: string }) => {
-                              setPreviewNumber(d.invoice_number);
-                              setPreviewLoading(false);
-                            })
-                            .catch(err => { if (err.name !== 'AbortError') setPreviewLoading(false); });
-                        } else {
-                          previewAbortRef.current?.abort();
-                          setPreviewNumber(null);
-                          setPreviewLoading(false);
-                        }
                       }}
                       className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-semibold transition-colors ${
                         ownerCompany === co
@@ -528,24 +518,13 @@ export default function InvoiceEditPage() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Invoice Number</Label>
-                  {ownerCompany !== originalCompany ? (
-                    <div className="flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-2.5 py-1.5 text-sm h-8 cursor-default select-none">
-                      {previewLoading ? (
-                        <><Loader2 className="h-3 w-3 animate-spin text-amber-600" /><span className="text-amber-700 dark:text-amber-400 text-xs">Generating…</span></>
-                      ) : (
-                        <><span className="font-mono font-semibold flex-1 truncate text-amber-800 dark:text-amber-300">{previewNumber || '—'}</span>
-                          <span className="text-xs text-amber-600 dark:text-amber-400 whitespace-nowrap">New on save</span></>
-                      )}
-                    </div>
-                  ) : (
-                    <div
-                      title="Invoice number is locked after creation"
-                      className="flex items-center gap-1.5 rounded-md border border-input bg-muted/40 px-2.5 py-1.5 text-sm h-8 cursor-default select-none"
-                    >
-                      <span className="font-mono font-semibold flex-1 truncate">{invoiceNumber || '—'}</span>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">Locked</span>
-                    </div>
-                  )}
+                  <div
+                    title="Invoice number is locked to the client and never changes after creation"
+                    className="flex items-center gap-1.5 rounded-md border border-input bg-muted/40 px-2.5 py-1.5 text-sm h-8 cursor-default select-none"
+                  >
+                    <span className="font-mono font-semibold flex-1 truncate">{invoiceNumber || '—'}</span>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Locked</span>
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Issue Date</Label>
@@ -629,8 +608,18 @@ export default function InvoiceEditPage() {
 
           {/* Professionals Table */}
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">Professionals</CardTitle>
+              {isFixedFee && (
+                <Badge variant="outline" className="text-xs">
+                  Fixed Fee — hours shown for reference only
+                </Badge>
+              )}
+              {isManagedServices && (
+                <Badge variant="outline" className="text-xs">
+                  Managed Services — hours shown for reference only
+                </Badge>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               {Object.keys(groupedLines).length === 0 ? (
@@ -648,10 +637,14 @@ export default function InvoiceEditPage() {
                         <TableRow>
                           <TableHead className="text-xs">Name / Title</TableHead>
                           <TableHead className="text-xs text-right w-24">Hours</TableHead>
-                          <TableHead className="text-xs text-right w-28">Rate ($/hr)</TableHead>
-                          <TableHead className="text-xs text-right w-28">Subtotal</TableHead>
-                          <TableHead className="text-xs w-56">Discount</TableHead>
-                          <TableHead className="text-xs text-right w-28">Total</TableHead>
+                          {!isFlatBilling && (
+                            <>
+                              <TableHead className="text-xs text-right w-28">Rate ($/hr)</TableHead>
+                              <TableHead className="text-xs text-right w-28">Subtotal</TableHead>
+                              <TableHead className="text-xs w-56">Discount</TableHead>
+                              <TableHead className="text-xs text-right w-28">Total</TableHead>
+                            </>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -671,7 +664,6 @@ export default function InvoiceEditPage() {
                                   <Input
                                     type="number"
                                     min="0"
-                                    max={line._originalHours}
                                     step="0.25"
                                     value={line._hoursInput}
                                     onFocus={e => e.target.select()}
@@ -706,86 +698,100 @@ export default function InvoiceEditPage() {
                                     </div>
                                   )}
                                   {line._hours > line._originalHours + 0.001 && (
-                                    <span className="text-xs text-destructive">
-                                      ⚠ Exceeds {line._originalHours.toFixed(2)}h
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-1">
-                                  <span className="text-xs text-muted-foreground">$</span>
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={line._rateInput}
-                                    onFocus={e => e.target.select()}
-                                    onChange={e => {
-                                      const raw = e.target.value;
-                                      const num = parseFloat(raw);
-                                      updateLine(line.id, {
-                                        _rateInput: raw,
-                                        ...(raw !== '' && !isNaN(num) ? { _rate: num } : {}),
-                                      });
-                                    }}
-                                    onBlur={e => {
-                                      const num = parseFloat(e.target.value);
-                                      const resolved = isNaN(num) ? 0 : num;
-                                      updateLine(line.id, { _rate: resolved, _rateInput: String(resolved) });
-                                    }}
-                                    className="w-20 h-7 text-right text-sm"
-                                  />
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right text-sm">
-                                ${subtotal.toFixed(2)}
-                              </TableCell>
-                              <TableCell>
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-1">
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={line._discountInput}
-                                      onFocus={e => e.target.select()}
-                                      onChange={e => {
-                                        const raw = e.target.value;
-                                        const num = parseFloat(raw);
-                                        updateLine(line.id, {
-                                          _discountInput: raw,
-                                          ...(raw !== '' && !isNaN(num) ? { _discountValue: num } : {}),
-                                        });
-                                      }}
-                                      onBlur={e => {
-                                        const num = parseFloat(e.target.value);
-                                        const resolved = isNaN(num) ? 0 : num;
-                                        updateLine(line.id, { _discountValue: resolved, _discountInput: String(resolved) });
-                                      }}
-                                      className="w-20 h-7 text-right text-sm"
-                                    />
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 px-2 text-xs font-mono"
-                                      onClick={() => updateLine(line.id, {
-                                        _discountType: line._discountType === 'amount' ? 'percent' : 'amount'
-                                      })}
-                                    >
-                                      {line._discountType === 'amount' ? '$' : '%'}
-                                    </Button>
-                                  </div>
-                                  {(discountDollars > 0) && (
-                                    <div className="text-xs text-muted-foreground">
-                                      {discountHours.toFixed(2)} hrs / ${discountDollars.toFixed(2)}
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                                        +{(line._hours - line._originalHours).toFixed(2)}h added
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => resetLine(line.id)}
+                                        className="text-xs text-muted-foreground hover:text-foreground"
+                                        title="Reset to original hours"
+                                      >
+                                        <RotateCcw className="h-3 w-3" />
+                                      </button>
                                     </div>
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell className="text-right font-semibold text-sm">
-                                ${total.toFixed(2)}
-                              </TableCell>
+                              {!isFlatBilling && (
+                                <>
+                                  <TableCell className="text-right">
+                                    <div className="flex items-center justify-end gap-1">
+                                      <span className="text-xs text-muted-foreground">$</span>
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={line._rateInput}
+                                        onFocus={e => e.target.select()}
+                                        onChange={e => {
+                                          const raw = e.target.value;
+                                          const num = parseFloat(raw);
+                                          updateLine(line.id, {
+                                            _rateInput: raw,
+                                            ...(raw !== '' && !isNaN(num) ? { _rate: num } : {}),
+                                          });
+                                        }}
+                                        onBlur={e => {
+                                          const num = parseFloat(e.target.value);
+                                          const resolved = isNaN(num) ? 0 : num;
+                                          updateLine(line.id, { _rate: resolved, _rateInput: String(resolved) });
+                                        }}
+                                        className="w-20 h-7 text-right text-sm"
+                                      />
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right text-sm">
+                                    ${subtotal.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-1">
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={line._discountInput}
+                                          onFocus={e => e.target.select()}
+                                          onChange={e => {
+                                            const raw = e.target.value;
+                                            const num = parseFloat(raw);
+                                            updateLine(line.id, {
+                                              _discountInput: raw,
+                                              ...(raw !== '' && !isNaN(num) ? { _discountValue: num } : {}),
+                                            });
+                                          }}
+                                          onBlur={e => {
+                                            const num = parseFloat(e.target.value);
+                                            const resolved = isNaN(num) ? 0 : num;
+                                            updateLine(line.id, { _discountValue: resolved, _discountInput: String(resolved) });
+                                          }}
+                                          className="w-20 h-7 text-right text-sm"
+                                        />
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 px-2 text-xs font-mono"
+                                          onClick={() => updateLine(line.id, {
+                                            _discountType: line._discountType === 'amount' ? 'percent' : 'amount'
+                                          })}
+                                        >
+                                          {line._discountType === 'amount' ? '$' : '%'}
+                                        </Button>
+                                      </div>
+                                      {(discountDollars > 0) && (
+                                        <div className="text-xs text-muted-foreground">
+                                          {discountHours.toFixed(2)} hrs / ${discountDollars.toFixed(2)}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold text-sm">
+                                    ${total.toFixed(2)}
+                                  </TableCell>
+                                </>
+                              )}
                             </TableRow>
                           );
                         })}
@@ -970,14 +976,74 @@ export default function InvoiceEditPage() {
                     Signatory: <span className="font-medium text-foreground">{signatoryName}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total Fees</span>
-                  <span className="font-medium">${(summary.totalFees + summary.totalDiscounts).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-destructive/80">
-                  <span>Total Discounts</span>
-                  <span>-${summary.totalDiscounts.toFixed(2)}</span>
-                </div>
+                {isFixedFee ? (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Fixed Fee Amount</Label>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground">$</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="h-7 text-sm"
+                        value={fixedFeeAmount}
+                        onChange={e => { setFixedFeeAmount(e.target.value); setIsDirty(true); }}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                ) : isManagedServices ? (
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Package minimum</span>
+                      <span>{minHours.toFixed(2)}h</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Hours worked</span>
+                      <span>{workedHours.toFixed(2)}h</span>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Amount to Bill</Label>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-muted-foreground">$</span>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="h-7 text-sm"
+                          value={fixedFeeAmount}
+                          onChange={e => { setFixedFeeAmount(e.target.value); setIsDirty(true); }}
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                    {workedHours < 0.001 && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <Checkbox
+                          checked={parseFloat(fixedFeeAmount) > 0}
+                          onCheckedChange={v => {
+                            setFixedFeeAmount(v ? String(parseFloat(data.invoice.fixed_fee_amount != null ? String(data.invoice.fixed_fee_amount) : '0') || 0) : '0');
+                            setIsDirty(true);
+                          }}
+                        />
+                        <Label className="text-xs text-muted-foreground font-normal">
+                          Charge the minimum hours package (no hours logged this period)
+                        </Label>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Total Fees</span>
+                      <span className="font-medium">${(summary.totalFees + summary.totalDiscounts).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-destructive/80">
+                      <span>Total Discounts</span>
+                      <span>-${summary.totalDiscounts.toFixed(2)}</span>
+                    </div>
+                  </>
+                )}
                 {onHoldSummary.hours > 0.001 && (
                   <div className="flex justify-between text-amber-600 dark:text-amber-400">
                     <span className="flex items-center gap-1">

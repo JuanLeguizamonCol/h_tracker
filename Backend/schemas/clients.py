@@ -14,6 +14,7 @@ class ClientBase(BaseModel):
     manager_phone: Optional[str] = None
     # Extended billing fields
     client_code: Optional[str] = None
+    client_number: Optional[str] = None
     salutation: Optional[str] = None
     first_name: Optional[str] = None
     middle_initial: Optional[str] = None
@@ -65,6 +66,7 @@ class ClientUpdate(BaseModel):
     manager_email: Optional[str] = None
     manager_phone: Optional[str] = None
     client_code: Optional[str] = None
+    client_number: Optional[str] = None
     salutation: Optional[str] = None
     first_name: Optional[str] = None
     middle_initial: Optional[str] = None

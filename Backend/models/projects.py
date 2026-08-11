@@ -32,6 +32,13 @@ class Project(Base):
     billing_day_of_period = Column(Integer, nullable=True, default=3)
     custom_period_days = Column(Integer, nullable=True)
     billing_anchor_date = Column(Date, nullable=True)
+    is_fixed_fee = Column(Boolean, nullable=False, default=False)
+    fixed_fee_amount = Column(Numeric(10, 2), nullable=True)
+    # Managed Services: bills a minimum hours package (at the project's
+    # blended employee rate) — hours below the minimum still bill the
+    # minimum; hours above it bill the actual hours worked.
+    is_managed_services = Column(Boolean, nullable=False, default=False)
+    managed_services_min_hours = Column(Numeric(10, 2), nullable=True)
 
     client = relationship("Client", back_populates="projects")
     roles = relationship("ProjectRole", back_populates="project", cascade="all, delete-orphan")

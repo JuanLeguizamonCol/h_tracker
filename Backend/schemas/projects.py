@@ -25,6 +25,10 @@ class ProjectBase(BaseModel):
     billing_day_of_period: Optional[int] = 3
     custom_period_days: Optional[int] = None
     billing_anchor_date: Optional[date] = None
+    is_fixed_fee: bool = False
+    fixed_fee_amount: Optional[float] = None
+    is_managed_services: bool = False
+    managed_services_min_hours: Optional[float] = None
 
 
 class ProjectCreate(ProjectBase):
@@ -52,6 +56,10 @@ class ProjectUpdate(BaseModel):
     billing_day_of_period: Optional[int] = None
     custom_period_days: Optional[int] = None
     billing_anchor_date: Optional[date] = None
+    is_fixed_fee: Optional[bool] = None
+    fixed_fee_amount: Optional[float] = None
+    is_managed_services: Optional[bool] = None
+    managed_services_min_hours: Optional[float] = None
 
 
 class ProjectOut(BaseModel):
@@ -80,6 +88,10 @@ class ProjectOut(BaseModel):
     billing_day_of_period: Optional[int] = 3
     custom_period_days: Optional[int] = None
     billing_anchor_date: Optional[date] = None
+    is_fixed_fee: bool = False
+    fixed_fee_amount: Optional[float] = None
+    is_managed_services: bool = False
+    managed_services_min_hours: Optional[float] = None
 
 
 class ProjectCategoryOut(BaseModel):

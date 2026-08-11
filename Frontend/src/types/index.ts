@@ -74,6 +74,7 @@ export interface Client {
   manager_email: string | null;
   manager_phone: string | null;
   client_code: string | null;
+  client_number: string | null;
   salutation: string | null;
   first_name: string | null;
   middle_initial: string | null;
@@ -166,6 +167,10 @@ export interface Project {
   billing_day_of_period: number | null;
   custom_period_days: number | null;
   billing_anchor_date: string | null;
+  is_fixed_fee: boolean;
+  fixed_fee_amount: number | null;
+  is_managed_services: boolean;
+  managed_services_min_hours: number | null;
 }
 
 export interface ProjectCategory {
@@ -239,6 +244,8 @@ export interface Invoice {
   discount: number;
   total: number;
   cap_amount: number | null;
+  fixed_fee_amount: number | null;
+  managed_services_min_hours: number | null;
   notes: string | null;
   invoice_number: string | null;
   issue_date: string | null;
@@ -280,7 +287,12 @@ export interface InvoiceEditLine {
 export interface InvoiceEditData {
   invoice: Invoice;
   client: { id: string; name: string; email: string | null; phone: string | null } | null;
-  project: { id: string; name: string; client_id: string } | null;
+  project: {
+    id: string; name: string; client_id: string;
+    is_fixed_fee?: boolean;
+    is_managed_services?: boolean;
+    managed_services_min_hours?: number | null;
+  } | null;
   lines: InvoiceEditLine[];
   expenses: InvoiceExpense[];
 }
@@ -320,6 +332,7 @@ export interface OnHoldEntryPatch {
 export interface InvoicePatch {
   status?: string;
   cap_amount?: number | null;
+  fixed_fee_amount?: number | null;
   invoice_number?: string | null;
   issue_date?: string | null;
   due_date?: string | null;

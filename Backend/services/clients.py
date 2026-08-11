@@ -7,6 +7,8 @@ from schemas.clients import ClientCreate, ClientUpdate
 
 def create_client(db: Session, client_in: ClientCreate) -> Client:
     data = client_in.model_dump(exclude_unset=True)
+    if not data.get('client_number'):
+        data['client_number'] = None
     db_client = Client(**data)
     db.add(db_client)
     db.commit()
@@ -30,6 +32,8 @@ def update_client(db: Session, client_id: str, client_in: ClientUpdate) -> Optio
     if not db_client:
         return None
     data = client_in.model_dump(exclude_unset=True)
+    if 'client_number' in data and not data['client_number']:
+        data['client_number'] = None
     for field, value in data.items():
         setattr(db_client, field, value)
     db.commit()

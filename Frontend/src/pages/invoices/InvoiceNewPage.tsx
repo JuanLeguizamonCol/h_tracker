@@ -61,6 +61,10 @@ export default function InvoiceNewPage() {
   }, [selectedProjectId]);
 
   const doCreateInvoice = async () => {
+    if (selectedProject?.is_fixed_fee && !selectedProject.fixed_fee_amount) {
+      toast.error('This project is marked fixed-fee but has no fee amount set. Add one on the project before invoicing.');
+      return;
+    }
     setIsCreating(true);
     try {
       const invoice = await createInvoice.mutateAsync({ project_id: selectedProjectId });
@@ -91,10 +95,26 @@ export default function InvoiceNewPage() {
           employeeHours[entry.user_id].entryIds.push(entry.id);
         });
 
-        const lineData = Object.values(employeeHours).map(eh => {
+        const isFixedFee = !!selectedProject?.is_fixed_fee;
+        const isManagedServices = !!selectedProject?.is_managed_services;
+        const isFlatBilling = isFixedFee || isManagedServices;
+
+        // Real (hours x rate) figures — used as-is for normal projects, and
+        // to derive the blended rate for Managed Services before zeroing.
+        let totalHours = 0;
+        let realSubtotal = 0;
+        Object.values(employeeHours).forEach(eh => {
           const roleId = assignmentMap.get(eh.userId);
           const role = roleId ? rolesMap.get(roleId) : null;
           const rate = role ? Number(role.hourly_rate_usd) : 0;
+          totalHours += eh.hours;
+          realSubtotal += eh.hours * rate;
+        });
+
+        const lineData = Object.values(employeeHours).map(eh => {
+          const roleId = assignmentMap.get(eh.userId);
+          const role = roleId ? rolesMap.get(roleId) : null;
+          const rate = isFlatBilling ? 0 : (role ? Number(role.hourly_rate_usd) : 0);
           return {
             invoice_id: invoice.id,
             user_id: eh.userId,
@@ -109,8 +129,31 @@ export default function InvoiceNewPage() {
         await createLines.mutateAsync(lineData);
         const timeEntryIds = Object.values(employeeHours).flatMap(eh => eh.entryIds);
         await linkTimeEntries.mutateAsync({ invoice_id: invoice.id, time_entry_ids: timeEntryIds });
-        const subtotalVal = lineData.reduce((sum, l) => sum + l.amount, 0);
-        await updateInvoice.mutateAsync({ id: invoice.id, updates: { subtotal: subtotalVal, total: subtotalVal } });
+
+        if (isFixedFee && selectedProject?.fixed_fee_amount) {
+          const feeVal = Number(selectedProject.fixed_fee_amount);
+          await updateInvoice.mutateAsync({
+            id: invoice.id,
+            updates: { fixed_fee_amount: feeVal, subtotal: feeVal, total: feeVal },
+          });
+        } else if (isManagedServices && selectedProject?.managed_services_min_hours) {
+          const minHours = Number(selectedProject.managed_services_min_hours);
+          const blendedRate = totalHours > 0 ? realSubtotal / totalHours : 0;
+          const billableHours = Math.max(totalHours, minHours);
+          const feeVal = billableHours * blendedRate;
+          await updateInvoice.mutateAsync({
+            id: invoice.id,
+            updates: {
+              fixed_fee_amount: feeVal,
+              managed_services_min_hours: minHours,
+              subtotal: feeVal,
+              total: feeVal,
+            },
+          });
+        } else {
+          const subtotalVal = lineData.reduce((sum, l) => sum + l.amount, 0);
+          await updateInvoice.mutateAsync({ id: invoice.id, updates: { subtotal: subtotalVal, total: subtotalVal } });
+        }
       }
 
       toast.success('Invoice created.');
@@ -119,7 +162,9 @@ export default function InvoiceNewPage() {
       console.error('[Invoice Creation Error]', err);
       const msg = err instanceof Error ? err.message : String(err);
       // Map known API errors to friendly messages
-      if (msg.includes('422') || msg.includes('Unprocessable')) {
+      if (msg.includes('Client Number')) {
+        toast.error('This client has no Client Number set. Add one in the client\'s record before generating invoices.');
+      } else if (msg.includes('422') || msg.includes('Unprocessable')) {
         toast.error('Invalid data — check all required fields and try again.');
       } else if (msg.includes('401') || msg.includes('403')) {
         toast.error('Session expired — please sign in again.');
@@ -230,6 +275,13 @@ export default function InvoiceNewPage() {
                     <span className="font-semibold">"{selectedProject?.name}"</span>{' '}
                     in the current period. Would you like to create a blank invoice and fill in the details manually?
                   </p>
+                  {selectedProject?.is_managed_services && selectedProject.managed_services_min_hours && (
+                    <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+                      This is a Managed Services project with a{' '}
+                      <span className="font-semibold">{selectedProject.managed_services_min_hours}h minimum</span> package —
+                      remember to charge the minimum on the blank invoice.
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2 pt-1">

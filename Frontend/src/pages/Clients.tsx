@@ -121,6 +121,20 @@ export default function Clients() {
                       <div>
                         <div className="flex items-center gap-2">
                           <CardTitle className="text-lg">{client.name}</CardTitle>
+                          {client.client_number ? (
+                            <Badge variant="outline" className="text-xs font-mono">#{client.client_number}</Badge>
+                          ) : (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge variant="outline" className="text-xs text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-700">
+                                    No Client Number
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>Required before invoices can be generated for this client</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
                           {isCrm && <CrmBadge syncedAt={client.crm_synced_at} />}
                         </div>
                         <p className="text-sm text-muted-foreground">

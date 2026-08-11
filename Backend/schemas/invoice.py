@@ -22,6 +22,8 @@ class InvoiceUpdate(BaseModel):
     discount: Optional[float] = None
     total: Optional[float] = None
     cap_amount: Optional[float] = None
+    fixed_fee_amount: Optional[float] = None
+    managed_services_min_hours: Optional[float] = None
     issue_date: Optional[date] = None
     due_date: Optional[date] = None
     period_start: Optional[date] = None
@@ -41,6 +43,8 @@ class InvoiceOut(BaseModel):
     discount: float
     total: float
     cap_amount: Optional[float] = None
+    fixed_fee_amount: Optional[float] = None
+    managed_services_min_hours: Optional[float] = None
     notes: Optional[str] = None
     invoice_number: Optional[str] = None
     issue_date: Optional[date] = None
@@ -75,6 +79,9 @@ class InvoiceEditProject(BaseModel):
     name: str
     client_id: str
     owner_company: Optional[str] = 'IPC'
+    is_fixed_fee: bool = False
+    is_managed_services: bool = False
+    managed_services_min_hours: Optional[float] = None
 
 
 class InvoiceEditLine(BaseModel):
@@ -149,6 +156,7 @@ class OnHoldEntryPatch(BaseModel):
 class InvoicePatch(BaseModel):
     status: Optional[str] = None
     cap_amount: Optional[float] = None
+    fixed_fee_amount: Optional[float] = None
     issue_date: Optional[date] = None
     due_date: Optional[date] = None
     period_start: Optional[date] = None

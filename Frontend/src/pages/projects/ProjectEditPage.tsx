@@ -48,6 +48,10 @@ export default function ProjectEditPage() {
   const [billingDay, setBillingDay] = useState('3');
   const [customPeriodDays, setCustomPeriodDays] = useState('');
   const [billingAnchorDate, setBillingAnchorDate] = useState('');
+  const [isFixedFee, setIsFixedFee] = useState(false);
+  const [fixedFeeAmount, setFixedFeeAmount] = useState('');
+  const [isManagedServices, setIsManagedServices] = useState(false);
+  const [managedServicesMinHours, setManagedServicesMinHours] = useState('');
 
   // Initialize from server data once
   if (project && !initialized) {
@@ -70,12 +74,24 @@ export default function ProjectEditPage() {
     setBillingDay(project.billing_day_of_period != null ? String(project.billing_day_of_period) : '3');
     setCustomPeriodDays(project.custom_period_days != null ? String(project.custom_period_days) : '');
     setBillingAnchorDate(project.billing_anchor_date || '');
+    setIsFixedFee(project.is_fixed_fee || false);
+    setFixedFeeAmount(project.fixed_fee_amount != null ? String(project.fixed_fee_amount) : '');
+    setIsManagedServices(project.is_managed_services || false);
+    setManagedServicesMinHours(project.managed_services_min_hours != null ? String(project.managed_services_min_hours) : '');
     setInitialized(true);
   }
 
   const handleSave = async () => {
     if (!name.trim()) { toast.error('Project name is required.'); return; }
     if (!clientId) { toast.error('Client is required.'); return; }
+    if (isFixedFee && (!fixedFeeAmount || parseFloat(fixedFeeAmount) <= 0)) {
+      toast.error('Enter a fixed fee amount.');
+      return;
+    }
+    if (isManagedServices && (!managedServicesMinHours || parseFloat(managedServicesMinHours) <= 0)) {
+      toast.error('Enter the minimum hours package.');
+      return;
+    }
     if (!projectId) return;
     try {
       await patchProject.mutateAsync({
@@ -100,6 +116,10 @@ export default function ProjectEditPage() {
           billing_day_of_period: billingDay ? parseInt(billingDay) : undefined,
           custom_period_days: customPeriodDays ? parseInt(customPeriodDays) : undefined,
           billing_anchor_date: billingAnchorDate || undefined,
+          is_fixed_fee: isFixedFee,
+          fixed_fee_amount: isFixedFee && fixedFeeAmount ? parseFloat(fixedFeeAmount) : null,
+          is_managed_services: isManagedServices,
+          managed_services_min_hours: isManagedServices && managedServicesMinHours ? parseFloat(managedServicesMinHours) : null,
         },
       });
       toast.success('Project saved.');
@@ -324,6 +344,60 @@ export default function ProjectEditPage() {
                 </div>
               )}
             </div>
+
+            <Separator />
+
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={isFixedFee}
+                onCheckedChange={v => { setIsFixedFee(v); if (v) setIsManagedServices(false); }}
+              />
+              <div>
+                <Label>Fixed fee project</Label>
+                <p className="text-xs text-muted-foreground">
+                  Bills a single flat fee regardless of hours worked. Invoices for this project will only show hours for reference.
+                </p>
+              </div>
+            </div>
+            {isFixedFee && (
+              <div className="space-y-1 max-w-xs">
+                <Label>Fixed Fee Amount ($) *</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={fixedFeeAmount}
+                  onChange={e => setFixedFeeAmount(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={isManagedServices}
+                onCheckedChange={v => { setIsManagedServices(v); if (v) setIsFixedFee(false); }}
+              />
+              <div>
+                <Label>Managed Services project</Label>
+                <p className="text-xs text-muted-foreground">
+                  Bills a minimum hours package. If actual hours fall short, the minimum is still charged; hours above it bill normally.
+                </p>
+              </div>
+            </div>
+            {isManagedServices && (
+              <div className="space-y-1 max-w-xs">
+                <Label>Minimum Hours Package *</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={managedServicesMinHours}
+                  onChange={e => setManagedServicesMinHours(e.target.value)}
+                  placeholder="e.g. 40"
+                />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
