@@ -1,8 +1,13 @@
 """
 Invoice number generation service.
 
-Format: "{client_number}-{sequence for that client}", e.g. "12-3"
+Format: "{prefix}{client_number}-{sequence for that client}", e.g. "12-3"
   (client #12's 3rd invoice).
+
+`prefix` is empty for Impact Point (IPC) invoices and "P" for Pegasus Insights
+(owner_company == "PI") invoices — so the same client's 3rd invoice reads "12-3"
+for IPC and "P12-3" for Pegasus. The sequence itself is shared per client (it is
+cumulative and never resets), only the leading "P" differs.
 
 Sequence is cumulative per client — never resets, does not depend on year.
 Counter stored in client_invoice_sequences, one row per client.
@@ -13,17 +18,30 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 
-def preview_next_number_for_client(db: Session, client_id: str, client_number: str) -> str:
+def company_prefix(owner_company: str | None) -> str:
+    """Leading letter for the invoice number based on the owning company.
+
+    Pegasus Insights (PI) invoices are prefixed with "P"; Impact Point (IPC)
+    and anything else have no prefix.
+    """
+    return "P" if (owner_company or "").upper() == "PI" else ""
+
+
+def preview_next_number_for_client(
+    db: Session, client_id: str, client_number: str, owner_company: str | None = None
+) -> str:
     """Non-destructive preview — does NOT increment the counter."""
     row = db.execute(
         text("SELECT last_sequence FROM client_invoice_sequences WHERE client_id = :cid"),
         {"cid": client_id},
     ).scalar()
     seq = (int(row) if row is not None else 0) + 1
-    return f"{client_number}-{seq}"
+    return f"{company_prefix(owner_company)}{client_number}-{seq}"
 
 
-def atomic_generate_number_for_client(db: Session, client_id: str, client_number: str) -> str:
+def atomic_generate_number_for_client(
+    db: Session, client_id: str, client_number: str, owner_company: str | None = None
+) -> str:
     """
     Atomically increment the per-client counter and return the locked invoice number.
     Called ONCE at invoice creation — never called again for the same invoice.
@@ -40,4 +58,4 @@ def atomic_generate_number_for_client(db: Session, client_id: str, client_number
         """),
         {"id": str(uuid.uuid4()), "client_id": client_id},
     ).scalar()
-    return f"{client_number}-{int(result)}"
+    return f"{company_prefix(owner_company)}{client_number}-{int(result)}"

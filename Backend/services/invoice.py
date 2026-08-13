@@ -21,8 +21,12 @@ def create_invoice(db: Session, invoice_in: InvoiceCreate) -> Invoice:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This client has no Client Number set. Add one in the client's record before generating invoices.",
         )
-    # Auto-generate invoice number — never user-supplied
-    invoice.invoice_number = atomic_generate_number_for_client(db, client.id, client.client_number)
+    # Auto-generate invoice number — never user-supplied. The owning company
+    # decides the prefix (Pegasus invoices lead with "P").
+    owner_company = invoice.owner_company or (project.owner_company if project else None) or "IPC"
+    invoice.invoice_number = atomic_generate_number_for_client(
+        db, client.id, client.client_number, owner_company
+    )
     db.add(invoice)
     db.commit()
     db.refresh(invoice)

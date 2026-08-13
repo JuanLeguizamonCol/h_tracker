@@ -100,7 +100,7 @@ def generate_invoice_for_project_period(
             notes=f"[Auto-generated] Period: {period_start} to {period_end}",
         )
         db.add(invoice)
-        invoice.invoice_number = atomic_generate_number_for_client(db, client.id, client.client_number)
+        invoice.invoice_number = atomic_generate_number_for_client(db, client.id, client.client_number, company)
         # Flush now so the unique-index race is detected before we build lines.
         db.flush()
 

@@ -1,9 +1,9 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, DollarSign, ChevronRight, Loader2, CheckCircle, Calendar, RefreshCw, Download, Zap, X } from 'lucide-react';
+import { Plus, FileText, DollarSign, ChevronRight, Loader2, CheckCircle, Calendar, RefreshCw, Download, Zap, X, MoreHorizontal, Trash2 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { toast } from 'sonner';
-import { useInvoices, useGenerateMonthlyInvoices } from '@/hooks/useInvoices';
+import { useInvoices, useGenerateMonthlyInvoices, useDeleteInvoice } from '@/hooks/useInvoices';
 import { useProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
 import { useAuth } from '@/contexts/AuthContext';
@@ -19,6 +19,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string }> = {
   draft: { label: 'Draft', color: 'bg-muted text-muted-foreground' },
@@ -37,6 +44,8 @@ export default function Invoices() {
   const { data: projects = [] } = useProjects();
   const { data: clients = [] } = useClients();
   const generateInvoices = useGenerateMonthlyInvoices();
+  const deleteInvoice = useDeleteInvoice();
+  const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
@@ -86,6 +95,25 @@ export default function Invoices() {
       api.get<SchedulerStatus>('/invoices/scheduler-status').then(setSchedulerStatus).catch(() => {});
     } catch {
       toast.error('Failed to generate invoices.');
+    }
+  };
+
+  const invoiceLabel = (inv: Invoice) =>
+    inv.invoice_number ? `#${inv.invoice_number}` : `#${inv.id.slice(0, 8)}`;
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteInvoice.mutateAsync(deleteTarget.id);
+      toast.success(`Invoice ${invoiceLabel(deleteTarget)} deleted.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      const conflict = err instanceof Error && err.message.includes('409');
+      toast.error(
+        conflict
+          ? 'Cannot delete this invoice because it has linked records.'
+          : 'Failed to delete invoice. Please try again.',
+      );
     }
   };
 
@@ -405,14 +433,33 @@ export default function Invoices() {
                   <TableCell className="text-right text-muted-foreground">
                     {format(new Date(invoice.created_at), 'MMM d, yyyy')}
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(e) => { e.stopPropagation(); navigate(`/invoices/${invoice.id}`); }}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate(`/invoices/${invoice.id}`)}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                      {isAdmin && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => setDeleteTarget(invoice)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
                 );
@@ -462,6 +509,29 @@ export default function Invoices() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete invoice confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete invoice?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete invoice <strong>{deleteTarget ? invoiceLabel(deleteTarget) : ''}</strong>.
+              Its lines, fees and expenses are removed and any linked hours become billable again. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteInvoice.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteInvoice.isPending ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

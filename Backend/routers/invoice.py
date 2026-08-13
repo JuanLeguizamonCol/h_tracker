@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import text as sql_text
+from sqlalchemy.exc import IntegrityError
 
 from config.database import get_db
+from utils.auth_jwt import require_admin
 from services.invoice import create_invoice, get_invoices, get_invoice, update_invoice, delete_invoice
 from services.invoice_expenses import create_expense, get_expenses, get_expense, update_expense, delete_expense
 from services.export_pdf import generate_invoice_pdf
@@ -57,7 +59,9 @@ def preview_invoice_number(project_id: str, db: Session = Depends(get_db)):
             detail="This client has no Client Number set. Add one in the client's record before generating invoices.",
         )
     return {
-        "invoice_number": preview_next_number_for_client(db, client.id, client.client_number),
+        "invoice_number": preview_next_number_for_client(
+            db, client.id, client.client_number, project.owner_company
+        ),
         "client_number": client.client_number,
         "client_name": client.name,
     }
@@ -491,7 +495,16 @@ def update_invoice_detail(invoice_id: str, invoice_in: InvoiceUpdate, db: Sessio
     return invoice
 
 
-@invoice_router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+@invoice_router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT,
+                       dependencies=[Depends(require_admin)])
 def delete_invoice_detail(invoice_id: str, db: Session = Depends(get_db)):
-    if not delete_invoice(db, invoice_id):
+    try:
+        deleted = delete_invoice(db, invoice_id)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete this invoice because it has linked records.",
+        )
+    if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
