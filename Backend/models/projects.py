@@ -16,6 +16,10 @@ class Project(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     is_internal = Column(Boolean, nullable=False, default=False)
     manager_id = Column(String, ForeignKey("employees.id"), nullable=True)
+    # The project owner is the ONLY employee allowed to invoice this project
+    # (owners are Admins). Distinct from manager_id (operational manager, may be
+    # any Manager or Admin).
+    owner_id = Column(String, ForeignKey("employees.id"), nullable=True)
     project_code = Column(String, unique=True, nullable=True)
     area_category = Column(String, nullable=True)
     business_unit = Column(String, nullable=True)

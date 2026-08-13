@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2, AlertTriangle, Clock, CheckCircle } from 'lucide-re
 import { toast } from 'sonner';
 import { useProjects } from '@/hooks/useProjects';
 import { useEmployees } from '@/hooks/useEmployees';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCreateInvoice, useCreateInvoiceLines, useLinkTimeEntries, useUpdateInvoice } from '@/hooks/useInvoices';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ type CheckResult = {
 
 export default function InvoiceNewPage() {
   const navigate = useNavigate();
+  const { employee, isAdmin } = useAuth();
   const { data: projects = [] } = useProjects();
   const { data: employees = [] } = useEmployees();
 
@@ -34,9 +36,15 @@ export default function InvoiceNewPage() {
   const [isChecking, setIsChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
 
+  // Only projects the current user is allowed to invoice: the ones they own,
+  // plus legacy projects without an owner if the user is an admin (mirrors the
+  // backend's ownership rule).
   const activeProjects = useMemo(
-    () => projects.filter(p => p.is_active && !p.is_internal),
-    [projects]
+    () => projects.filter(p =>
+      p.is_active && !p.is_internal &&
+      (p.owner_id ? p.owner_id === employee?.id : isAdmin)
+    ),
+    [projects, employee?.id, isAdmin]
   );
 
   const selectedProject = useMemo(
@@ -164,6 +172,8 @@ export default function InvoiceNewPage() {
       // Map known API errors to friendly messages
       if (msg.includes('Client Number')) {
         toast.error('This client has no Client Number set. Add one in the client\'s record before generating invoices.');
+      } else if (msg.includes('only the project owner') || msg.includes('Only the project owner')) {
+        toast.error('Only the project owner can invoice this project.');
       } else if (msg.includes('422') || msg.includes('Unprocessable')) {
         toast.error('Invalid data — check all required fields and try again.');
       } else if (msg.includes('401') || msg.includes('403')) {

@@ -61,6 +61,8 @@ type Filters = {
   projectId: string;
   clientId: string;
   location: string;
+  ownerId: string;
+  managerId: string;
   status: string;
   billing: string;
   search: string;
@@ -73,6 +75,8 @@ const INIT: Filters = {
   projectId: 'all',
   clientId: 'all',
   location: 'all',
+  ownerId: 'all',
+  managerId: 'all',
   status: 'all',
   billing: 'all',
   search: '',
@@ -277,6 +281,25 @@ export default function Reports() {
       .map(k => ({ value: k, label: k === NO_LOCATION ? NO_LOCATION_LABEL : k }));
   }, [rawEntries, f.projectId, f.clientId, f.employeeId, projectMap, locationKeyOf]);
 
+  // Distinct project owners / managers present in the current entries.
+  const availableOwners = useMemo(() => {
+    const byId = new Map<string, string>();
+    rawEntries.forEach(e => {
+      const p = projectMap.get(e.project_id);
+      if (p?.owner_id) byId.set(p.owner_id, p.owner_name ?? p.owner_id);
+    });
+    return [...byId].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [rawEntries, projectMap]);
+
+  const availableManagers = useMemo(() => {
+    const byId = new Map<string, string>();
+    rawEntries.forEach(e => {
+      const p = projectMap.get(e.project_id);
+      if (p?.manager_id) byId.set(p.manager_id, p.manager_name ?? p.manager_id);
+    });
+    return [...byId].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [rawEntries, projectMap]);
+
   // ── Project auto-fill client ─────────────────────────────────────────────────
   const handleProjectChange = (val: string) => {
     setF(prev => {
@@ -289,7 +312,7 @@ export default function Reports() {
     });
   };
 
-  const clearAll = () => setF(prev => ({ ...prev, employeeId: 'all', projectId: 'all', clientId: 'all', location: 'all', status: 'all', billing: 'all', search: '' }));
+  const clearAll = () => setF(prev => ({ ...prev, employeeId: 'all', projectId: 'all', clientId: 'all', location: 'all', ownerId: 'all', managerId: 'all', status: 'all', billing: 'all', search: '' }));
 
   // ── Excel export (server-generated, honours the current filters) ───────────────
   const handleExportExcel = async () => {
@@ -302,6 +325,8 @@ export default function Reports() {
       if (f.projectId !== 'all') params.set('project_id', f.projectId);
       if (f.clientId !== 'all') params.set('client_id', f.clientId);
       if (f.location !== 'all') params.set('location', f.location);
+      if (f.ownerId !== 'all') params.set('owner_id', f.ownerId);
+      if (f.managerId !== 'all') params.set('manager_id', f.managerId);
       if (f.status !== 'all') params.set('status', f.status);
       if (f.billing !== 'all') params.set('billing', f.billing);
       if (f.search) params.set('search', f.search);
@@ -313,7 +338,7 @@ export default function Reports() {
       setIsExporting(false);
     }
   };
-  const hasActiveFilters = f.employeeId !== 'all' || f.projectId !== 'all' || f.clientId !== 'all' || f.location !== 'all' || f.status !== 'all' || f.billing !== 'all' || !!f.search;
+  const hasActiveFilters = f.employeeId !== 'all' || f.projectId !== 'all' || f.clientId !== 'all' || f.location !== 'all' || f.ownerId !== 'all' || f.managerId !== 'all' || f.status !== 'all' || f.billing !== 'all' || !!f.search;
 
   // ── Filtered entries (single source of truth) ─────────────────────────────────
   const filteredEntries = useMemo(() => rawEntries.filter(e => {
@@ -321,6 +346,8 @@ export default function Reports() {
     if (f.projectId !== 'all' && e.project_id !== f.projectId) return false;
     if (f.clientId !== 'all' && projectMap.get(e.project_id)?.client_id !== f.clientId) return false;
     if (f.location !== 'all' && locationKeyOf(e.user_id) !== f.location) return false;
+    if (f.ownerId !== 'all' && projectMap.get(e.project_id)?.owner_id !== f.ownerId) return false;
+    if (f.managerId !== 'all' && projectMap.get(e.project_id)?.manager_id !== f.managerId) return false;
     if (f.status === 'normal' && e.status !== 'normal') return false;
     if (f.status === 'on_hold' && e.status !== 'on_hold') return false;
     if (f.billing === 'billable' && !e.billable) return false;
@@ -485,11 +512,13 @@ export default function Reports() {
     if (f.projectId !== 'all')  c.push({ key: 'proj', label: `Project: ${projectMap.get(f.projectId)?.name ?? f.projectId}`,    onClear: () => set('projectId', 'all') });
     if (f.clientId !== 'all')   c.push({ key: 'cli',  label: `Client: ${clientMap.get(f.clientId)?.name ?? f.clientId}`,        onClear: () => set('clientId', 'all') });
     if (f.location !== 'all')   c.push({ key: 'loc',  label: `Location: ${f.location === NO_LOCATION ? NO_LOCATION_LABEL : f.location}`, onClear: () => set('location', 'all') });
+    if (f.ownerId !== 'all')    c.push({ key: 'own',  label: `Owner: ${availableOwners.find(o => o.value === f.ownerId)?.label ?? f.ownerId}`, onClear: () => set('ownerId', 'all') });
+    if (f.managerId !== 'all')  c.push({ key: 'mgr',  label: `Manager: ${availableManagers.find(m => m.value === f.managerId)?.label ?? f.managerId}`, onClear: () => set('managerId', 'all') });
     if (f.status !== 'all')     c.push({ key: 'st',   label: `Status: ${f.status === 'on_hold' ? 'On Hold' : 'Normal'}`,        onClear: () => set('status', 'all') });
     if (f.billing !== 'all')    c.push({ key: 'bi',   label: f.billing === 'billable' ? 'Billable only' : 'Non-billable only',   onClear: () => set('billing', 'all') });
     if (f.search)               c.push({ key: 'q',    label: `"${f.search}"`,                                                   onClear: () => set('search', '') });
     return c;
-  }, [f, employeeMap, projectMap, clientMap]);
+  }, [f, employeeMap, projectMap, clientMap, availableOwners, availableManagers]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -588,6 +617,18 @@ export default function Reports() {
                 options={availableLocations}
                 isFiltered={f.location !== 'all'}
                 onChange={v => set('location', v)} onClear={() => set('location', 'all')} />
+            )}
+            {canManage && (
+              <FilterSelect label="Owner" value={f.ownerId} allLabel="All Owners"
+                options={availableOwners}
+                isFiltered={f.ownerId !== 'all'}
+                onChange={v => set('ownerId', v)} onClear={() => set('ownerId', 'all')} />
+            )}
+            {canManage && (
+              <FilterSelect label="Project Manager" value={f.managerId} allLabel="All Managers"
+                options={availableManagers}
+                isFiltered={f.managerId !== 'all'}
+                onChange={v => set('managerId', v)} onClear={() => set('managerId', 'all')} />
             )}
             <FilterSelect label="Status" value={f.status} allLabel="All Statuses"
               options={[{ value: 'normal', label: 'Normal' }, { value: 'on_hold', label: 'On Hold' }]}

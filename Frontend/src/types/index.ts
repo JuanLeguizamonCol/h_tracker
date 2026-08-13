@@ -155,6 +155,8 @@ export interface Project {
   business_unit: string | null;
   manager_id: string | null;
   manager_name: string | null;
+  owner_id: string | null;
+  owner_name: string | null;
   referral_id: string | null;
   referral_type: string | null;
   referral_value: number | null;

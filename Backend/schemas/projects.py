@@ -14,6 +14,7 @@ class ProjectBase(BaseModel):
     area_category: Optional[str] = None
     business_unit: Optional[str] = None
     manager_id: Optional[str] = None
+    owner_id: Optional[str] = None
     referral_id: Optional[str] = None
     referral_type: Optional[str] = None
     referral_value: Optional[float] = None
@@ -45,6 +46,7 @@ class ProjectUpdate(BaseModel):
     area_category: Optional[str] = None
     business_unit: Optional[str] = None
     manager_id: Optional[str] = None
+    owner_id: Optional[str] = None
     referral_id: Optional[str] = None
     referral_type: Optional[str] = None
     referral_value: Optional[float] = None
@@ -76,6 +78,8 @@ class ProjectOut(BaseModel):
     business_unit: Optional[str] = None
     manager_id: Optional[str] = None
     manager_name: Optional[str] = None   # computed in router, not a DB column
+    owner_id: Optional[str] = None
+    owner_name: Optional[str] = None     # computed in router, not a DB column
     referral_id: Optional[str] = None
     referral_type: Optional[str] = None
     referral_value: Optional[float] = None

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, Plus, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useCreateProject, useProjectCategories, useAdminEmployees } from '@/hooks/useProjects';
+import { useCreateProject, useProjectCategories, useAdminEmployees, useManagerEmployees } from '@/hooks/useProjects';
 import { useActiveClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useQueryClient } from '@tanstack/react-query';
@@ -31,6 +31,7 @@ interface Step1Form {
   area_category: string;
   business_unit: string;
   manager_id: string;
+  owner_id: string;
   start_date: string;
   end_date: string;
   status: string;
@@ -74,6 +75,7 @@ export default function ProjectNewPage() {
   const { data: areaCategories = [] } = useProjectCategories('area_category');
   const { data: businessUnits = [] } = useProjectCategories('business_unit');
   const { data: adminEmployees = [] } = useAdminEmployees();
+  const { data: managerEmployees = [] } = useManagerEmployees();
   const { data: allEmployees = [] } = useEmployees();
 
   const [step, setStep] = useState(0);
@@ -87,6 +89,7 @@ export default function ProjectNewPage() {
     area_category: '',
     business_unit: '',
     manager_id: '',
+    owner_id: '',
     start_date: '',
     end_date: '',
     status: 'active',
@@ -167,6 +170,7 @@ export default function ProjectNewPage() {
     if (!form.client_id) { toast.error('Client is required.'); return false; }
     if (!form.area_category) { toast.error('Area category is required.'); return false; }
     if (!form.business_unit) { toast.error('Business unit is required.'); return false; }
+    if (!form.owner_id) { toast.error('Project owner is required.'); return false; }
     if (!form.manager_id) { toast.error('Project manager is required.'); return false; }
     if (!form.start_date) { toast.error('Start date is required.'); return false; }
     if (!form.status) { toast.error('Status is required.'); return false; }
@@ -200,6 +204,7 @@ export default function ProjectNewPage() {
         area_category: form.area_category || undefined,
         business_unit: form.business_unit || undefined,
         manager_id: form.manager_id || undefined,
+        owner_id: form.owner_id || undefined,
         start_date: form.start_date || undefined,
         end_date: form.end_date || undefined,
         status: form.status,
@@ -253,7 +258,12 @@ export default function ProjectNewPage() {
   const clientOptions = clients.map(c => ({ id: c.id, label: c.name }));
   const areaOptions = areaCategories.map(c => ({ id: c.value, label: c.value }));
   const buOptions = businessUnits.map(c => ({ id: c.value, label: c.value }));
-  const managerOptions = adminEmployees.map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
+  // Owner must be able to invoice → Admins only. Manager may be any Manager or Admin.
+  const ownerOptions = adminEmployees.map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
+  const managerOptions = [...managerEmployees, ...adminEmployees]
+    .filter((e, i, arr) => arr.findIndex(x => x.id === e.id) === i)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
   const referralOptions = allEmployees.map(e => ({ id: e.id, label: e.name }));
 
   return (
@@ -345,12 +355,22 @@ export default function ProjectNewPage() {
                 />
               </div>
               <div className="space-y-1">
+                <Label>Project Owner *</Label>
+                <SearchableCombobox
+                  options={ownerOptions}
+                  value={form.owner_id || null}
+                  onChange={v => set('owner_id', v ?? '')}
+                  placeholder="Select owner (Admin only)..."
+                />
+                <p className="text-xs text-muted-foreground">Only the owner can invoice this project.</p>
+              </div>
+              <div className="space-y-1">
                 <Label>Project Manager *</Label>
                 <SearchableCombobox
                   options={managerOptions}
                   value={form.manager_id || null}
                   onChange={v => set('manager_id', v ?? '')}
-                  placeholder="Select manager (Admin only)..."
+                  placeholder="Select manager (Manager or Admin)..."
                 />
               </div>
               <div className="space-y-1">

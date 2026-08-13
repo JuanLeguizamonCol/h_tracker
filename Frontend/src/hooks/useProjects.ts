@@ -46,6 +46,13 @@ export function useAdminEmployees() {
   });
 }
 
+export function useManagerEmployees() {
+  return useQuery({
+    queryKey: ['employees', 'manager'],
+    queryFn: () => api.get<Employee[]>('/employees?user_role=manager'),
+  });
+}
+
 export function useCreateProject() {
   const queryClient = useQueryClient();
   return useMutation({

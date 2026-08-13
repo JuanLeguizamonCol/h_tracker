@@ -1,5 +1,6 @@
 import logging
 import uuid
+from typing import Optional
 from datetime import date
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -227,10 +228,15 @@ def generate_invoice_for_project_period(
         return {"generated": False, "skipped": True, "reason": "race_lost", "invoice_number": None}
 
 
-def generate_invoices_for_period(db: Session, period_start: date, period_end: date) -> dict:
+def generate_invoices_for_period(
+    db: Session, period_start: date, period_end: date, owner_id: Optional[str] = None
+) -> dict:
     """
     Generate draft invoices for every active, non-internal project that has
     unlinked billable time entries in [period_start, period_end].
+
+    When `owner_id` is given, only projects owned by that employee are
+    considered — so a manual run bills just the caller's own projects.
 
     Thin wrapper over generate_invoice_for_project_period — used by the manual
     /invoices/generate-monthly endpoint. Idempotent: safe to re-run for a period.
@@ -240,10 +246,13 @@ def generate_invoices_for_period(db: Session, period_start: date, period_end: da
     skipped = 0
     errors = []
 
-    active_projects = db.query(Project).filter(
+    query = db.query(Project).filter(
         Project.is_active == True,  # noqa: E712
         Project.is_internal == False,  # noqa: E712
-    ).all()
+    )
+    if owner_id is not None:
+        query = query.filter(Project.owner_id == owner_id)
+    active_projects = query.all()
 
     for project in active_projects:
         try:

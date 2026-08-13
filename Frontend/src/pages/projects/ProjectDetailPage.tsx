@@ -87,6 +87,9 @@ export default function ProjectDetailPage() {
               </Badge>
             </div>
             <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-muted-foreground">
+              {project.owner_name && (
+                <span><span className="font-medium text-foreground">Owner:</span> {project.owner_name}</span>
+              )}
               {project.manager_name && (
                 <span><span className="font-medium text-foreground">Manager:</span> {project.manager_name}</span>
               )}
@@ -119,6 +122,7 @@ export default function ProjectDetailPage() {
                     {project.status?.replace('_', ' ')}
                   </Badge>
                 } />
+                <InfoRow label="Owner" value={project.owner_name ?? '— Unassigned'} />
                 <InfoRow label="Manager" value={project.manager_name ?? '— Unassigned'} />
                 {project.project_code && <InfoRow label="Project Code" value={<code className="text-xs bg-muted px-1.5 py-0.5 rounded">{project.project_code}</code>} />}
                 {project.area_category && <InfoRow label="Area Category" value={project.area_category} />}

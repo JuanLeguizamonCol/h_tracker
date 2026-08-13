@@ -51,6 +51,8 @@ export default function Invoices() {
   const [companyFilter, setCompanyFilter] = useState<string>('all');
   const [clientFilter, setClientFilter] = useState<string>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
+  const [ownerFilter, setOwnerFilter] = useState<string>('all');
+  const [managerFilter, setManagerFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
 
@@ -147,6 +149,25 @@ export default function Invoices() {
   const projectMap = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
   const clientMap = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
 
+  // Distinct owners / managers among the projects that have invoices.
+  const ownerOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    invoices.forEach(inv => {
+      const p = projectMap.get(inv.project_id);
+      if (p?.owner_id) byId.set(p.owner_id, p.owner_name ?? p.owner_id);
+    });
+    return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [invoices, projectMap]);
+
+  const managerOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    invoices.forEach(inv => {
+      const p = projectMap.get(inv.project_id);
+      if (p?.manager_id) byId.set(p.manager_id, p.manager_name ?? p.manager_id);
+    });
+    return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [invoices, projectMap]);
+
   // Projects available in the filter — narrowed to the selected client, if any.
   const projectOptions = useMemo(() => {
     const list = clientFilter === 'all' ? projects : projects.filter(p => p.client_id === clientFilter);
@@ -155,12 +176,14 @@ export default function Invoices() {
 
   const activeFilterCount = [
     statusFilter !== 'all', companyFilter !== 'all', clientFilter !== 'all',
-    projectFilter !== 'all', !!dateFrom, !!dateTo,
+    projectFilter !== 'all', ownerFilter !== 'all', managerFilter !== 'all',
+    !!dateFrom, !!dateTo,
   ].filter(Boolean).length;
 
   const clearFilters = () => {
     setStatusFilter('all'); setCompanyFilter('all'); setClientFilter('all');
-    setProjectFilter('all'); setDateFrom(''); setDateTo('');
+    setProjectFilter('all'); setOwnerFilter('all'); setManagerFilter('all');
+    setDateFrom(''); setDateTo('');
   };
 
   const filteredInvoices = useMemo(() => {
@@ -172,6 +195,8 @@ export default function Invoices() {
         const project = projectMap.get(inv.project_id);
         if (!project || project.client_id !== clientFilter) return false;
       }
+      if (ownerFilter !== 'all' && projectMap.get(inv.project_id)?.owner_id !== ownerFilter) return false;
+      if (managerFilter !== 'all' && projectMap.get(inv.project_id)?.manager_id !== managerFilter) return false;
       if (dateFrom || dateTo) {
         const d = inv.created_at.slice(0, 10);
         if (dateFrom && d < dateFrom) return false;
@@ -179,7 +204,7 @@ export default function Invoices() {
       }
       return true;
     });
-  }, [invoices, statusFilter, companyFilter, clientFilter, projectFilter, dateFrom, dateTo, projectMap]);
+  }, [invoices, statusFilter, companyFilter, clientFilter, projectFilter, ownerFilter, managerFilter, dateFrom, dateTo, projectMap]);
 
   const getProjectName = useCallback(
     (projectId: string) => projectMap.get(projectId)?.name || 'Unknown',
@@ -329,6 +354,30 @@ export default function Invoices() {
                   <SelectItem value="all">All projects</SelectItem>
                   {projectOptions.map(p => (
                     <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Owner</Label>
+              <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All owners</SelectItem>
+                  {ownerOptions.map(o => (
+                    <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Project Manager</Label>
+              <Select value={managerFilter} onValueChange={setManagerFilter}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All managers</SelectItem>
+                  {managerOptions.map(m => (
+                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

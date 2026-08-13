@@ -40,6 +40,8 @@ def export_time_entries_xlsx(
     project_id: Optional[str] = None,
     client_id: Optional[str] = None,
     location: Optional[str] = None,
+    owner_id: Optional[str] = None,
+    manager_id: Optional[str] = None,
     status: Optional[str] = None,
     billing: Optional[str] = None,
     search: Optional[str] = None,
@@ -69,6 +71,10 @@ def export_time_entries_xlsx(
         q = q.filter(TimeEntry.project_id == project_id)
     if client_id:
         q = q.filter(Project.client_id == client_id)
+    if owner_id:
+        q = q.filter(Project.owner_id == owner_id)
+    if manager_id:
+        q = q.filter(Project.manager_id == manager_id)
     if location:
         if location == NO_LOCATION:
             q = q.filter(
@@ -131,6 +137,12 @@ def export_time_entries_xlsx(
         filters.append(f"Employee: {emp.name if emp else user_id}")
     if location:
         filters.append(f"Location: {'No location' if location == NO_LOCATION else location}")
+    if owner_id:
+        emp = db.query(Employee).filter(Employee.id == owner_id).first()
+        filters.append(f"Owner: {emp.name if emp else owner_id}")
+    if manager_id:
+        emp = db.query(Employee).filter(Employee.id == manager_id).first()
+        filters.append(f"Manager: {emp.name if emp else manager_id}")
     if status in ("normal", "on_hold"):
         filters.append(f"Status: {'On Hold' if status == 'on_hold' else 'Normal'}")
     if billing in ("billable", "non_billable"):

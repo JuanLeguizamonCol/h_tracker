@@ -64,18 +64,24 @@ def _suggest_role(skill_names: List[str]) -> Optional[str]:
     return best_role if best_count > 0 else None
 
 
-def _project_out(project, manager_name: Optional[str]) -> ProjectOut:
+def _project_out(project, manager_name: Optional[str], owner_name: Optional[str] = None) -> ProjectOut:
     data = {c.name: getattr(project, c.name) for c in project.__table__.columns}
     data["manager_name"] = manager_name
+    data["owner_name"] = owner_name
     return ProjectOut.model_validate(data)
 
 
 def _with_manager_name(project, db: Session) -> ProjectOut:
-    manager_name = None
-    if project.manager_id:
-        manager = db.query(Employee).filter(Employee.id == project.manager_id).first()
-        manager_name = manager.name if manager else None
-    return _project_out(project, manager_name)
+    # Resolve manager + owner display names in a single query.
+    ids = {pid for pid in (project.manager_id, project.owner_id) if pid}
+    name_by_id = dict(
+        db.query(Employee.id, Employee.name).filter(Employee.id.in_(ids)).all()
+    ) if ids else {}
+    return _project_out(
+        project,
+        name_by_id.get(project.manager_id) if project.manager_id else None,
+        name_by_id.get(project.owner_id) if project.owner_id else None,
+    )
 
 
 # ── Categories (must come before /{project_id}) ───────────────────────────────
@@ -126,12 +132,19 @@ def list_projects(
     db: Session = Depends(get_db),
 ):
     projects = get_projects(db, active=active, client_id=client_id, status=status)
-    # Batch-load manager names in one query instead of one per project (N+1).
-    manager_ids = {p.manager_id for p in projects if p.manager_id}
+    # Batch-load manager + owner names in one query instead of one per project (N+1).
+    people_ids = {pid for p in projects for pid in (p.manager_id, p.owner_id) if pid}
     name_by_id = dict(
-        db.query(Employee.id, Employee.name).filter(Employee.id.in_(manager_ids)).all()
-    ) if manager_ids else {}
-    return [_project_out(p, name_by_id.get(p.manager_id) if p.manager_id else None) for p in projects]
+        db.query(Employee.id, Employee.name).filter(Employee.id.in_(people_ids)).all()
+    ) if people_ids else {}
+    return [
+        _project_out(
+            p,
+            name_by_id.get(p.manager_id) if p.manager_id else None,
+            name_by_id.get(p.owner_id) if p.owner_id else None,
+        )
+        for p in projects
+    ]
 
 
 # ── Project sub-resources (before /{project_id} catch-all) ───────────────────

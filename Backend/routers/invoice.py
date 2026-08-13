@@ -7,7 +7,8 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
 
 from config.database import get_db
-from utils.auth_jwt import require_admin
+from utils.auth_jwt import require_admin, get_current_employee
+from utils.roles import get_role
 from services.invoice import create_invoice, get_invoices, get_invoice, update_invoice, delete_invoice
 from services.invoice_expenses import create_expense, get_expenses, get_expense, update_expense, delete_expense
 from services.export_pdf import generate_invoice_pdf
@@ -35,6 +36,22 @@ from dateutil.relativedelta import relativedelta
 import uuid
 
 invoice_router = APIRouter(prefix="/invoices", tags=["invoices"])
+
+
+def _ensure_can_invoice_project(project: Project, employee: Employee, db: Session) -> None:
+    """Only the project's owner may invoice it. Legacy projects without an owner
+    fall back to admin-only so they stay invoiceable."""
+    if project.owner_id:
+        if project.owner_id != employee.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the project owner can invoice this project.",
+            )
+    elif get_role(db, employee.id) != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the project owner (an Admin) can invoice this project.",
+        )
 
 
 @invoice_router.get("/signatories")
@@ -68,7 +85,16 @@ def preview_invoice_number(project_id: str, db: Session = Depends(get_db)):
 
 
 @invoice_router.post("/", response_model=InvoiceOut, status_code=status.HTTP_201_CREATED)
-def create_new_invoice(invoice_in: InvoiceCreate, db: Session = Depends(get_db)):
+def create_new_invoice(
+    invoice_in: InvoiceCreate,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    project = db.query(Project).filter(Project.id == invoice_in.project_id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    _ensure_can_invoice_project(project, current_employee, db)
+
     invoice = create_invoice(db, invoice_in)
     # Notify project manager
     project = db.query(Project).filter(Project.id == invoice.project_id).first()
@@ -131,8 +157,13 @@ def check_hours(
 
 
 @invoice_router.post("/generate-monthly")
-def generate_monthly_invoices(body: Dict[str, Any], db: Session = Depends(get_db)):
-    """Manually trigger invoice generation for a given period."""
+def generate_monthly_invoices(
+    body: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Manually trigger invoice generation for a given period. Only the caller's
+    own projects (those they own) are billed."""
     period_start_str = body.get("period_start")
     period_end_str = body.get("period_end")
     if not period_start_str or not period_end_str:
@@ -141,7 +172,7 @@ def generate_monthly_invoices(body: Dict[str, Any], db: Session = Depends(get_db
     period_start = datetime.strptime(period_start_str, "%Y-%m-%d").date()
     period_end = datetime.strptime(period_end_str, "%Y-%m-%d").date()
 
-    result = generate_invoices_for_period(db, period_start, period_end)
+    result = generate_invoices_for_period(db, period_start, period_end, owner_id=current_employee.id)
 
     log = SchedulerLog(
         id=str(uuid.uuid4()),

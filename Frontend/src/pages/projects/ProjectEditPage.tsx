@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useProject, usePatchProject, useProjectCategories, useAdminEmployees } from '@/hooks/useProjects';
+import { useProject, usePatchProject, useProjectCategories, useAdminEmployees, useManagerEmployees } from '@/hooks/useProjects';
 import { useActiveClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ export default function ProjectEditPage() {
   const { data: areaCategories = [] } = useProjectCategories('area_category');
   const { data: businessUnits = [] } = useProjectCategories('business_unit');
   const { data: adminEmployees = [] } = useAdminEmployees();
+  const { data: managerEmployees = [] } = useManagerEmployees();
   const { data: allEmployees = [] } = useEmployees();
 
   const [initialized, setInitialized] = useState(false);
@@ -35,6 +36,7 @@ export default function ProjectEditPage() {
   const [areaCategory, setAreaCategory] = useState('');
   const [businessUnit, setBusinessUnit] = useState('');
   const [managerId, setManagerId] = useState('');
+  const [ownerId, setOwnerId] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [status, setStatus] = useState('active');
@@ -61,6 +63,7 @@ export default function ProjectEditPage() {
     setAreaCategory(project.area_category || '');
     setBusinessUnit(project.business_unit || '');
     setManagerId(project.manager_id || '');
+    setOwnerId(project.owner_id || '');
     setStartDate(project.start_date || '');
     setEndDate(project.end_date || '');
     setStatus(project.status || 'active');
@@ -103,6 +106,7 @@ export default function ProjectEditPage() {
           area_category: areaCategory || undefined,
           business_unit: businessUnit || undefined,
           manager_id: managerId || undefined,
+          owner_id: ownerId || undefined,
           start_date: startDate || undefined,
           end_date: endDate || undefined,
           status,
@@ -140,7 +144,12 @@ export default function ProjectEditPage() {
   const clientOptions = clients.map(c => ({ id: c.id, label: c.name }));
   const areaOptions = areaCategories.map(c => ({ id: c.value, label: c.value }));
   const buOptions = businessUnits.map(c => ({ id: c.value, label: c.value }));
-  const managerOptions = adminEmployees.map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
+  // Owner must be able to invoice → Admins only. Manager may be any Manager or Admin.
+  const ownerOptions = adminEmployees.map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
+  const managerOptions = [...managerEmployees, ...adminEmployees]
+    .filter((e, i, arr) => arr.findIndex(x => x.id === e.id) === i)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
   const referralOptions = allEmployees.map(e => ({ id: e.id, label: e.name }));
 
   return (
@@ -199,8 +208,13 @@ export default function ProjectEditPage() {
               <SearchableCombobox options={buOptions} value={businessUnit || null} onChange={v => setBusinessUnit(v ?? '')} placeholder="Select unit..." clearable />
             </div>
             <div className="space-y-1">
+              <Label>Project Owner</Label>
+              <SearchableCombobox options={ownerOptions} value={ownerId || null} onChange={v => setOwnerId(v ?? '')} placeholder="Select owner (Admin only)..." clearable />
+              <p className="text-xs text-muted-foreground">Only the owner can invoice this project.</p>
+            </div>
+            <div className="space-y-1">
               <Label>Project Manager</Label>
-              <SearchableCombobox options={managerOptions} value={managerId || null} onChange={v => setManagerId(v ?? '')} placeholder="Select manager..." clearable />
+              <SearchableCombobox options={managerOptions} value={managerId || null} onChange={v => setManagerId(v ?? '')} placeholder="Select manager (Manager or Admin)..." clearable />
             </div>
             <div className="space-y-1">
               <Label>Start Date</Label>

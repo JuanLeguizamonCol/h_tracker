@@ -256,7 +256,9 @@ export default function InvoiceManualPage() {
     } catch (err) {
       console.error('[Manual Invoice Error]', err);
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('422') || msg.includes('Unprocessable')) {
+      if (msg.includes('only the project owner') || msg.includes('Only the project owner')) {
+        toast.error('Only the project owner can invoice this project.');
+      } else if (msg.includes('422') || msg.includes('Unprocessable')) {
         toast.error('Invalid data — check all required fields and try again.');
       } else if (msg.includes('401') || msg.includes('403')) {
         toast.error('Session expired — please sign in again.');
