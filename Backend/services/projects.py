@@ -1,12 +1,42 @@
 from typing import List, Optional
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.projects import Project
 from schemas.projects import ProjectCreate, ProjectUpdate
+from services.project_code_service import generate_project_code
 
 
 def create_project(db: Session, project_in: ProjectCreate) -> Project:
     data = project_in.model_dump(exclude_unset=True)
+
+    # Auto-generate the project code from the client number when none was
+    # supplied — "{client_number}-{consecutive}" (first project → "...-1").
+    auto_code = False
+    if not data.get("project_code") and data.get("client_id"):
+        code = generate_project_code(db, data["client_id"])
+        if code:
+            data["project_code"] = code
+            auto_code = True
+
+    for _ in range(5):
+        db_project = Project(**data)
+        db.add(db_project)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            # Only self-heal an auto-generated code that lost a race; a
+            # manually-supplied duplicate code should surface the error.
+            if auto_code:
+                data["project_code"] = generate_project_code(db, data["client_id"])
+                continue
+            raise
+        db.refresh(db_project)
+        return db_project
+
+    # Exhausted retries (extremely unlikely) — create without a code rather than fail.
+    data.pop("project_code", None)
     db_project = Project(**data)
     db.add(db_project)
     db.commit()

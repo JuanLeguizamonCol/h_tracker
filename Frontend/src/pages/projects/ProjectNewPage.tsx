@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, Plus, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -108,6 +108,19 @@ export default function ProjectNewPage() {
 
   const set = (field: keyof Step1Form, value: any) =>
     setForm(f => ({ ...f, [field]: value }));
+
+  // Whether the user has typed a custom project code. While false, the code is
+  // auto-suggested from the selected client's number ("{client_number}-{n}").
+  const [codeEdited, setCodeEdited] = useState(false);
+
+  useEffect(() => {
+    if (!form.client_id || codeEdited) return;
+    let cancelled = false;
+    api.get<{ project_code: string | null }>(`/projects/preview-code?client_id=${form.client_id}`)
+      .then(res => { if (!cancelled) setForm(f => ({ ...f, project_code: res.project_code ?? '' })); })
+      .catch(() => {/* leave the field as-is if the preview fails */});
+    return () => { cancelled = true; };
+  }, [form.client_id, codeEdited]);
 
   // ── Step 2 state
   const [roles, setRoles] = useState<RoleRow[]>([]);
@@ -295,7 +308,14 @@ export default function ProjectNewPage() {
               </div>
               <div className="space-y-1">
                 <Label>Project ID Code</Label>
-                <Input value={form.project_code} onChange={e => set('project_code', e.target.value)} placeholder="e.g. IPC-2026-001" />
+                <Input
+                  value={form.project_code}
+                  onChange={e => { set('project_code', e.target.value); setCodeEdited(e.target.value.trim().length > 0); }}
+                  placeholder="e.g. 12-1"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Auto-generated from the client number (e.g. <span className="font-mono">12-1</span>). Editable.
+                </p>
               </div>
               <div className="space-y-1">
                 <Label>Client *</Label>

@@ -91,6 +91,23 @@ def list_project_categories(
     return q.order_by(ProjectCategory.value).all()
 
 
+# ── Project code preview (must come before /{project_id}) ─────────────────────
+
+@projects_router.get("/preview-code")
+def preview_project_code_endpoint(client_id: str, db: Session = Depends(get_db)):
+    """Suggest the next project code for a client, without reserving it."""
+    from services.project_code_service import preview_project_code
+    from models.clients import Client
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    return {
+        "project_code": preview_project_code(db, client_id),
+        "client_number": client.client_number,
+    }
+
+
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
 @projects_router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
