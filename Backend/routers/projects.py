@@ -1,8 +1,10 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config.database import get_db
+from utils.auth_jwt import require_admin
 from services.projects import create_project, get_projects, get_project, update_project, delete_project
 from schemas.projects import ProjectCreate, ProjectUpdate, ProjectOut, ProjectCategoryOut, ProjectAssignmentOut
 from schemas.project_required_skill import (
@@ -359,7 +361,16 @@ def patch_project_detail(project_id: str, project_in: ProjectUpdate, db: Session
     return _with_manager_name(project, db)
 
 
-@projects_router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+@projects_router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT,
+                        dependencies=[Depends(require_admin)])
 def delete_project_detail(project_id: str, db: Session = Depends(get_db)):
-    if not delete_project(db, project_id):
+    try:
+        deleted = delete_project(db, project_id)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete this project because it has time entries or invoices linked to it.",
+        )
+    if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")

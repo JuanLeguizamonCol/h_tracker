@@ -1,14 +1,23 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Briefcase, Search, Loader2, User } from 'lucide-react';
-import { useProjects } from '@/hooks/useProjects';
+import { Plus, Briefcase, Search, Loader2, User, MoreHorizontal, Trash2 } from 'lucide-react';
+import { useProjects, useDeleteProject } from '@/hooks/useProjects';
 import { useActiveClients } from '@/hooks/useClients';
+import { useAuth } from '@/contexts/AuthContext';
 import { Project } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { toast } from 'sonner';
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'default',
@@ -27,13 +36,32 @@ const BILLING_PERIOD_LABELS: Record<string, string> = {
 
 export default function Projects() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { data: projects = [], isLoading } = useProjects();
   const { data: clients = [] } = useActiveClients();
+  const deleteProject = useDeleteProject();
   const [searchTerm, setSearchTerm] = useState('');
   const [companyFilter, setCompanyFilter] = useState('all');
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   const getClientName = (clientId: string) =>
     clients.find(c => c.id === clientId)?.name || 'No client';
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteProject.mutateAsync(deleteTarget.id);
+      toast.success(`Project "${deleteTarget.name}" deleted.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      const conflict = err instanceof Error && err.message.includes('409');
+      toast.error(
+        conflict
+          ? 'Cannot delete this project because it has time entries or invoices linked to it.'
+          : 'Failed to delete project. Please try again.',
+      );
+    }
+  };
 
   const filtered = projects.filter(p => {
     const matchesSearch =
@@ -94,6 +122,8 @@ export default function Projects() {
             project={project}
             clientName={getClientName(project.client_id)}
             onClick={() => navigate(`/projects/${project.id}`)}
+            canDelete={isAdmin}
+            onDelete={() => setDeleteTarget(project)}
           />
         ))}
       </div>
@@ -104,6 +134,28 @@ export default function Projects() {
           <p className="text-muted-foreground">No projects found</p>
         </div>
       )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{deleteTarget?.name}</strong>. This action cannot be undone.
+              Projects with time entries or invoices cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteProject.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteProject.isPending ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -112,10 +164,14 @@ function ProjectCard({
   project,
   clientName,
   onClick,
+  canDelete,
+  onDelete,
 }: {
   project: Project;
   clientName: string;
   onClick: () => void;
+  canDelete: boolean;
+  onDelete: () => void;
 }) {
   return (
     <Card
@@ -132,6 +188,25 @@ function ProjectCard({
             <p className="text-xs text-muted-foreground truncate">{clientName}</p>
           </div>
         </div>
+        {canDelete && (
+          <div onClick={e => e.stopPropagation()}>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={onDelete}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="space-y-2">

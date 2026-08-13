@@ -3,17 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import {
   Plus, Users, Search, MoreHorizontal, Edit, ChevronDown, ChevronRight,
-  Briefcase, Loader2, Download, RefreshCw,
+  Briefcase, Loader2, Download, RefreshCw, Trash2,
 } from 'lucide-react';
-import { useClients, useUpdateClient } from '@/hooks/useClients';
+import { useClients, useUpdateClient, useDeleteClient } from '@/hooks/useClients';
 import { useProjects } from '@/hooks/useProjects';
+import { useAuth } from '@/contexts/AuthContext';
+import { Client } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
@@ -23,13 +29,16 @@ import { FreshSalesImportModal } from '@/components/FreshSalesImportModal';
 
 export default function Clients() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { data: clients = [], isLoading } = useClients();
   const { data: projects = [] } = useProjects();
   const updateClient = useUpdateClient();
+  const deleteClient = useDeleteClient();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
   const [importOpen, setImportOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
   const filteredClients = clients.filter(
     client =>
@@ -53,6 +62,22 @@ export default function Clients() {
       await updateClient.mutateAsync({ id: client.id, updates: { is_active: !client.is_active } });
       toast.success(client.is_active ? 'Client deactivated.' : 'Client activated.');
     } catch { toast.error('Something went wrong. Please try again.'); }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteClient.mutateAsync(deleteTarget.id);
+      toast.success(`Client "${deleteTarget.name}" deleted.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      const conflict = err instanceof Error && err.message.includes('409');
+      toast.error(
+        conflict
+          ? 'Cannot delete this client because it still has projects. Delete its projects first.'
+          : 'Failed to delete client. Please try again.',
+      );
+    }
   };
 
   const existingFreshsalesIds = new Set(
@@ -163,6 +188,17 @@ export default function Clients() {
                           <DropdownMenuItem onClick={() => handleToggleActive(client)}>
                             {client.is_active ? 'Deactivate' : 'Activate'}
                           </DropdownMenuItem>
+                          {isAdmin && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setDeleteTarget(client)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />Delete
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -216,6 +252,28 @@ export default function Clients() {
         onOpenChange={setImportOpen}
         existingFreshsalesIds={existingFreshsalesIds}
       />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete client?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{deleteTarget?.name}</strong>. This action cannot be undone.
+              Clients that still have projects cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteClient.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteClient.isPending ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

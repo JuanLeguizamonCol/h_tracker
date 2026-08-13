@@ -46,3 +46,19 @@ def get_current_employee(
     if emp is None:
         raise credentials_exception
     return emp
+
+
+def require_admin(
+    current_employee=Depends(get_current_employee),
+    db: Session = Depends(get_db),
+):
+    """Dependency that allows the request only for admins. Returns the employee."""
+    from models.user_roles import UserRole
+
+    role = db.query(UserRole).filter(UserRole.user_id == current_employee.id).first()
+    if role is None or role.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required.",
+        )
+    return current_employee

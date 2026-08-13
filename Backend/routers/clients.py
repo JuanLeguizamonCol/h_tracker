@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from config.database import get_db
 from services.clients import create_client, get_clients, get_client, update_client, delete_client
 from schemas.clients import ClientCreate, ClientUpdate, ClientOut
+from utils.auth_jwt import require_admin
 
 clients_router = APIRouter(prefix="/clients", tags=["clients"])
 
@@ -44,7 +45,16 @@ def update_client_detail(client_id: str, client_in: ClientUpdate, db: Session = 
     return client
 
 
-@clients_router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
+@clients_router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT,
+                       dependencies=[Depends(require_admin)])
 def delete_client_detail(client_id: str, db: Session = Depends(get_db)):
-    if not delete_client(db, client_id):
+    try:
+        deleted = delete_client(db, client_id)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete this client because it still has projects. Delete its projects first.",
+        )
+    if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
