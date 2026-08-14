@@ -23,3 +23,5 @@ from models.employee_internal_cost import EmployeeInternalCost
 from models.project_required_skill import ProjectRequiredSkill
 from models.invoice_number_sequence import InvoiceNumberSequence
 from models.client_invoice_sequence import ClientInvoiceSequence
+from models.announcements import Announcement
+from models.announcement_attachments import AnnouncementAttachment

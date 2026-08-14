@@ -64,6 +64,27 @@ export interface EmployeeSkill {
   created_at: string;
 }
 
+export interface AnnouncementAttachment {
+  id: string;
+  announcement_id: string;
+  file_name: string;
+  file_url: string;
+  file_size: number | null;
+  created_at: string;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string | null;
+  visibility: 'all' | 'locations';
+  locations: string[];
+  posted_by: string;
+  posted_by_name: string;
+  created_at: string;
+  attachments: AnnouncementAttachment[];
+}
+
 export interface SkillSearchResult {
   employee_id: string;
   employee_name: string;
