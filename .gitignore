@@ -5,6 +5,7 @@ core/.env.*
 azure.env
 .env
 
+docs/
 
 
 # Byte-compiled / optimized / DLL files

@@ -53,7 +53,6 @@ export default function ProjectEditPage() {
   const [isFixedFee, setIsFixedFee] = useState(false);
   const [fixedFeeAmount, setFixedFeeAmount] = useState('');
   const [isManagedServices, setIsManagedServices] = useState(false);
-  const [managedServicesMinHours, setManagedServicesMinHours] = useState('');
 
   // Initialize from server data once
   if (project && !initialized) {
@@ -80,7 +79,6 @@ export default function ProjectEditPage() {
     setIsFixedFee(project.is_fixed_fee || false);
     setFixedFeeAmount(project.fixed_fee_amount != null ? String(project.fixed_fee_amount) : '');
     setIsManagedServices(project.is_managed_services || false);
-    setManagedServicesMinHours(project.managed_services_min_hours != null ? String(project.managed_services_min_hours) : '');
     setInitialized(true);
   }
 
@@ -89,10 +87,6 @@ export default function ProjectEditPage() {
     if (!clientId) { toast.error('Client is required.'); return; }
     if (isFixedFee && (!fixedFeeAmount || parseFloat(fixedFeeAmount) <= 0)) {
       toast.error('Enter a fixed fee amount.');
-      return;
-    }
-    if (isManagedServices && (!managedServicesMinHours || parseFloat(managedServicesMinHours) <= 0)) {
-      toast.error('Enter the minimum hours package.');
       return;
     }
     if (!projectId) return;
@@ -123,7 +117,6 @@ export default function ProjectEditPage() {
           is_fixed_fee: isFixedFee,
           fixed_fee_amount: isFixedFee && fixedFeeAmount ? parseFloat(fixedFeeAmount) : null,
           is_managed_services: isManagedServices,
-          managed_services_min_hours: isManagedServices && managedServicesMinHours ? parseFloat(managedServicesMinHours) : null,
         },
       });
       toast.success('Project saved.');
@@ -400,17 +393,10 @@ export default function ProjectEditPage() {
               </div>
             </div>
             {isManagedServices && (
-              <div className="space-y-1 max-w-xs">
-                <Label>Minimum Hours Package *</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.5"
-                  value={managedServicesMinHours}
-                  onChange={e => setManagedServicesMinHours(e.target.value)}
-                  placeholder="e.g. 40"
-                />
-              </div>
+              <p className="text-xs text-muted-foreground rounded-md border border-dashed p-2 max-w-md">
+                Minimum hours are set <strong>per role</strong> on the project’s Roles &amp; Rates tab.
+                Each position can have its minimum turned on or off.
+              </p>
             )}
           </div>
         </CardContent>

@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -155,7 +156,7 @@ export default function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="roles" className="mt-4">
-          <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} /></CardContent></Card>
+          <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} /></CardContent></Card>
         </TabsContent>
 
         <TabsContent value="assignments" className="mt-4">
@@ -176,7 +177,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 // ── Roles & Rates Panel ──────────────────────────────────────────────────────
-function ProjectRolesPanel({ projectId }: { projectId: string }) {
+function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string; isManagedServices: boolean }) {
   const { data: roles = [], isLoading } = useProjectRoles(projectId);
   const createRole = useCreateProjectRole();
   const updateRole = useUpdateProjectRole();
@@ -184,14 +185,19 @@ function ProjectRolesPanel({ projectId }: { projectId: string }) {
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<ProjectRole | null>(null);
-  const [form, setForm] = useState({ name: '', hourly_rate_usd: 0 });
+  const [form, setForm] = useState({ name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '' });
+
+  const minPayload = () => ({
+    min_hours_enabled: isManagedServices && form.min_hours_enabled,
+    min_hours: isManagedServices && form.min_hours_enabled && form.min_hours ? parseFloat(form.min_hours) : null,
+  });
 
   const handleAdd = async () => {
     if (!form.name) { toast.error('Please enter a role name.'); return; }
     try {
-      await createRole.mutateAsync({ project_id: projectId, name: form.name, hourly_rate_usd: form.hourly_rate_usd });
+      await createRole.mutateAsync({ project_id: projectId, name: form.name, hourly_rate_usd: form.hourly_rate_usd, ...minPayload() });
       toast.success('Role added.');
-      setForm({ name: '', hourly_rate_usd: 0 });
+      setForm({ name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '' });
       setIsAddOpen(false);
     } catch { toast.error('Something went wrong.'); }
   };
@@ -199,7 +205,7 @@ function ProjectRolesPanel({ projectId }: { projectId: string }) {
   const handleUpdate = async () => {
     if (!editingRole || !form.name) return;
     try {
-      await updateRole.mutateAsync({ id: editingRole.id, updates: { name: form.name, hourly_rate_usd: form.hourly_rate_usd } });
+      await updateRole.mutateAsync({ id: editingRole.id, updates: { name: form.name, hourly_rate_usd: form.hourly_rate_usd, ...minPayload() } });
       toast.success('Role saved.');
       setEditingRole(null);
     } catch { toast.error('Something went wrong.'); }
@@ -217,8 +223,11 @@ function ProjectRolesPanel({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Define roles and hourly rates (USD) for this project.</p>
-        <Button size="sm" className="gap-1.5" onClick={() => { setForm({ name: '', hourly_rate_usd: 0 }); setIsAddOpen(true); }}>
+        <p className="text-sm text-muted-foreground">
+          Define roles and hourly rates (USD) for this project.
+          {isManagedServices && ' Managed Services: enable a minimum per role to bill max(actual, minimum).'}
+        </p>
+        <Button size="sm" className="gap-1.5" onClick={() => { setForm({ name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '' }); setIsAddOpen(true); }}>
           <Plus className="h-4 w-4" /> Add Role
         </Button>
       </div>
@@ -230,6 +239,7 @@ function ProjectRolesPanel({ projectId }: { projectId: string }) {
             <TableRow>
               <TableHead>Role Name</TableHead>
               <TableHead className="text-right">Rate (USD/h)</TableHead>
+              {isManagedServices && <TableHead className="text-right">Min Hours</TableHead>}
               <TableHead className="text-right w-24">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -238,9 +248,16 @@ function ProjectRolesPanel({ projectId }: { projectId: string }) {
               <TableRow key={role.id}>
                 <TableCell className="font-medium">{role.name}</TableCell>
                 <TableCell className="text-right font-semibold text-primary">${Number(role.hourly_rate_usd)}/h</TableCell>
+                {isManagedServices && (
+                  <TableCell className="text-right text-sm">
+                    {role.min_hours_enabled && role.min_hours != null
+                      ? <span className="font-medium">{Number(role.min_hours)}h min</span>
+                      : <span className="text-muted-foreground">Flat</span>}
+                  </TableCell>
+                )}
                 <TableCell className="text-right">
                   <div className="flex gap-1 justify-end">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd) }); setEditingRole(role); }}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd), min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '' }); setEditingRole(role); }}>
                       <Edit className="h-4 w-4" />
                     </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(role.id)}>
@@ -265,6 +282,24 @@ function ProjectRolesPanel({ projectId }: { projectId: string }) {
               <Label>Hourly rate (USD)</Label>
               <Input type="number" min="0" step="0.5" value={form.hourly_rate_usd || ''} onChange={e => setForm({ ...form, hourly_rate_usd: parseFloat(e.target.value) || 0 })} />
             </div>
+            {isManagedServices && (
+              <div className="rounded-md border p-3 bg-muted/20 space-y-3">
+                <div className="flex items-center gap-3">
+                  <Switch checked={form.min_hours_enabled} onCheckedChange={v => setForm({ ...form, min_hours_enabled: v })} />
+                  <div>
+                    <Label>Bill a minimum for this role</Label>
+                    <p className="text-xs text-muted-foreground">If off, this role is billed flat on actual hours.</p>
+                  </div>
+                </div>
+                {form.min_hours_enabled && (
+                  <div className="space-y-1">
+                    <Label>Minimum hours (per billing period)</Label>
+                    <Input type="number" min="0" step="0.5" value={form.min_hours} onChange={e => setForm({ ...form, min_hours: e.target.value })} placeholder="e.g. 40" />
+                    <p className="text-xs text-muted-foreground">Bills max(actual hours, minimum) × rate for the period.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setIsAddOpen(false); setEditingRole(null); }}>Cancel</Button>

@@ -8,6 +8,9 @@ class ProjectRoleBase(BaseModel):
     project_id: str
     name: str
     hourly_rate_usd: float
+    # Managed Services: bill a per-period minimum for this role when enabled.
+    min_hours_enabled: bool = False
+    min_hours: Optional[float] = None
 
 
 class ProjectRoleCreate(ProjectRoleBase):
@@ -17,6 +20,8 @@ class ProjectRoleCreate(ProjectRoleBase):
 class ProjectRoleUpdate(BaseModel):
     name: Optional[str] = None
     hourly_rate_usd: Optional[float] = None
+    min_hours_enabled: Optional[bool] = None
+    min_hours: Optional[float] = None
 
 
 class ProjectRoleOut(ProjectRoleBase):

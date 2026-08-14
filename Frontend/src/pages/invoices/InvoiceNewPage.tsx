@@ -84,7 +84,7 @@ export default function InvoiceNewPage() {
       const availableEntries = entries.filter(e => !linkedIds.has(e.id));
 
       if (availableEntries.length > 0) {
-        const projectRoles = await api.get<{ id: string; name: string; hourly_rate_usd: number }[]>(
+        const projectRoles = await api.get<{ id: string; name: string; hourly_rate_usd: number; min_hours_enabled: boolean; min_hours: number | null }[]>(
           `/project-roles?project_id=${selectedProjectId}`
         );
         const assignments = await api.get<{ user_id: string; role_id: string | null }[]>(
@@ -106,18 +106,6 @@ export default function InvoiceNewPage() {
         const isFixedFee = !!selectedProject?.is_fixed_fee;
         const isManagedServices = !!selectedProject?.is_managed_services;
         const isFlatBilling = isFixedFee || isManagedServices;
-
-        // Real (hours x rate) figures — used as-is for normal projects, and
-        // to derive the blended rate for Managed Services before zeroing.
-        let totalHours = 0;
-        let realSubtotal = 0;
-        Object.values(employeeHours).forEach(eh => {
-          const roleId = assignmentMap.get(eh.userId);
-          const role = roleId ? rolesMap.get(roleId) : null;
-          const rate = role ? Number(role.hourly_rate_usd) : 0;
-          totalHours += eh.hours;
-          realSubtotal += eh.hours * rate;
-        });
 
         const lineData = Object.values(employeeHours).map(eh => {
           const roleId = assignmentMap.get(eh.userId);
@@ -144,19 +132,33 @@ export default function InvoiceNewPage() {
             id: invoice.id,
             updates: { fixed_fee_amount: feeVal, subtotal: feeVal, total: feeVal },
           });
-        } else if (isManagedServices && selectedProject?.managed_services_min_hours) {
-          const minHours = Number(selectedProject.managed_services_min_hours);
-          const blendedRate = totalHours > 0 ? realSubtotal / totalHours : 0;
-          const billableHours = Math.max(totalHours, minHours);
-          const feeVal = billableHours * blendedRate;
+        } else if (isManagedServices) {
+          // Per-role minimum: each role bills max(actual, min) when its minimum
+          // is enabled, else flat on actual hours. Min-enabled roles bill their
+          // minimum even without logged hours.
+          const actualByRole = new Map<string, number>();
+          Object.values(employeeHours).forEach(eh => {
+            const roleId = assignmentMap.get(eh.userId);
+            if (roleId) actualByRole.set(roleId, (actualByRole.get(roleId) || 0) + eh.hours);
+          });
+          const roleIds = new Set<string>([
+            ...actualByRole.keys(),
+            ...projectRoles.filter(r => r.min_hours_enabled).map(r => r.id),
+          ]);
+          let feeVal = 0;
+          roleIds.forEach(rid => {
+            const role = rolesMap.get(rid);
+            if (!role) return;
+            const rate = Number(role.hourly_rate_usd);
+            const actual = actualByRole.get(rid) || 0;
+            const billed = role.min_hours_enabled && role.min_hours != null
+              ? Math.max(actual, Number(role.min_hours))
+              : actual;
+            feeVal += billed * rate;
+          });
           await updateInvoice.mutateAsync({
             id: invoice.id,
-            updates: {
-              fixed_fee_amount: feeVal,
-              managed_services_min_hours: minHours,
-              subtotal: feeVal,
-              total: feeVal,
-            },
+            updates: { fixed_fee_amount: feeVal, subtotal: feeVal, total: feeVal },
           });
         } else {
           const subtotalVal = lineData.reduce((sum, l) => sum + l.amount, 0);

@@ -56,6 +56,8 @@ interface RoleRow {
   _tempId: string;
   name: string;
   hourly_rate_usd: number;
+  min_hours_enabled: boolean;
+  min_hours: string;
 }
 
 // ── Step 3 form state
@@ -129,7 +131,7 @@ export default function ProjectNewPage() {
   const [roles, setRoles] = useState<RoleRow[]>([]);
 
   const addRole = () =>
-    setRoles(r => [...r, { _tempId: crypto.randomUUID(), name: '', hourly_rate_usd: 0 }]);
+    setRoles(r => [...r, { _tempId: crypto.randomUUID(), name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '' }]);
 
   const updateRole = (id: string, field: keyof Omit<RoleRow, '_tempId'>, val: any) =>
     setRoles(r => r.map(row => row._tempId === id ? { ...row, [field]: val } : row));
@@ -178,10 +180,6 @@ export default function ProjectNewPage() {
       toast.error('Enter a fixed fee amount.');
       return false;
     }
-    if (form.is_managed_services && (!form.managed_services_min_hours || parseFloat(form.managed_services_min_hours) <= 0)) {
-      toast.error('Enter the minimum hours package.');
-      return false;
-    }
     return true;
   };
 
@@ -221,7 +219,6 @@ export default function ProjectNewPage() {
         is_fixed_fee: form.is_fixed_fee,
         fixed_fee_amount: form.is_fixed_fee && form.fixed_fee_amount ? parseFloat(form.fixed_fee_amount) : undefined,
         is_managed_services: form.is_managed_services,
-        managed_services_min_hours: form.is_managed_services && form.managed_services_min_hours ? parseFloat(form.managed_services_min_hours) : undefined,
       } as any);
 
       // 2. Create roles (collect created role IDs by temp ID)
@@ -231,6 +228,8 @@ export default function ProjectNewPage() {
           project_id: project.id,
           name: role.name,
           hourly_rate_usd: role.hourly_rate_usd,
+          min_hours_enabled: form.is_managed_services && role.min_hours_enabled,
+          min_hours: form.is_managed_services && role.min_hours_enabled && role.min_hours ? parseFloat(role.min_hours) : null,
         });
         roleIdMap[role._tempId] = created.id;
       }
@@ -580,17 +579,10 @@ export default function ProjectNewPage() {
                 </div>
               </div>
               {form.is_managed_services && (
-                <div className="space-y-1 max-w-xs">
-                  <Label>Minimum Hours Package *</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={form.managed_services_min_hours}
-                    onChange={e => set('managed_services_min_hours', e.target.value)}
-                    placeholder="e.g. 40"
-                  />
-                </div>
+                <p className="text-xs text-muted-foreground rounded-md border border-dashed p-2">
+                  Set the minimum hours <strong>per role</strong> in the next step (Roles &amp; Rates).
+                  Each position can have its minimum turned on or off.
+                </p>
               )}
             </div>
           </CardContent>
@@ -617,6 +609,7 @@ export default function ProjectNewPage() {
                   <TableRow>
                     <TableHead>Role Name</TableHead>
                     <TableHead className="text-right w-36">Rate (USD/h)</TableHead>
+                    {form.is_managed_services && <TableHead className="w-56">Minimum hours</TableHead>}
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -641,6 +634,27 @@ export default function ProjectNewPage() {
                           className="h-8 text-right"
                         />
                       </TableCell>
+                      {form.is_managed_services && (
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={row.min_hours_enabled}
+                              onCheckedChange={v => updateRole(row._tempId, 'min_hours_enabled', v)}
+                            />
+                            {row.min_hours_enabled ? (
+                              <Input
+                                type="number" min="0" step="0.5"
+                                value={row.min_hours}
+                                onChange={e => updateRole(row._tempId, 'min_hours', e.target.value)}
+                                placeholder="min h"
+                                className="h-8 w-24 text-right"
+                              />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Flat bill</span>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                       <TableCell>
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeRole(row._tempId)}>
                           <Trash2 className="h-3.5 w-3.5" />

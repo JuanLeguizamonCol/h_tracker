@@ -180,22 +180,30 @@ def generate_invoice_for_project_period(
             invoice.subtotal = fee_amount
             invoice.total = fee_amount
         elif project.is_managed_services:
-            min_hours = float(project.managed_services_min_hours)
-            if total_hours > 0:
-                blended_rate = real_subtotal / total_hours
-            else:
-                # No hours logged this period — fall back to the average rate
-                # across the project's currently assigned roles, so the
-                # minimum package can still be priced.
-                assigned_role_rates = [
-                    float(role_map[rid].hourly_rate_usd)
-                    for rid in assign_map.values()
-                    if rid and rid in role_map
-                ]
-                blended_rate = (sum(assigned_role_rates) / len(assigned_role_rates)) if assigned_role_rates else 0.0
-            billable_hours = max(total_hours, min_hours)
-            fee_amount = billable_hours * blended_rate
-            invoice.managed_services_min_hours = min_hours
+            # Per-role minimum: each role with its minimum enabled bills
+            # max(actual, min_hours) for the period; roles left off bill flat on
+            # actual hours. A min-enabled role bills its minimum even with no
+            # hours logged (e.g. a Manager's guaranteed package).
+            actual_by_role: dict = {}
+            for uid, data in employee_hours.items():
+                rid = assign_map.get(uid)
+                if rid:
+                    actual_by_role[rid] = actual_by_role.get(rid, 0.0) + data["hours"]
+            roles_to_bill = set(actual_by_role) | {
+                rid for rid, r in role_map.items() if r.min_hours_enabled
+            }
+            fee_amount = 0.0
+            for rid in roles_to_bill:
+                role = role_map.get(rid)
+                if not role:
+                    continue
+                rate = float(role.hourly_rate_usd)
+                actual = actual_by_role.get(rid, 0.0)
+                if role.min_hours_enabled and role.min_hours is not None:
+                    billed = max(actual, float(role.min_hours))
+                else:
+                    billed = actual
+                fee_amount += billed * rate
             invoice.fixed_fee_amount = fee_amount
             invoice.subtotal = fee_amount
             invoice.total = fee_amount
