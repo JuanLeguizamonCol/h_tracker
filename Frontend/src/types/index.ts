@@ -199,6 +199,8 @@ export interface ProjectRole {
   hourly_rate_usd: number;
   min_hours_enabled: boolean;
   min_hours: number | null;
+  additional_hours_enabled: boolean;
+  additional_hours_rate: number | null;
   created_at: string;
 }
 

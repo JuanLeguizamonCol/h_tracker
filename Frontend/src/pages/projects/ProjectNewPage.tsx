@@ -58,6 +58,8 @@ interface RoleRow {
   hourly_rate_usd: number;
   min_hours_enabled: boolean;
   min_hours: string;
+  additional_hours_enabled: boolean;
+  additional_hours_rate: string;
 }
 
 // ── Step 3 form state
@@ -131,7 +133,7 @@ export default function ProjectNewPage() {
   const [roles, setRoles] = useState<RoleRow[]>([]);
 
   const addRole = () =>
-    setRoles(r => [...r, { _tempId: crypto.randomUUID(), name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '' }]);
+    setRoles(r => [...r, { _tempId: crypto.randomUUID(), name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '', additional_hours_enabled: false, additional_hours_rate: '' }]);
 
   const updateRole = (id: string, field: keyof Omit<RoleRow, '_tempId'>, val: any) =>
     setRoles(r => r.map(row => row._tempId === id ? { ...row, [field]: val } : row));
@@ -230,6 +232,8 @@ export default function ProjectNewPage() {
           hourly_rate_usd: role.hourly_rate_usd,
           min_hours_enabled: form.is_managed_services && role.min_hours_enabled,
           min_hours: form.is_managed_services && role.min_hours_enabled && role.min_hours ? parseFloat(role.min_hours) : null,
+          additional_hours_enabled: form.is_managed_services && role.additional_hours_enabled,
+          additional_hours_rate: form.is_managed_services && role.additional_hours_enabled && role.additional_hours_rate ? parseFloat(role.additional_hours_rate) : null,
         });
         roleIdMap[role._tempId] = created.id;
       }
@@ -610,6 +614,7 @@ export default function ProjectNewPage() {
                     <TableHead>Role Name</TableHead>
                     <TableHead className="text-right w-36">Rate (USD/h)</TableHead>
                     {form.is_managed_services && <TableHead className="w-56">Minimum hours</TableHead>}
+                    {form.is_managed_services && <TableHead className="w-56">Additional hours (quarterly)</TableHead>}
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -651,6 +656,27 @@ export default function ProjectNewPage() {
                               />
                             ) : (
                               <span className="text-xs text-muted-foreground">Flat bill</span>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                      {form.is_managed_services && (
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={row.additional_hours_enabled}
+                              onCheckedChange={v => updateRole(row._tempId, 'additional_hours_enabled', v)}
+                            />
+                            {row.additional_hours_enabled ? (
+                              <Input
+                                type="number" min="0" step="0.5"
+                                value={row.additional_hours_rate}
+                                onChange={e => updateRole(row._tempId, 'additional_hours_rate', e.target.value)}
+                                placeholder="$/h"
+                                className="h-8 w-24 text-right"
+                              />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Off</span>
                             )}
                           </div>
                         </TableCell>

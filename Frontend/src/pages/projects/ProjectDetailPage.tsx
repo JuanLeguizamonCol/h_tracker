@@ -185,11 +185,14 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<ProjectRole | null>(null);
-  const [form, setForm] = useState({ name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '' });
+  const emptyForm = { name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '', additional_hours_enabled: false, additional_hours_rate: '' };
+  const [form, setForm] = useState(emptyForm);
 
   const minPayload = () => ({
     min_hours_enabled: isManagedServices && form.min_hours_enabled,
     min_hours: isManagedServices && form.min_hours_enabled && form.min_hours ? parseFloat(form.min_hours) : null,
+    additional_hours_enabled: isManagedServices && form.additional_hours_enabled,
+    additional_hours_rate: isManagedServices && form.additional_hours_enabled && form.additional_hours_rate ? parseFloat(form.additional_hours_rate) : null,
   });
 
   const handleAdd = async () => {
@@ -197,7 +200,7 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
     try {
       await createRole.mutateAsync({ project_id: projectId, name: form.name, hourly_rate_usd: form.hourly_rate_usd, ...minPayload() });
       toast.success('Role added.');
-      setForm({ name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '' });
+      setForm(emptyForm);
       setIsAddOpen(false);
     } catch { toast.error('Something went wrong.'); }
   };
@@ -225,9 +228,9 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Define roles and hourly rates (USD) for this project.
-          {isManagedServices && ' Managed Services: enable a minimum per role to bill max(actual, minimum).'}
+          {isManagedServices && ' Managed Services: enable a minimum per role to bill max(actual, minimum), and optionally bill hours over that minimum quarterly.'}
         </p>
-        <Button size="sm" className="gap-1.5" onClick={() => { setForm({ name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '' }); setIsAddOpen(true); }}>
+        <Button size="sm" className="gap-1.5" onClick={() => { setForm(emptyForm); setIsAddOpen(true); }}>
           <Plus className="h-4 w-4" /> Add Role
         </Button>
       </div>
@@ -240,6 +243,7 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
               <TableHead>Role Name</TableHead>
               <TableHead className="text-right">Rate (USD/h)</TableHead>
               {isManagedServices && <TableHead className="text-right">Min Hours</TableHead>}
+              {isManagedServices && <TableHead className="text-right">Additional Hours</TableHead>}
               <TableHead className="text-right w-24">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -255,9 +259,16 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
                       : <span className="text-muted-foreground">Flat</span>}
                   </TableCell>
                 )}
+                {isManagedServices && (
+                  <TableCell className="text-right text-sm">
+                    {role.additional_hours_enabled && role.additional_hours_rate != null
+                      ? <span className="font-medium">${Number(role.additional_hours_rate)}/h</span>
+                      : <span className="text-muted-foreground">Off</span>}
+                  </TableCell>
+                )}
                 <TableCell className="text-right">
                   <div className="flex gap-1 justify-end">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd), min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '' }); setEditingRole(role); }}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd), min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
                       <Edit className="h-4 w-4" />
                     </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(role.id)}>
@@ -296,6 +307,24 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
                     <Label>Minimum hours (per billing period)</Label>
                     <Input type="number" min="0" step="0.5" value={form.min_hours} onChange={e => setForm({ ...form, min_hours: e.target.value })} placeholder="e.g. 40" />
                     <p className="text-xs text-muted-foreground">Bills max(actual hours, minimum) × rate for the period.</p>
+                  </div>
+                )}
+              </div>
+            )}
+            {isManagedServices && (
+              <div className="rounded-md border p-3 bg-muted/20 space-y-3">
+                <div className="flex items-center gap-3">
+                  <Switch checked={form.additional_hours_enabled} onCheckedChange={v => setForm({ ...form, additional_hours_enabled: v })} />
+                  <div>
+                    <Label>Bill additional hours quarterly</Label>
+                    <p className="text-xs text-muted-foreground">Hours beyond the minimum each month accrue and are billed once, on the quarter's 3rd month.</p>
+                  </div>
+                </div>
+                {form.additional_hours_enabled && (
+                  <div className="space-y-1">
+                    <Label>Additional hours rate (USD/h)</Label>
+                    <Input type="number" min="0" step="0.5" value={form.additional_hours_rate} onChange={e => setForm({ ...form, additional_hours_rate: e.target.value })} placeholder="e.g. 120" />
+                    <p className="text-xs text-muted-foreground">Requires a minimum set above — additional hours = monthly hours over that minimum.</p>
                   </div>
                 )}
               </div>

@@ -20,7 +20,7 @@ export function useAllProjectRoles() {
 export function useCreateProjectRole() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (role: { project_id: string; name: string; hourly_rate_usd: number; min_hours_enabled?: boolean; min_hours?: number | null }) =>
+    mutationFn: (role: { project_id: string; name: string; hourly_rate_usd: number; min_hours_enabled?: boolean; min_hours?: number | null; additional_hours_enabled?: boolean; additional_hours_rate?: number | null }) =>
       api.post<ProjectRole>('/project-roles', role),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project-roles'] });

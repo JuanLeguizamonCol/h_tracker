@@ -1,13 +1,15 @@
 import logging
 import uuid
 from typing import Optional
-from datetime import date
+from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from models.invoice import Invoice
 from models.invoice_lines import InvoiceLine
+from models.invoice_fees import InvoiceFee
 from models.invoice_time_entries import InvoiceTimeEntry
 from models.projects import Project
 from models.clients import Client
@@ -18,6 +20,69 @@ from models.employees import Employee
 from services.invoice_number_service import atomic_generate_number_for_client
 
 logger = logging.getLogger(__name__)
+
+
+def _hours_by_role_for_range(
+    db: Session, project_id: str, assign_map: dict, start: date, end: date
+) -> dict:
+    """Actual billable hours in [start, end], grouped by role_id, regardless
+    of whether those hours have since been linked to an invoice. Used for the
+    Managed Services quarterly additional-hours true-up, which looks at hours
+    actually worked each month of the quarter — not just what's still unbilled."""
+    rows = db.query(TimeEntry).filter(
+        TimeEntry.project_id == project_id,
+        TimeEntry.billable == True,  # noqa: E712
+        TimeEntry.status == "normal",
+        TimeEntry.date >= start,
+        TimeEntry.date <= end,
+    ).all()
+    by_role: dict = {}
+    for e in rows:
+        rid = assign_map.get(e.user_id)
+        if rid:
+            by_role[rid] = by_role.get(rid, 0.0) + float(e.hours)
+    return by_role
+
+
+def _quarterly_additional_hours_fees(
+    db: Session, project, roles: list, assign_map: dict, period_end: date
+) -> list:
+    """
+    For Managed Services projects billed monthly: on the 3rd month of a
+    calendar quarter (Mar/Jun/Sep/Dec), compute the quarterly true-up for
+    every role with additional_hours_enabled — the sum, across the quarter's
+    3 months, of hours worked beyond that role's min_hours (floor) each
+    month. Returns a list of {role_name, hours, rate, amount} to add as
+    invoice fee lines. Returns [] outside a quarter-close month, or for
+    non-monthly billing (the "3rd month" concept doesn't apply).
+    """
+    billing_period = getattr(project, "billing_period", None) or "monthly"
+    if billing_period != "monthly" or period_end.month not in (3, 6, 9, 12):
+        return []
+
+    quarter_num = period_end.month // 3
+    quarter_start = date(period_end.year, period_end.month - 2, 1)
+    month_starts = [quarter_start + relativedelta(months=i) for i in range(3)]
+
+    results = []
+    for role in roles:
+        if not role.additional_hours_enabled or role.additional_hours_rate is None or role.min_hours is None:
+            continue
+        floor = float(role.min_hours)
+        excess_total = 0.0
+        for m_start in month_starts:
+            m_end = m_start + relativedelta(months=1) - timedelta(days=1)
+            month_by_role = _hours_by_role_for_range(db, project.id, assign_map, m_start, m_end)
+            excess_total += max(0.0, month_by_role.get(role.id, 0.0) - floor)
+        if excess_total > 0:
+            rate = float(role.additional_hours_rate)
+            results.append({
+                "label": f"Additional Hours - {role.name} (Q{quarter_num} {period_end.year})",
+                "hours": excess_total,
+                "rate": rate,
+                "amount": excess_total * rate,
+            })
+    return results
 
 
 def generate_invoice_for_project_period(
@@ -204,6 +269,22 @@ def generate_invoice_for_project_period(
                 else:
                     billed = actual
                 fee_amount += billed * rate
+
+            # Quarterly true-up: additional hours (beyond each role's floor)
+            # accrue monthly but only get billed on the quarter's 3rd month.
+            quarter_fees = _quarterly_additional_hours_fees(db, project, roles, assign_map, period_end)
+            for qf in quarter_fees:
+                fee_amount += qf["amount"]
+                db.add(InvoiceFee(
+                    id=str(uuid.uuid4()),
+                    invoice_id=invoice.id,
+                    label=qf["label"],
+                    quantity=qf["hours"],
+                    unit_price_usd=qf["rate"],
+                    description="Hours exceeding the role's floor, accumulated across the quarter",
+                    fee_total=qf["amount"],
+                ))
+
             invoice.fixed_fee_amount = fee_amount
             invoice.subtotal = fee_amount
             invoice.total = fee_amount

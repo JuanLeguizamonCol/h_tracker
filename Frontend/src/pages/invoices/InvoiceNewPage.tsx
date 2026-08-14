@@ -84,7 +84,7 @@ export default function InvoiceNewPage() {
       const availableEntries = entries.filter(e => !linkedIds.has(e.id));
 
       if (availableEntries.length > 0) {
-        const projectRoles = await api.get<{ id: string; name: string; hourly_rate_usd: number; min_hours_enabled: boolean; min_hours: number | null }[]>(
+        const projectRoles = await api.get<{ id: string; name: string; hourly_rate_usd: number; min_hours_enabled: boolean; min_hours: number | null; additional_hours_enabled: boolean; additional_hours_rate: number | null }[]>(
           `/project-roles?project_id=${selectedProjectId}`
         );
         const assignments = await api.get<{ user_id: string; role_id: string | null }[]>(
@@ -156,6 +156,53 @@ export default function InvoiceNewPage() {
               : actual;
             feeVal += billed * rate;
           });
+
+          // Quarterly true-up: on the quarter's 3rd calendar month, bill
+          // accumulated additional hours (monthly hours over each role's
+          // floor) as separate fee lines — mirrors the auto-generation job.
+          const today = new Date();
+          const isQuarterCloseMonth = [2, 5, 8, 11].includes(today.getMonth());
+          const additionalRoles = projectRoles.filter(
+            r => r.additional_hours_enabled && r.additional_hours_rate != null && r.min_hours != null
+          );
+          if (isQuarterCloseMonth && additionalRoles.length > 0) {
+            const year = today.getFullYear();
+            const quarterNum = Math.floor(today.getMonth() / 3) + 1;
+            const quarterStartMonth = today.getMonth() - 2;
+            const fmt = (d: Date) => d.toISOString().slice(0, 10);
+            const monthRanges = [0, 1, 2].map(i => ({
+              start: new Date(year, quarterStartMonth + i, 1),
+              end: new Date(year, quarterStartMonth + i + 1, 0),
+            }));
+
+            for (const role of additionalRoles) {
+              let excess = 0;
+              for (const { start, end } of monthRanges) {
+                const monthEntries = await api.get<{ user_id: string; hours: number }[]>(
+                  `/time-entries?project_id=${selectedProjectId}&billable=true&status=normal&date_gte=${fmt(start)}&date_lte=${fmt(end)}`
+                );
+                const roleHours = monthEntries.reduce(
+                  (sum, e) => (assignmentMap.get(e.user_id) === role.id ? sum + Number(e.hours) : sum),
+                  0
+                );
+                excess += Math.max(0, roleHours - Number(role.min_hours));
+              }
+              if (excess > 0) {
+                const addRate = Number(role.additional_hours_rate);
+                const addAmount = excess * addRate;
+                feeVal += addAmount;
+                await api.post('/invoice-fees/', {
+                  invoice_id: invoice.id,
+                  label: `Additional Hours - ${role.name} (Q${quarterNum} ${year})`,
+                  quantity: excess,
+                  unit_price_usd: addRate,
+                  description: "Hours exceeding the role's floor, accumulated across the quarter",
+                  fee_total: addAmount,
+                });
+              }
+            }
+          }
+
           await updateInvoice.mutateAsync({
             id: invoice.id,
             updates: { fixed_fee_amount: feeVal, subtotal: feeVal, total: feeVal },
