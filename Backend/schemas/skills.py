@@ -52,3 +52,19 @@ class EmployeeSkillOut(EmployeeSkillBase):
     id: str
     employee_id: str
     created_at: datetime
+
+
+class SkillSearchResultOut(BaseModel):
+    """One employee-skill match, flattened with the employee's basic profile
+    info — used by the Reports skills search for resource staffing."""
+    employee_id: str
+    employee_name: str
+    title: Optional[str] = None
+    department: Optional[str] = None
+    location: Optional[str] = None
+    skill_id: str
+    skill_name: str
+    category: str
+    proficiency_level: int
+    years_experience: Optional[float] = None
+    certified: bool

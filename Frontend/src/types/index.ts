@@ -64,6 +64,20 @@ export interface EmployeeSkill {
   created_at: string;
 }
 
+export interface SkillSearchResult {
+  employee_id: string;
+  employee_name: string;
+  title: string | null;
+  department: string | null;
+  location: string | null;
+  skill_id: string;
+  skill_name: string;
+  category: string;
+  proficiency_level: number;
+  years_experience: number | null;
+  certified: boolean;
+}
+
 export interface Client {
   id: string;
   name: string;

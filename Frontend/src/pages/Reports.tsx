@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks } from 'date-fns';
 import {
   CalendarIcon, Search, Loader2, Filter, X,
@@ -18,6 +18,7 @@ import { useProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useAllTimeEntriesByDateRange, useTimeEntriesByDateRange } from '@/hooks/useTimeEntries';
+import { useSkillSearch, useSkillCatalog } from '@/hooks/useSkills';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
@@ -119,6 +120,119 @@ function FilterSelect({ label, value, allLabel, options, isFiltered, onChange, o
         </SelectContent>
       </Select>
     </div>
+  );
+}
+
+const PROFICIENCY_LABELS: Record<number, string> = { 1: 'Beginner', 2: 'Intermediate', 3: 'Advanced', 4: 'Expert' };
+
+function SkillsSearchPanel() {
+  const [skillQuery, setSkillQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const [minProficiency, setMinProficiency] = useState('all');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(skillQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [skillQuery]);
+
+  const { data: catalog = [] } = useSkillCatalog();
+  const categories = useMemo(
+    () => Array.from(new Set(catalog.map(c => c.category))).sort(),
+    [catalog]
+  );
+
+  const hasQuery = !!debouncedQuery || category !== 'all' || minProficiency !== 'all';
+  const { data: results = [], isLoading } = useSkillSearch(
+    {
+      q: debouncedQuery || undefined,
+      category: category !== 'all' ? category : undefined,
+      min_proficiency: minProficiency !== 'all' ? parseInt(minProficiency) : undefined,
+    },
+    { enabled: hasQuery }
+  );
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, { employee_name: string; title: string | null; department: string | null; location: string | null; skills: typeof results }>();
+    results.forEach(r => {
+      if (!map.has(r.employee_id)) {
+        map.set(r.employee_id, { employee_name: r.employee_name, title: r.title, department: r.department, location: r.location, skills: [] });
+      }
+      map.get(r.employee_id)!.skills.push(r);
+    });
+    return Array.from(map.values()).sort((a, b) => a.employee_name.localeCompare(b.employee_name));
+  }, [results]);
+
+  return (
+    <Card className="card-elevated">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Search className="h-4 w-4" />Skills Search
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Find who has a skill loaded on their profile — for staffing new projects.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Skill</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="e.g. Power BI, SQL, Tableau…"
+                value={skillQuery}
+                onChange={e => setSkillQuery(e.target.value)}
+                className="pl-10 text-sm"
+              />
+            </div>
+          </div>
+          <FilterSelect label="Category" value={category} allLabel="All Categories"
+            options={categories.map(c => ({ value: c, label: c }))}
+            isFiltered={category !== 'all'} onChange={setCategory} onClear={() => setCategory('all')} />
+          <FilterSelect label="Min Proficiency" value={minProficiency} allLabel="Any Level"
+            options={[
+              { value: '1', label: 'Beginner+' },
+              { value: '2', label: 'Intermediate+' },
+              { value: '3', label: 'Advanced+' },
+              { value: '4', label: 'Expert' },
+            ]}
+            isFiltered={minProficiency !== 'all'} onChange={setMinProficiency} onClear={() => setMinProficiency('all')} />
+        </div>
+
+        {!hasQuery ? (
+          <p className="text-sm text-muted-foreground text-center py-6">
+            Search by skill, category, or minimum proficiency to see who has it.
+          </p>
+        ) : isLoading ? (
+          <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+        ) : grouped.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">No employees found with that skill.</p>
+        ) : (
+          <div className="space-y-3">
+            {grouped.map(g => (
+              <div key={g.employee_name} className="rounded-lg border p-3">
+                <div>
+                  <p className="font-medium text-foreground">{g.employee_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {[g.title, g.department, g.location].filter(Boolean).join(' · ') || '—'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {g.skills.map(s => (
+                    <Badge key={s.skill_id} variant="secondary" className="text-xs font-normal">
+                      {s.skill_name} · {PROFICIENCY_LABELS[s.proficiency_level] || s.proficiency_level}
+                      {s.years_experience != null && ` · ${s.years_experience}y`}
+                      {s.certified && ' · ✓ cert'}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -660,6 +774,9 @@ export default function Reports() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Skills Search (resource staffing) ────────────────────────────── */}
+      {canManage && <SkillsSearchPanel />}
 
       {/* ── KPI cards ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

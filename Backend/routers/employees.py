@@ -9,12 +9,13 @@ from services.employees import (
 )
 from services.skills import (
     get_employee_skills, create_employee_skill, update_employee_skill, delete_employee_skill,
+    search_employee_skills,
 )
 from services.employee_internal_cost import (
     get_current_internal_cost, get_internal_cost_history, upsert_internal_cost,
 )
 from schemas.employees import EmployeeCreate, EmployeeUpdate, EmployeeOut
-from schemas.skills import EmployeeSkillCreate, EmployeeSkillUpdate, EmployeeSkillOut
+from schemas.skills import EmployeeSkillCreate, EmployeeSkillUpdate, EmployeeSkillOut, SkillSearchResultOut
 from schemas.employee_internal_cost import EmployeeInternalCostCreate, EmployeeInternalCostOut
 from models.employees import Employee
 from models.user_roles import UserRole
@@ -170,6 +171,20 @@ def get_employee_internal_cost_history(employee_id: str, db: Session = Depends(g
 
 
 # ── Skills (admin-only) ───────────────────────────────────────────────────────
+
+@employees_router.get(
+    "/skills/search",
+    response_model=List[SkillSearchResultOut],
+    dependencies=[Depends(require_manager_or_admin)],
+)
+def search_skills(
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    min_proficiency: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    return search_employee_skills(db, q=q, category=category, min_proficiency=min_proficiency)
+
 
 @employees_router.get(
     "/{employee_id}/skills",

@@ -21,7 +21,7 @@ from schemas.skills import EmployeeSkillCreate, EmployeeSkillUpdate, EmployeeSki
 from utils.auth_jwt import get_current_employee
 from services.skills import (
     get_employee_skills,
-    create_employee_skill,
+    create_employee_skill_from_catalog,
     update_employee_skill,
     delete_employee_skill,
 )
@@ -91,13 +91,31 @@ def list_my_skills(
     return get_employee_skills(db, current_employee.id)
 
 
+# Self-service skill edits (employees editing their own profile) can only
+# tune these — the skill's identity (name/category) is locked to whatever
+# catalog entry was picked at creation, so employees can't rename it into a
+# typo or duplicate. Only managers/admins (via /employees/{id}/skills) can
+# create brand-new catalog entries or freely retype a skill's name.
+_SELF_EDITABLE_SKILL_FIELDS = {
+    "proficiency_level", "years_experience", "certified", "certificate_name", "cert_expiry_date", "notes",
+}
+
+
 @profile_router.post("/skills", response_model=EmployeeSkillOut, status_code=status.HTTP_201_CREATED)
 def add_skill(
     skill_in: EmployeeSkillCreate,
     db: Session = Depends(get_db),
     current_employee: Employee = Depends(get_current_employee),
 ):
-    return create_employee_skill(db, current_employee.id, skill_in)
+    if not skill_in.skill_catalog_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please select a skill from the catalog. Ask a manager or admin to add it if it's missing.",
+        )
+    skill = create_employee_skill_from_catalog(db, current_employee.id, skill_in.skill_catalog_id, skill_in)
+    if not skill:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found in catalog")
+    return skill
 
 
 @profile_router.patch("/skills/{skill_id}", response_model=EmployeeSkillOut)
@@ -114,7 +132,10 @@ def edit_skill(
     ).first()
     if not skill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
-    return update_employee_skill(db, skill_id, skill_in)
+    filtered = EmployeeSkillUpdate(**{
+        k: v for k, v in skill_in.model_dump(exclude_unset=True).items() if k in _SELF_EDITABLE_SKILL_FIELDS
+    })
+    return update_employee_skill(db, skill_id, filtered)
 
 
 @profile_router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)

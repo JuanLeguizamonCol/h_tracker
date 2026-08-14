@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { User, Briefcase, Zap, Edit2, X, Save, Plus, Trash2, Pencil, Star, Lock, Award } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile, usePatchProfile, useMySkills, useAddSkill, useUpdateSkill, useDeleteSkill } from '@/hooks/useProfile';
+import { useSkillCatalog } from '@/hooks/useSkills';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,7 +17,6 @@ import { EmployeeSkill } from '@/types';
 const GENDERS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
 const WORK_MODES = ['Remote', 'On-site', 'Hybrid'];
 const LOCATIONS = ['USA', 'Colombia', 'Ecuador'];
-const SKILL_CATEGORIES = ['Frontend', 'Backend', 'Cloud', 'Data', 'Design', 'DevOps', 'Management', 'Other'];
 
 const PROFICIENCY = [
   { level: 1, label: 'Beginner' },
@@ -283,6 +283,7 @@ function CorporateTab() {
 // ── Skills Tab ────────────────────────────────────────────────────────────────
 
 type SkillForm = {
+  skill_catalog_id: string | null;
   skill_name: string;
   category: string;
   proficiency_level: number;
@@ -294,8 +295,9 @@ type SkillForm = {
 };
 
 const EMPTY_SKILL: SkillForm = {
+  skill_catalog_id: null,
   skill_name: '',
-  category: 'Backend',
+  category: '',
   proficiency_level: 1,
   years_experience: '',
   certified: false,
@@ -313,16 +315,25 @@ function SkillsTab() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<SkillForm>(EMPTY_SKILL);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState('');
+
+  const { data: catalog = [] } = useSkillCatalog();
+  const alreadyAdded = new Set(skills.map(s => s.skill_catalog_id).filter(Boolean));
+  const filteredCatalog = catalog
+    .filter(c => !alreadyAdded.has(c.id) || c.id === form.skill_catalog_id)
+    .filter(c => !catalogSearch || c.name.toLowerCase().includes(catalogSearch.toLowerCase()));
 
   function openAdd() {
     setEditingId(null);
     setForm(EMPTY_SKILL);
+    setCatalogSearch('');
     setShowForm(true);
   }
 
   function openEdit(s: EmployeeSkill) {
     setEditingId(s.id);
     setForm({
+      skill_catalog_id: s.skill_catalog_id,
       skill_name: s.skill_name,
       category: s.category,
       proficiency_level: s.proficiency_level,
@@ -336,17 +347,35 @@ function SkillsTab() {
   }
 
   async function handleSave() {
-    if (!form.skill_name.trim()) { toast.error('Skill name is required.'); return; }
-    const payload = {
-      ...form,
-      years_experience: form.years_experience ? parseFloat(form.years_experience) : null,
-    };
+    if (!editingId && !form.skill_catalog_id) {
+      toast.error('Select a skill from the list. Ask a manager or admin to add it if it\'s missing.');
+      return;
+    }
+    const years_experience = form.years_experience ? parseFloat(form.years_experience) : null;
     try {
       if (editingId) {
-        await updateSkill.mutateAsync({ id: editingId, ...payload });
+        await updateSkill.mutateAsync({
+          id: editingId,
+          proficiency_level: form.proficiency_level,
+          years_experience,
+          certified: form.certified,
+          certificate_name: form.certificate_name || null,
+          cert_expiry_date: form.cert_expiry_date || null,
+          notes: form.notes || null,
+        });
         toast.success('Skill updated.');
       } else {
-        await addSkill.mutateAsync(payload as any);
+        await addSkill.mutateAsync({
+          skill_catalog_id: form.skill_catalog_id,
+          skill_name: form.skill_name,
+          category: form.category,
+          proficiency_level: form.proficiency_level,
+          years_experience,
+          certified: form.certified,
+          certificate_name: form.certificate_name || null,
+          cert_expiry_date: form.cert_expiry_date || null,
+          notes: form.notes || null,
+        } as any);
         toast.success('Skill added.');
       }
       setShowForm(false);
@@ -390,24 +419,45 @@ function SkillsTab() {
             <CardTitle className="text-sm">{editingId ? 'Edit Skill' : 'New Skill'}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            {editingId ? (
               <div className="space-y-1.5">
-                <Label className="text-xs">Skill Name *</Label>
+                <Label className="text-xs">Skill</Label>
+                <p className="text-sm font-medium px-1">{form.skill_name} <span className="text-xs text-muted-foreground font-normal">· {form.category}</span></p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Skill *</Label>
                 <Input
-                  value={form.skill_name}
-                  onChange={e => setForm(f => ({ ...f, skill_name: e.target.value }))}
+                  value={catalogSearch}
+                  onChange={e => { setCatalogSearch(e.target.value); setForm(f => ({ ...f, skill_catalog_id: null, skill_name: '', category: '' })); }}
                   className="h-8 text-sm"
-                  placeholder="e.g. React"
+                  placeholder="Search skills…"
                 />
+                {form.skill_catalog_id ? (
+                  <p className="text-xs text-primary px-1">Selected: <span className="font-medium">{form.skill_name}</span> · {form.category}</p>
+                ) : (
+                  <div className="border rounded-md bg-background shadow-sm max-h-36 overflow-y-auto">
+                    {filteredCatalog.length === 0 ? (
+                      <p className="text-xs text-muted-foreground px-3 py-2">
+                        No matching skill. Ask a manager or admin to add it to the catalog.
+                      </p>
+                    ) : (
+                      filteredCatalog.slice(0, 20).map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className="w-full text-left px-3 py-1.5 text-sm hover:bg-muted flex items-center justify-between"
+                          onClick={() => { setForm(f => ({ ...f, skill_catalog_id: c.id, skill_name: c.name, category: c.category })); setCatalogSearch(c.name); }}
+                        >
+                          <span>{c.name}</span>
+                          <span className="text-xs text-muted-foreground">{c.category}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Category</Label>
-                <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
-                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>{SKILL_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
