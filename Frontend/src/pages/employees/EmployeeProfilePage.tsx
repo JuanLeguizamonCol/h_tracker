@@ -22,7 +22,11 @@ import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tool
 import { toast } from 'sonner';
 import { EmployeeSkill } from '@/types';
 
-const SKILL_CATEGORIES = ['Frontend', 'Backend', 'Cloud', 'DevOps', 'Design', 'Data', 'Management', 'Soft Skills', 'Other'];
+const SKILL_CATEGORIES = [
+  'Frontend', 'Backend', 'Cloud', 'DevOps', 'Design', 'Data', 'Management',
+  'FP&A', 'M&A', 'Financial Modeling', 'Valuation', 'Corporate Finance',
+  'Soft Skills', 'Other',
+];
 const PROFICIENCY_LABELS: Record<number, string> = { 1: 'Beginner', 2: 'Intermediate', 3: 'Advanced', 4: 'Expert' };
 const PROFICIENCY_COLORS: Record<number, string> = {
   1: 'bg-slate-100 text-slate-700',

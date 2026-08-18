@@ -28,7 +28,11 @@ const STATUS_COLORS: Record<string, string> = {
   completed: 'outline',
 };
 
-const SKILL_CATEGORIES = ['Frontend', 'Backend', 'Cloud', 'DevOps', 'Design', 'Data', 'Management', 'Soft Skills', 'Other'];
+const SKILL_CATEGORIES = [
+  'Frontend', 'Backend', 'Cloud', 'DevOps', 'Design', 'Data', 'Management',
+  'FP&A', 'M&A', 'Financial Modeling', 'Valuation', 'Corporate Finance',
+  'Soft Skills', 'Other',
+];
 const MIN_LEVEL_OPTIONS = [
   { value: 'beginner', label: 'Beginner+' },
   { value: 'intermediate', label: 'Intermediate+' },

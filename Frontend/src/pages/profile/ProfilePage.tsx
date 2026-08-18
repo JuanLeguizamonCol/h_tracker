@@ -306,7 +306,11 @@ const EMPTY_SKILL: SkillForm = {
   notes: '',
 };
 
-const SKILL_CATEGORY_OPTIONS = ['Frontend', 'Backend', 'Cloud', 'DevOps', 'Design', 'Data', 'Management', 'Soft Skills', 'Other'];
+const SKILL_CATEGORY_OPTIONS = [
+  'Frontend', 'Backend', 'Cloud', 'DevOps', 'Design', 'Data', 'Management',
+  'FP&A', 'M&A', 'Financial Modeling', 'Valuation', 'Corporate Finance',
+  'Soft Skills', 'Other',
+];
 
 function SkillsTab() {
   const { canManage } = useAuth();
