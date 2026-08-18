@@ -15,23 +15,19 @@ from datetime import date
 
 from config.database import get_db
 from models.employees import Employee
-from models.user_roles import UserRole
 from schemas.employees import EmployeeOut
 from schemas.skills import EmployeeSkillCreate, EmployeeSkillUpdate, EmployeeSkillOut
 from utils.auth_jwt import get_current_employee
+from utils.roles import get_role
 from services.skills import (
     get_employee_skills,
+    create_employee_skill,
     create_employee_skill_from_catalog,
     update_employee_skill,
     delete_employee_skill,
 )
 
 profile_router = APIRouter(prefix="/profile", tags=["profile"])
-
-
-def _is_admin(emp: Employee, db: Session) -> bool:
-    role = db.query(UserRole).filter(UserRole.user_id == emp.id).first()
-    return role is not None and role.role == "admin"
 
 
 # ── Profile patch schema (self-editable fields only) ─────────────────────────
@@ -107,6 +103,12 @@ def add_skill(
     db: Session = Depends(get_db),
     current_employee: Employee = Depends(get_current_employee),
 ):
+    # Admins/managers can add a new skill to their own profile the same way
+    # they can for anyone else's (via /employees/{id}/skills) — typing a new
+    # name creates it in the catalog. Employees must pick an existing entry.
+    if get_role(db, current_employee.id) in ("admin", "manager"):
+        return create_employee_skill(db, current_employee.id, skill_in)
+
     if not skill_in.skill_catalog_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -132,6 +134,10 @@ def edit_skill(
     ).first()
     if not skill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
+
+    if get_role(db, current_employee.id) in ("admin", "manager"):
+        return update_employee_skill(db, skill_id, skill_in)
+
     filtered = EmployeeSkillUpdate(**{
         k: v for k, v in skill_in.model_dump(exclude_unset=True).items() if k in _SELF_EDITABLE_SKILL_FIELDS
     })

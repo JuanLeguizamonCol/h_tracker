@@ -17,6 +17,24 @@ export default {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         display: ['Plus Jakarta Sans', 'Inter', 'system-ui', 'sans-serif'],
       },
+      // Tailwind's default text-* scale, uniformly bumped 30% — letters across
+      // the app were reading too small. Only font sizes/line-heights move;
+      // spacing, icons, and component dimensions are untouched.
+      fontSize: {
+        xs: ['0.975rem', { lineHeight: '1.3rem' }],
+        sm: ['1.1375rem', { lineHeight: '1.625rem' }],
+        base: ['1.3rem', { lineHeight: '1.95rem' }],
+        lg: ['1.4625rem', { lineHeight: '2.275rem' }],
+        xl: ['1.625rem', { lineHeight: '2.275rem' }],
+        '2xl': ['1.95rem', { lineHeight: '2.6rem' }],
+        '3xl': ['2.4375rem', { lineHeight: '2.925rem' }],
+        '4xl': ['2.925rem', { lineHeight: '3.25rem' }],
+        '5xl': ['3.9rem', { lineHeight: '1' }],
+        '6xl': ['4.875rem', { lineHeight: '1' }],
+        '7xl': ['5.85rem', { lineHeight: '1' }],
+        '8xl': ['7.8rem', { lineHeight: '1' }],
+        '9xl': ['10.4rem', { lineHeight: '1' }],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

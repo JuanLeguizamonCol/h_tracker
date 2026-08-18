@@ -306,7 +306,10 @@ const EMPTY_SKILL: SkillForm = {
   notes: '',
 };
 
+const SKILL_CATEGORY_OPTIONS = ['Frontend', 'Backend', 'Cloud', 'DevOps', 'Design', 'Data', 'Management', 'Soft Skills', 'Other'];
+
 function SkillsTab() {
+  const { canManage } = useAuth();
   const { data: skills = [], isLoading } = useMySkills();
   const addSkill = useAddSkill();
   const updateSkill = useUpdateSkill();
@@ -325,7 +328,7 @@ function SkillsTab() {
 
   function openAdd() {
     setEditingId(null);
-    setForm(EMPTY_SKILL);
+    setForm(canManage ? { ...EMPTY_SKILL, category: SKILL_CATEGORY_OPTIONS[0] } : EMPTY_SKILL);
     setCatalogSearch('');
     setShowForm(true);
   }
@@ -343,12 +346,17 @@ function SkillsTab() {
       cert_expiry_date: s.cert_expiry_date || '',
       notes: s.notes || '',
     });
+    setCatalogSearch('');
     setShowForm(true);
   }
 
   async function handleSave() {
-    if (!editingId && !form.skill_catalog_id) {
+    if (!editingId && !canManage && !form.skill_catalog_id) {
       toast.error('Select a skill from the list. Ask a manager or admin to add it if it\'s missing.');
+      return;
+    }
+    if (!editingId && canManage && !form.skill_name.trim()) {
+      toast.error('Skill name is required.');
       return;
     }
     const years_experience = form.years_experience ? parseFloat(form.years_experience) : null;
@@ -356,6 +364,7 @@ function SkillsTab() {
       if (editingId) {
         await updateSkill.mutateAsync({
           id: editingId,
+          ...(canManage ? { skill_name: form.skill_name, category: form.category } : {}),
           proficiency_level: form.proficiency_level,
           years_experience,
           certified: form.certified,
@@ -419,7 +428,50 @@ function SkillsTab() {
             <CardTitle className="text-sm">{editingId ? 'Edit Skill' : 'New Skill'}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {editingId ? (
+            {canManage ? (
+              // Admins/managers can type a new skill name (creating it in the
+              // catalog) or pick an existing one from the autocomplete list.
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Skill Name *</Label>
+                  <Input
+                    value={form.skill_name}
+                    onChange={e => {
+                      const value = e.target.value;
+                      setForm(f => ({ ...f, skill_name: value, skill_catalog_id: null }));
+                      setCatalogSearch(value);
+                    }}
+                    className="h-8 text-sm"
+                    placeholder="e.g. React"
+                  />
+                  {catalogSearch && (
+                    <div className="border rounded-md bg-background shadow-sm max-h-32 overflow-y-auto">
+                      {catalog
+                        .filter(c => c.name.toLowerCase().includes(catalogSearch.toLowerCase()))
+                        .slice(0, 8)
+                        .map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-muted flex items-center justify-between"
+                            onClick={() => { setForm(f => ({ ...f, skill_catalog_id: c.id, skill_name: c.name, category: c.category })); setCatalogSearch(''); }}
+                          >
+                            <span>{c.name}</span>
+                            <span className="text-xs text-muted-foreground">{c.category}</span>
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Category</Label>
+                  <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>{SKILL_CATEGORY_OPTIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : editingId ? (
               <div className="space-y-1.5">
                 <Label className="text-xs">Skill</Label>
                 <p className="text-sm font-medium px-1">{form.skill_name} <span className="text-xs text-muted-foreground font-normal">· {form.category}</span></p>
