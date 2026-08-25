@@ -7,8 +7,10 @@ employee_id is ever accepted from the client.
 Allowed self-edit fields (personal info + location + emergency contact).
 Corporate/admin fields are intentionally excluded from PATCH.
 """
+import os
+import uuid
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date
@@ -19,6 +21,7 @@ from schemas.employees import EmployeeOut
 from schemas.skills import EmployeeSkillCreate, EmployeeSkillUpdate, EmployeeSkillOut
 from utils.auth_jwt import get_current_employee
 from utils.roles import get_role
+from utils import blob_storage
 from services.skills import (
     get_employee_skills,
     create_employee_skill,
@@ -28,6 +31,9 @@ from services.skills import (
 )
 
 profile_router = APIRouter(prefix="/profile", tags=["profile"])
+
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "uploads"))
+_ALLOWED_SIGNATURE_TYPES = {"image/png", "image/jpeg"}
 
 
 # ── Profile patch schema (self-editable fields only) ─────────────────────────
@@ -158,3 +164,75 @@ def remove_skill(
     if not skill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
     delete_employee_skill(db, skill_id)
+
+
+# ── Signature (admins only) ──────────────────────────────────────────────────
+# The uploaded image is what renders on an invoice's signature line — but only
+# for invoices this admin actually signs (auto-set at generation time from the
+# invoiced project's owner_id — see services/invoice_generator.py and
+# services/invoice.py). Uploading a signature here has no effect on invoices
+# for projects owned by someone else.
+
+def _delete_existing_signature(employee: Employee) -> None:
+    if not employee.signature_file_name:
+        return
+    if blob_storage.blob_enabled():
+        blob_storage.delete_blob(employee.signature_file_name)
+    else:
+        path = os.path.join(UPLOAD_DIR, employee.signature_file_name)
+        if os.path.exists(path):
+            os.remove(path)
+
+
+@profile_router.post("/signature", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
+async def upload_signature(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    if get_role(db, current_employee.id) != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Admin users can upload a signature.",
+        )
+    if file.content_type not in _ALLOWED_SIGNATURE_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Signature must be a PNG or JPEG image.")
+
+    contents = await file.read()
+    ext = os.path.splitext(file.filename)[1] if file.filename else ".png"
+    unique_name = f"signature-{current_employee.id}-{uuid.uuid4()}{ext}"
+
+    _delete_existing_signature(current_employee)
+
+    if blob_storage.blob_enabled():
+        blob_storage.upload_blob(unique_name, contents, content_type=file.content_type)
+        file_url = blob_storage.sas_url(unique_name)
+    else:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        with open(os.path.join(UPLOAD_DIR, unique_name), "wb") as f:
+            f.write(contents)
+        file_url = f"/uploads/{unique_name}"
+
+    current_employee.signature_file_name = unique_name
+    current_employee.signature_url = file_url
+    db.commit()
+    db.refresh(current_employee)
+    return current_employee
+
+
+@profile_router.delete("/signature", response_model=EmployeeOut)
+def remove_signature(
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    if get_role(db, current_employee.id) != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Admin users can manage a signature.",
+        )
+    _delete_existing_signature(current_employee)
+    current_employee.signature_file_name = None
+    current_employee.signature_url = None
+    db.commit()
+    db.refresh(current_employee)
+    return current_employee

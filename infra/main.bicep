@@ -77,6 +77,9 @@ var backendAppName = '${prefix}-backend'
 var frontendAppName = '${prefix}-frontend'
 var invoiceJobName = '${prefix}-invoice-job'
 // Storage account: 3-24 chars, lowercase alphanumeric, globally unique.
+// Single container for every app-managed upload — invoice fee attachments,
+// announcement attachments, and admin-uploaded signature images (see
+// utils/blob_storage.py; each caller just picks its own blob name prefix).
 var storageAccountName = 'ipthours${uniqueString(resourceGroup().id)}'
 var uploadsContainerName = 'invoice-attachments'
 
@@ -194,11 +197,16 @@ resource pgDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-12
 }
 
 // ---------------------------------------------------------------------------
-// 3b. Storage Account + Blob container (invoice fee attachments)
+// 3b. Storage Account + Blob container (invoice/announcement attachments,
+//     invoice logo assets, and admin signature images)
 // ---------------------------------------------------------------------------
 // Uploaded files are stored in Blob Storage because the Container Apps
 // filesystem is ephemeral (lost on restart/scale). The backend reads
 // AZURE_STORAGE_CONNECTION_STRING and uploads/serves via short-lived SAS URLs.
+// Admins upload their own invoice signature (PNG/JPEG) from their Profile
+// page (POST /profile/signature) — it lands in this same container and gets
+// pulled onto an invoice's PDF only when that admin is the invoiced
+// project's owner (see services/invoice_generator.py).
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName

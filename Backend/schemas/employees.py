@@ -91,5 +91,8 @@ class EmployeeOut(EmployeeBase):
 
     id: str
     user_id: str
+    # Read-only — set via POST/DELETE /profile/signature, never through the
+    # normal Create/Update payloads.
+    signature_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime

@@ -52,3 +52,29 @@ export function useDeleteSkill() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profile', 'skills'] }),
   });
 }
+
+export function useUploadSignature() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.upload<Employee>('/profile/signature', formData);
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['profile'], updated);
+      queryClient.invalidateQueries({ queryKey: ['employees', 'me'] });
+    },
+  });
+}
+
+export function useDeleteSignature() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete<Employee>('/profile/signature'),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['profile'], updated);
+      queryClient.invalidateQueries({ queryKey: ['employees', 'me'] });
+    },
+  });
+}

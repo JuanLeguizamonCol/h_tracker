@@ -167,6 +167,17 @@ def generate_invoice_for_project_period(
         )
         db.add(invoice)
         invoice.invoice_number = atomic_generate_number_for_client(db, client.id, client.client_number, company)
+
+        # Signature: only set when the project has an owner — that owner is
+        # who signs it (their self-service signature image, if uploaded).
+        # Legacy/unowned projects get no auto signatory; it stays editable.
+        if project.owner_id:
+            owner = db.query(Employee).filter(Employee.id == project.owner_id).first()
+            if owner:
+                invoice.signatory_employee_id = owner.id
+                invoice.signatory_name = owner.name
+                invoice.signatory_title = owner.title or ""
+
         # Flush now so the unique-index race is detected before we build lines.
         db.flush()
 

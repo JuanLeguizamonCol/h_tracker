@@ -53,6 +53,13 @@ class Employee(Base):
     billing_currency = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
 
+    # Signature image (admins only) — uploaded via /profile/signature, used on
+    # invoices this admin signs as the owning project's owner. `signature_url`
+    # is what gets embedded on the PDF; `signature_file_name` is the blob/local
+    # key, kept so it can be deleted when the signature is replaced/removed.
+    signature_url = Column(String, nullable=True)
+    signature_file_name = Column(String, nullable=True)
+
     assigned_projects = relationship("EmployeeProject", back_populates="employee")
     time_entries = relationship("TimeEntry", back_populates="employee")
     supervisor = relationship("Employee", remote_side=[id])

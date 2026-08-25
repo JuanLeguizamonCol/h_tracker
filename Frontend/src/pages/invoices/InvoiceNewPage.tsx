@@ -22,7 +22,7 @@ type CheckResult = {
 
 export default function InvoiceNewPage() {
   const navigate = useNavigate();
-  const { employee, isAdmin } = useAuth();
+  const { employee, isAdmin, isSuperAdmin } = useAuth();
   const { data: projects = [] } = useProjects();
   const { data: employees = [] } = useEmployees();
 
@@ -36,15 +36,16 @@ export default function InvoiceNewPage() {
   const [isChecking, setIsChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
 
-  // Only projects the current user is allowed to invoice: the ones they own,
-  // plus legacy projects without an owner if the user is an admin (mirrors the
-  // backend's ownership rule).
+  // Only projects the current user is allowed to invoice: super admins see
+  // every project; everyone else sees the ones they own, plus legacy
+  // projects without an owner if the user is an admin (mirrors the backend's
+  // ownership rule).
   const activeProjects = useMemo(
     () => projects.filter(p =>
       p.is_active && !p.is_internal &&
-      (p.owner_id ? p.owner_id === employee?.id : isAdmin)
+      (isSuperAdmin || (p.owner_id ? p.owner_id === employee?.id : isAdmin))
     ),
-    [projects, employee?.id, isAdmin]
+    [projects, employee?.id, isAdmin, isSuperAdmin]
   );
 
   const selectedProject = useMemo(

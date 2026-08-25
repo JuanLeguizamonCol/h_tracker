@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
-import { User, Briefcase, Zap, Edit2, X, Save, Plus, Trash2, Pencil, Star, Lock, Award } from 'lucide-react';
+import { User, Briefcase, Zap, Edit2, X, Save, Plus, Trash2, Pencil, Star, Lock, Award, PenTool, Loader2, Upload } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useProfile, usePatchProfile, useMySkills, useAddSkill, useUpdateSkill, useDeleteSkill } from '@/hooks/useProfile';
+import {
+  useProfile, usePatchProfile, useMySkills, useAddSkill, useUpdateSkill, useDeleteSkill,
+  useUploadSignature, useDeleteSignature,
+} from '@/hooks/useProfile';
 import { useSkillCatalog } from '@/hooks/useSkills';
+import { apiUrl } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -626,6 +630,90 @@ function SkillsTab() {
   );
 }
 
+// ── Signature Tab (admins only) ─────────────────────────────────────────────
+
+function fileHref(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : apiUrl(url);
+}
+
+function SignatureTab() {
+  const { data: profile } = useProfile();
+  const uploadSignature = useUploadSignature();
+  const deleteSignature = useDeleteSignature();
+  const [isUploading, setIsUploading] = useState(false);
+
+  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      toast.error('Please upload a PNG or JPEG image.');
+      return;
+    }
+    setIsUploading(true);
+    try {
+      await uploadSignature.mutateAsync(file);
+      toast.success('Signature uploaded.');
+    } catch {
+      toast.error('Failed to upload signature.');
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!confirm('Remove your signature? Invoices you sign will show no signature image until you upload a new one.')) return;
+    try {
+      await deleteSignature.mutateAsync();
+      toast.success('Signature removed.');
+    } catch {
+      toast.error('Failed to remove signature.');
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">Invoice Signature</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          This image appears on the invoices you sign — automatically used when you're the owner of the invoiced project.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {profile?.signature_url ? (
+          <div className="space-y-3">
+            <div className="rounded-md border bg-white p-4 flex items-center justify-center">
+              <img src={fileHref(profile.signature_url)} alt="Your signature" className="max-h-20" />
+            </div>
+            <div className="flex gap-2">
+              <label className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm cursor-pointer hover:bg-muted transition-colors ${isUploading ? 'opacity-60 pointer-events-none' : ''}`}>
+                {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Replace
+                <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFileChange} disabled={isUploading} />
+              </label>
+              <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleRemove}>
+                <Trash2 className="h-4 w-4 mr-1.5" /> Remove
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <label className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-8 cursor-pointer hover:border-primary/50 transition-colors">
+            {isUploading ? (
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            ) : (
+              <>
+                <Upload className="h-6 w-6 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Click to upload a PNG or JPEG signature</span>
+              </>
+            )}
+            <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFileChange} disabled={isUploading} />
+          </label>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main Profile Page ─────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
@@ -681,6 +769,11 @@ export default function ProfilePage() {
           <TabsTrigger value="skills" className="flex-1 gap-1.5">
             <Zap className="h-4 w-4" /> Skills
           </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="signature" className="flex-1 gap-1.5">
+              <PenTool className="h-4 w-4" /> Signature
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="personal" className="mt-4">
@@ -692,6 +785,11 @@ export default function ProfilePage() {
         <TabsContent value="skills" className="mt-4">
           <SkillsTab />
         </TabsContent>
+        {isAdmin && (
+          <TabsContent value="signature" className="mt-4">
+            <SignatureTab />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

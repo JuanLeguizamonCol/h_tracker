@@ -8,6 +8,7 @@ schema constraint. A missing UserRole row is treated as "employee".
 Manager sits between employee and admin: it gets admin-level access to every
 module EXCEPT Invoices, which stays admin-only (require_admin).
 """
+import os
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,22 @@ from models.user_roles import UserRole
 from utils.auth_jwt import get_current_employee
 
 VALID_ROLES = ("employee", "manager", "admin")
+
+# Super admins have unrestricted access to every invoice regardless of which
+# project's owner_id they hold — everyone else (a regular Admin who owns some
+# projects) only sees/manages invoices for the projects they own, so the
+# Invoices panel doesn't overload them with — or let them edit — invoices
+# that aren't theirs. Matched by Employee.name (case-insensitive) since that's
+# how the requester identified them; override via env if names ever change.
+_SUPER_ADMIN_NAMES = {
+    n.strip().lower()
+    for n in os.getenv("SUPER_ADMIN_NAMES", "Jose Fornell,Gail Fornell,Juan Leguizamon").split(",")
+    if n.strip()
+}
+
+
+def is_super_admin(employee: Employee) -> bool:
+    return (employee.name or "").strip().lower() in _SUPER_ADMIN_NAMES
 
 
 def get_role(db: Session, employee_id: str) -> str:

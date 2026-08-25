@@ -3,6 +3,13 @@ import { Employee, AppRole } from '@/types';
 import { api, getStoredToken, setStoredToken, clearStoredToken } from '@/lib/api';
 import { msalInstance, ensureMsalInitialized } from '@/lib/msal';
 
+// Super admins have unrestricted access to every invoice regardless of
+// project ownership — everyone else (a regular Admin) only sees/manages
+// invoices for projects they own. This list is a UX convenience only (e.g.
+// showing "all invoices" affordances); the real enforcement is server-side
+// in Backend/utils/roles.py — keep this in sync with SUPER_ADMIN_NAMES there.
+const SUPER_ADMIN_NAMES = new Set(['jose fornell', 'gail fornell', 'juan leguizamon']);
+
 interface AuthContextType {
   employee: Employee | null;
   role: AppRole;
@@ -13,6 +20,9 @@ interface AuthContextType {
   /** Admin OR manager — elevated access to everything EXCEPT Invoices, which
    * stays gated behind `isAdmin` alone. */
   canManage: boolean;
+  /** A named super admin (Jose Fornell, Gail Fornell, Juan Leguizamon) — sees
+   * and manages every invoice, not just the ones for projects they own. */
+  isSuperAdmin: boolean;
   isAuthenticated: boolean;
   loginWithEntra: () => Promise<void>;
   signOut: () => void;
@@ -83,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin: role === 'admin',
       isManager: role === 'manager',
       canManage: role === 'admin' || role === 'manager',
+      isSuperAdmin: SUPER_ADMIN_NAMES.has((employee?.name || '').trim().toLowerCase()),
       isAuthenticated: !!employee,
       loginWithEntra,
       signOut,

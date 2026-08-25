@@ -47,6 +47,11 @@ class Invoice(Base):
     auto_generated = Column(Boolean, nullable=False, default=False)
     signatory_name = Column(String, nullable=True)
     signatory_title = Column(String, nullable=True)
+    # Set automatically at generation time from the project's owner — this is
+    # who actually signs the PDF (their uploaded signature image, if any).
+    # signatory_name/title stay as free text for display/back-compat, but the
+    # signature IMAGE is resolved from this employee, not from name matching.
+    signatory_employee_id = Column(String, ForeignKey("employees.id"), nullable=True)
     owner_company = Column(String(10), nullable=True, default='IPC')
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),

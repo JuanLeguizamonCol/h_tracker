@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from config.database import get_db
 from utils.auth_jwt import require_admin, get_current_employee
-from utils.roles import get_role
+from utils.roles import get_role, is_super_admin
 from services.invoice import create_invoice, get_invoices, get_invoice, update_invoice, delete_invoice
 from services.invoice_expenses import create_expense, get_expenses, get_expense, update_expense, delete_expense
 from services.export_pdf import generate_invoice_pdf
@@ -40,7 +40,11 @@ invoice_router = APIRouter(prefix="/invoices", tags=["invoices"])
 
 def _ensure_can_invoice_project(project: Project, employee: Employee, db: Session) -> None:
     """Only the project's owner may invoice it. Legacy projects without an owner
-    fall back to admin-only so they stay invoiceable."""
+    fall back to admin-only so they stay invoiceable. Super admins (Jose
+    Fornell, Gail Fornell, Juan Leguizamon) bypass this — they manage every
+    project's invoices."""
+    if is_super_admin(employee):
+        return
     if project.owner_id:
         if project.owner_id != employee.id:
             raise HTTPException(
@@ -51,6 +55,29 @@ def _ensure_can_invoice_project(project: Project, employee: Employee, db: Sessio
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the project owner (an Admin) can invoice this project.",
+        )
+
+
+def _visible_project_ids(employee: Employee, db: Session) -> Optional[set]:
+    """None = unrestricted (super admin, sees every invoice). Otherwise the
+    set of project ids this admin owns — everything else must be filtered
+    out so a regular Admin isn't overloaded with, or able to touch, invoices
+    for projects they don't own."""
+    if is_super_admin(employee):
+        return None
+    return {
+        row[0] for row in db.query(Project.id).filter(Project.owner_id == employee.id).all()
+    }
+
+
+def _ensure_can_access_invoice(invoice, employee: Employee, db: Session) -> None:
+    if is_super_admin(employee):
+        return
+    project = db.query(Project).filter(Project.id == invoice.project_id).first()
+    if not project or project.owner_id != employee.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access invoices for projects you own.",
         )
 
 
@@ -118,8 +145,13 @@ def list_invoices(
     project_id: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
 ):
-    return get_invoices(db, project_id=project_id, status=status)
+    invoices = get_invoices(db, project_id=project_id, status=status)
+    visible_ids = _visible_project_ids(current_employee, db)
+    if visible_ids is not None:
+        invoices = [inv for inv in invoices if inv.project_id in visible_ids]
+    return invoices
 
 
 @invoice_router.get("/check-hours")
@@ -163,7 +195,8 @@ def generate_monthly_invoices(
     current_employee: Employee = Depends(get_current_employee),
 ):
     """Manually trigger invoice generation for a given period. Only the caller's
-    own projects (those they own) are billed."""
+    own projects (those they own) are billed — unless the caller is a super
+    admin, who can generate for every project."""
     period_start_str = body.get("period_start")
     period_end_str = body.get("period_end")
     if not period_start_str or not period_end_str:
@@ -172,7 +205,8 @@ def generate_monthly_invoices(
     period_start = datetime.strptime(period_start_str, "%Y-%m-%d").date()
     period_end = datetime.strptime(period_end_str, "%Y-%m-%d").date()
 
-    result = generate_invoices_for_period(db, period_start, period_end, owner_id=current_employee.id)
+    owner_id = None if is_super_admin(current_employee) else current_employee.id
+    result = generate_invoices_for_period(db, period_start, period_end, owner_id=owner_id)
 
     log = SchedulerLog(
         id=str(uuid.uuid4()),
@@ -222,6 +256,11 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
     invoice = get_invoice(db, invoice_id)
     project = db.query(Project).filter(Project.id == invoice.project_id).first()
     client = db.query(Client).filter(Client.id == project.client_id).first() if project else None
+
+    signatory = (
+        db.query(Employee).filter(Employee.id == invoice.signatory_employee_id).first()
+        if invoice.signatory_employee_id else None
+    )
 
     # Batch the per-line lookups to avoid N+1 queries (one role query + one
     # hours-aggregate query per line). Roles for all line employees in one go…
@@ -293,6 +332,8 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "period_end": invoice.period_end,
             "signatory_name": invoice.signatory_name,
             "signatory_title": invoice.signatory_title,
+            "signatory_employee_id": invoice.signatory_employee_id,
+            "signatory_signature_file_name": signatory.signature_file_name if signatory else None,
             "owner_company": invoice.owner_company or "IPC",
             "created_at": invoice.created_at,
             "updated_at": invoice.updated_at,
@@ -327,11 +368,16 @@ def export_invoices_report(
     status: Optional[str] = None,
     company: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
 ):
-    """Export all invoices (optionally filtered) as a multi-sheet XLSX report."""
+    """Export invoices (optionally filtered) as a multi-sheet XLSX report —
+    scoped to the caller's own projects unless they're a super admin."""
     invoices = get_invoices(db, project_id=None, status=status)
     if company:
         invoices = [inv for inv in invoices if (inv.owner_company or "IPC") == company]
+    visible_ids = _visible_project_ids(current_employee, db)
+    if visible_ids is not None:
+        invoices = [inv for inv in invoices if inv.project_id in visible_ids]
     invoices_data = [_build_edit_data(inv.id, db) for inv in invoices]
     xlsx_bytes = generate_invoices_report_xlsx(invoices_data)
     import datetime as dt
@@ -344,10 +390,15 @@ def export_invoices_report(
 
 
 @invoice_router.get("/{invoice_id}/edit-data", response_model=InvoiceEditDataOut)
-def get_invoice_edit_data(invoice_id: str, db: Session = Depends(get_db)):
+def get_invoice_edit_data(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
     invoice = get_invoice(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
 
     data = _build_edit_data(invoice_id, db)
 
@@ -370,17 +421,24 @@ def get_invoice_edit_data(invoice_id: str, db: Session = Depends(get_db)):
 
 
 @invoice_router.patch("/{invoice_id}", response_model=InvoiceOut)
-def patch_invoice(invoice_id: str, patch_in: InvoicePatch, db: Session = Depends(get_db)):
+def patch_invoice(
+    invoice_id: str,
+    patch_in: InvoicePatch,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
     invoice = get_invoice(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
 
     # Update simple invoice fields
     # Note: owner_company no longer drives invoice numbering — the number is
     # locked to the client at creation time and never changes.
     simple_fields = [
         "status", "cap_amount", "fixed_fee_amount", "issue_date", "due_date",
-        "period_start", "period_end", "notes", "signatory_name", "signatory_title", "owner_company",
+        "period_start", "period_end", "notes", "signatory_name", "signatory_title",
+        "signatory_employee_id", "owner_company",
     ]
     for field in simple_fields:
         value = getattr(patch_in, field)
@@ -481,10 +539,15 @@ def patch_invoice(invoice_id: str, patch_in: InvoicePatch, db: Session = Depends
 
 
 @invoice_router.get("/{invoice_id}/export/pdf")
-def export_invoice_pdf(invoice_id: str, db: Session = Depends(get_db)):
+def export_invoice_pdf(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
     invoice = get_invoice(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
     edit_data = _build_edit_data(invoice_id, db)
     pdf_bytes = generate_invoice_pdf(edit_data)
     inv_label = invoice.invoice_number or invoice_id[:8]
@@ -496,10 +559,15 @@ def export_invoice_pdf(invoice_id: str, db: Session = Depends(get_db)):
 
 
 @invoice_router.get("/{invoice_id}/export/xlsx")
-def export_invoice_xlsx(invoice_id: str, db: Session = Depends(get_db)):
+def export_invoice_xlsx(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
     invoice = get_invoice(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
     edit_data = _build_edit_data(invoice_id, db)
     xlsx_bytes = generate_invoice_xlsx(edit_data)
     inv_label = invoice.invoice_number or invoice_id[:8]
@@ -511,24 +579,44 @@ def export_invoice_xlsx(invoice_id: str, db: Session = Depends(get_db)):
 
 
 @invoice_router.get("/{invoice_id}", response_model=InvoiceOut)
-def get_invoice_detail(invoice_id: str, db: Session = Depends(get_db)):
+def get_invoice_detail(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
     invoice = get_invoice(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
     return invoice
 
 
 @invoice_router.put("/{invoice_id}", response_model=InvoiceOut)
-def update_invoice_detail(invoice_id: str, invoice_in: InvoiceUpdate, db: Session = Depends(get_db)):
-    invoice = update_invoice(db, invoice_id, invoice_in)
+def update_invoice_detail(
+    invoice_id: str,
+    invoice_in: InvoiceUpdate,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    invoice = get_invoice(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
+    invoice = update_invoice(db, invoice_id, invoice_in)
     return invoice
 
 
 @invoice_router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT,
                        dependencies=[Depends(require_admin)])
-def delete_invoice_detail(invoice_id: str, db: Session = Depends(get_db)):
+def delete_invoice_detail(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    invoice = get_invoice(db, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
     try:
         deleted = delete_invoice(db, invoice_id)
     except IntegrityError:

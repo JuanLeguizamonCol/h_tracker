@@ -30,6 +30,7 @@ class InvoiceUpdate(BaseModel):
     period_end: Optional[date] = None
     signatory_name: Optional[str] = None
     signatory_title: Optional[str] = None
+    signatory_employee_id: Optional[str] = None
     owner_company: Optional[str] = None
 
 
@@ -53,6 +54,7 @@ class InvoiceOut(BaseModel):
     period_end: Optional[date] = None
     signatory_name: Optional[str] = None
     signatory_title: Optional[str] = None
+    signatory_employee_id: Optional[str] = None
     owner_company: Optional[str] = 'IPC'
     created_at: datetime
     updated_at: datetime
@@ -164,6 +166,7 @@ class InvoicePatch(BaseModel):
     notes: Optional[str] = None
     signatory_name: Optional[str] = None
     signatory_title: Optional[str] = None
+    signatory_employee_id: Optional[str] = None
     owner_company: Optional[str] = None
     lines: Optional[List[InvoiceLinePatch]] = None
     expenses: Optional[List[InvoiceExpensePatch]] = None

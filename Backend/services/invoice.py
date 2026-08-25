@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from models.invoice import Invoice
 from models.projects import Project
 from models.clients import Client
+from models.employees import Employee
 from schemas.invoice import InvoiceCreate, InvoiceUpdate
 from services.invoice_number_service import atomic_generate_number_for_client
 
@@ -27,6 +28,16 @@ def create_invoice(db: Session, invoice_in: InvoiceCreate) -> Invoice:
     invoice.invoice_number = atomic_generate_number_for_client(
         db, client.id, client.client_number, owner_company
     )
+
+    # Signature: same rule as the auto-generation job — only set when the
+    # project has an owner, who is who signs it.
+    if project and project.owner_id:
+        owner = db.query(Employee).filter(Employee.id == project.owner_id).first()
+        if owner:
+            invoice.signatory_employee_id = owner.id
+            invoice.signatory_name = owner.name
+            invoice.signatory_title = owner.title or ""
+
     db.add(invoice)
     db.commit()
     db.refresh(invoice)

@@ -14,14 +14,18 @@ from io import BytesIO
 from datetime import date, datetime
 from typing import Optional
 
+import httpx
 from xhtml2pdf import pisa
 
 from services.invoice_config import (
     ASSETS_DIR, SIGNATURES_DIR, LOGOS_DIR, LOGO_FILE,
     SIGNATURE_FILES, COMPANY_INFO, BANK_INFO, COMPANY_PROFILES,
 )
+from utils import blob_storage
 
 logger = logging.getLogger(__name__)
+
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "..", "uploads"))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -69,16 +73,56 @@ def _get_image_base64(filepath: str) -> Optional[str]:
 
 
 def _get_signature_base64(signatory_name: str) -> Optional[str]:
-    """Look up the signature file for a signatory and return base64 data-URI."""
+    """Legacy path: look up a signature by name in the static SIGNATURE_FILES
+    mapping baked into the image. Used as a fallback for signatories who
+    haven't uploaded a self-service signature yet."""
     filename = SIGNATURE_FILES.get(signatory_name)
     if filename:
         path = os.path.join(SIGNATURES_DIR, filename)
         result = _get_image_base64(path)
         if result:
             return result
-    # Fallback
-    fallback = os.path.join(SIGNATURES_DIR, "signature_default.png")
-    return _get_image_base64(fallback)
+    return None
+
+
+def _fetch_image_base64_from_url(url: str) -> Optional[str]:
+    """Download a (typically short-lived SAS) URL and return it as a base64
+    data-URI, for signature images stored in Blob Storage."""
+    try:
+        resp = httpx.get(url, timeout=10.0)
+        resp.raise_for_status()
+        data = base64.b64encode(resp.content).decode("ascii")
+        mime = resp.headers.get("content-type") or "image/png"
+        return f"data:{mime};base64,{data}"
+    except Exception as exc:
+        logger.warning("Could not fetch signature image from %s: %s", url, exc)
+        return None
+
+
+def _get_signature_base64_for_invoice(invoice: dict) -> Optional[str]:
+    """Resolve the signature image for an invoice: prefer the self-service
+    image uploaded by the signing employee (the project's owner, set at
+    generation time — see services/invoice_generator.py), falling back to the
+    legacy static-file-by-name mapping for signatories who haven't uploaded
+    one yet. Returns None (no image, name/title still render as text) if
+    neither is available."""
+    file_name = invoice.get("signatory_signature_file_name")
+    if file_name:
+        if blob_storage.blob_enabled():
+            try:
+                url = blob_storage.sas_url(file_name)
+                result = _fetch_image_base64_from_url(url)
+                if result:
+                    return result
+            except Exception as exc:
+                logger.warning("Could not resolve signature blob %s: %s", file_name, exc)
+        else:
+            result = _get_image_base64(os.path.join(UPLOAD_DIR, file_name))
+            if result:
+                return result
+
+    signatory_name = invoice.get("signatory_name")
+    return _get_signature_base64(signatory_name) if signatory_name else None
 
 
 # ── HTML Template ─────────────────────────────────────────────────────────────
@@ -434,7 +478,7 @@ def generate_invoice_html(edit_data: dict) -> str:
         logo_img = f'<span style="font-weight:bold; font-size:12pt;">{profile["name"]}</span>'
 
     # ── Signature ─────────────────────────────────────────────────────────────
-    sig_uri = _get_signature_base64(signatory_name) if signatory_name else None
+    sig_uri = _get_signature_base64_for_invoice(invoice)
     signature_img = f'<img src="{sig_uri}" alt="Signature"/>' if sig_uri else ""
 
     # ── Fee rows ──────────────────────────────────────────────────────────────

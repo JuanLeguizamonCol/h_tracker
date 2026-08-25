@@ -40,6 +40,8 @@ export interface Employee {
   employment_status: string | null;
   billing_currency: string | null;
   notes: string | null;
+  // Read-only — set via POST/DELETE /profile/signature (admins only).
+  signature_url: string | null;
 }
 
 export interface SkillCatalog {
@@ -291,6 +293,9 @@ export interface Invoice {
   invoice_number: string | null;
   issue_date: string | null;
   due_date: string | null;
+  signatory_name?: string | null;
+  signatory_title?: string | null;
+  signatory_employee_id?: string | null;
   owner_company: string;
   created_at: string;
   updated_at: string;
@@ -382,6 +387,7 @@ export interface InvoicePatch {
   notes?: string | null;
   signatory_name?: string | null;
   signatory_title?: string | null;
+  signatory_employee_id?: string | null;
   owner_company?: string | null;
   lines?: InvoiceLinePatch[];
   expenses?: InvoiceExpensePatch[];
