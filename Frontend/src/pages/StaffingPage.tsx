@@ -209,32 +209,32 @@ export default function StaffingPage() {
                   </Button>
                 </CardHeader>
                 <CardContent>
-                  <Table>
+                  <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Project</TableHead>
-                        <TableHead>Client</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead className="text-right">Allocation</TableHead>
-                        <TableHead>Window</TableHead>
-                        <TableHead className="text-right w-24">Actions</TableHead>
+                        <TableHead className="w-[22%]">Project</TableHead>
+                        <TableHead className="w-[22%]">Client</TableHead>
+                        <TableHead className="w-[16%]">Role</TableHead>
+                        <TableHead className="w-[10%] text-right">Allocation</TableHead>
+                        <TableHead className="w-[20%]">Window</TableHead>
+                        <TableHead className="w-24 text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {group.rows.map(row => (
                         <TableRow key={row.id}>
-                          <TableCell className="font-medium">
+                          <TableCell className="font-medium break-words">
                             {row.project_name}
                             {!row.project_is_active && <Badge variant="outline" className="ml-2 text-xs">Inactive</Badge>}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{row.client_name}</TableCell>
-                          <TableCell>{row.role_name || <span className="text-muted-foreground">—</span>}</TableCell>
+                          <TableCell className="text-muted-foreground break-words">{row.client_name}</TableCell>
+                          <TableCell className="break-words">{row.role_name || <span className="text-muted-foreground">—</span>}</TableCell>
                           <TableCell className="text-right">
                             {row.allocation_percentage != null ? `${row.allocation_percentage}%` : <span className="text-muted-foreground">—</span>}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             <span className="inline-flex items-center gap-1">
-                              <CalendarRange className="h-3.5 w-3.5" />
+                              <CalendarRange className="h-3.5 w-3.5 shrink-0" />
                               {row.project_start_date || '—'} → {row.project_end_date || '—'}
                             </span>
                           </TableCell>
