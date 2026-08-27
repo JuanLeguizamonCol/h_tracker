@@ -1,5 +1,5 @@
 from config.database import Base
-from sqlalchemy import Column, String, ForeignKey, DateTime
+from sqlalchemy import Column, String, ForeignKey, DateTime, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
@@ -13,6 +13,10 @@ class EmployeeProject(Base):
     user_id = Column(String, ForeignKey("employees.id"), nullable=False, index=True)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
     role_id = Column(String, ForeignKey("project_roles.id"), nullable=True)
+    # % of the employee's time this assignment represents (e.g. 50 when split
+    # across two projects). Set from the Staffing panel — purely informational
+    # for planning, not enforced against logged hours.
+    allocation_percentage = Column(Numeric(5, 2), nullable=True)
     assigned_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     assigned_by = Column(String, nullable=True)
 

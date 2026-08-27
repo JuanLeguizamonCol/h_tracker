@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -7,9 +8,14 @@ from config.database import get_db
 from services.employee_projects import (
     create_employee_project, get_employee_projects, get_employee_project,
     update_employee_project, get_employee_projects_with_details,
+    get_all_assignments_with_details,
     delete_employee_project, bulk_replace_assignments,
 )
-from schemas.employee_projects import EmployeeProjectCreate, EmployeeProjectOut, EmployeeProjectWithDetails as EmployeeProjectWithDetailsOut
+from schemas.employee_projects import (
+    EmployeeProjectCreate, EmployeeProjectOut,
+    EmployeeProjectWithDetails as EmployeeProjectWithDetailsOut,
+    StaffingAssignmentOut,
+)
 
 employee_projects_router = APIRouter(prefix="/employee-projects", tags=["employee-projects"])
 
@@ -20,6 +26,9 @@ class BulkAssignBody(BaseModel):
 
 class UpdateEpBody(BaseModel):
     role_id: Optional[str] = None
+    allocation_percentage: Optional[float] = None
+    project_start_date: Optional[date] = None
+    project_end_date: Optional[date] = None
 
 
 @employee_projects_router.post("/", response_model=EmployeeProjectOut, status_code=status.HTTP_201_CREATED)
@@ -34,6 +43,12 @@ def list_employee_projects(
     db: Session = Depends(get_db),
 ):
     return get_employee_projects(db, user_id=user_id, project_id=project_id)
+
+
+@employee_projects_router.get("/staffing", response_model=List[StaffingAssignmentOut])
+def list_staffing(db: Session = Depends(get_db)):
+    """Every assignment across every employee — feeds the Staffing panel."""
+    return get_all_assignments_with_details(db)
 
 
 @employee_projects_router.get("/{user_id}/details", response_model=List[EmployeeProjectWithDetailsOut])

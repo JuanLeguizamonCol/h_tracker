@@ -1,4 +1,4 @@
-import { Clock, Calendar, Briefcase, Users, FileText, UserCircle, ChevronLeft, ChevronRight, LogOut, LayoutDashboard, BarChart3 } from 'lucide-react';
+import { Clock, Calendar, Briefcase, Users, FileText, UserCircle, ChevronLeft, ChevronRight, LogOut, LayoutDashboard, BarChart3, Users2 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -15,6 +15,7 @@ const adminNavigationItems = [
   { title: 'Projects', url: '/projects', icon: Briefcase },
   { title: 'Clients', url: '/clients', icon: Users },
   { title: 'Employees', url: '/employees', icon: UserCircle },
+  { title: 'Staffing', url: '/staffing', icon: Users2 },
   { title: 'Invoices', url: '/invoices', icon: FileText },
   { title: 'Reports', url: '/reports', icon: BarChart3 },
 ];

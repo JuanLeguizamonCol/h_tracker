@@ -261,6 +261,7 @@ export interface EmployeeProject {
   user_id: string;
   project_id: string;
   role_id: string | null;
+  allocation_percentage: number | null;
   assigned_at: string;
   assigned_by: string | null;
 }
@@ -269,6 +270,23 @@ export interface EmployeeProjectWithDetails extends EmployeeProject {
   project_name: string;
   client_name: string;
   client_id: string;
+}
+
+export interface StaffingAssignment {
+  id: string;
+  user_id: string;
+  employee_name: string;
+  project_id: string;
+  project_name: string;
+  project_is_active: boolean;
+  client_id: string;
+  client_name: string;
+  role_id: string | null;
+  role_name: string | null;
+  allocation_percentage: number | null;
+  project_start_date: string | null;
+  project_end_date: string | null;
+  assigned_at: string;
 }
 
 export interface UserRole {

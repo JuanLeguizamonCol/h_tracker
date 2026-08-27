@@ -28,6 +28,7 @@ const EmployeeProfilePage = lazy(() => import("./pages/employees/EmployeeProfile
 const ProjectDetailPage = lazy(() => import("./pages/projects/ProjectDetailPage"));
 const ProjectEditPage = lazy(() => import("./pages/projects/ProjectEditPage"));
 const Reports = lazy(() => import("./pages/Reports"));
+const StaffingPage = lazy(() => import("./pages/StaffingPage"));
 const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Auth = lazy(() => import("./pages/Auth"));
@@ -67,6 +68,7 @@ const App = () => (
               <Route path="/employees/new" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/employees/:employeeId" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeProfilePage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/employees/:employeeId/edit" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/staffing" element={<ProtectedRoute><MainLayout><AdminGuard><StaffingPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices" element={<ProtectedRoute><MainLayout><InvoiceGuard><Invoices /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices/new" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceNewPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices/new/manual" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceManualPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
