@@ -93,7 +93,8 @@ def get_employee_projects_with_details(db: Session, user_id: str) -> List[dict]:
 def get_all_assignments_with_details(db: Session) -> List[dict]:
     """Every employee↔project assignment, with everything the Staffing panel
     needs to render in one query: who, which project/client/role, how much of
-    their time (%), and the project's own time window."""
+    their time (%), and the project's own time window. Internal projects
+    (no real client) are excluded — this panel is for client staffing only."""
     results = (
         db.query(
             EmployeeProject.id,
@@ -115,6 +116,7 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
         .join(Project, EmployeeProject.project_id == Project.id)
         .join(Client, Project.client_id == Client.id)
         .outerjoin(ProjectRole, EmployeeProject.role_id == ProjectRole.id)
+        .filter(Project.is_internal == False)  # noqa: E712
         .order_by(Employee.name, Project.name)
         .all()
     )

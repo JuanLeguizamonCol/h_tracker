@@ -28,8 +28,11 @@ const EMPTY_FORM: AssignForm = { employeeId: '', projectId: '', roleId: '', allo
 
 export default function StaffingPage() {
   const { data: employees = [], isLoading: employeesLoading } = useEmployees();
-  const { data: projects = [], isLoading: projectsLoading } = useActiveProjects();
+  const { data: allActiveProjects = [], isLoading: projectsLoading } = useActiveProjects();
   const { data: staffing = [], isLoading: staffingLoading } = useStaffing();
+
+  // This panel is for client staffing only — internal projects don't apply.
+  const projects = useMemo(() => allActiveProjects.filter(p => !p.is_internal), [allActiveProjects]);
 
   const createAssignment = useCreateAssignment();
   const updateAssignment = useUpdateAssignment();
