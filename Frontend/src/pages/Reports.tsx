@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks } from 'date-fns';
+import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks, addDays } from 'date-fns';
 import {
   CalendarIcon, Search, Loader2, Filter, X,
   Clock, TrendingUp, Activity, BarChart2, Table as TableIcon,
@@ -17,6 +17,7 @@ import { useProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useAllTimeEntriesByDateRange, useTimeEntriesByDateRange } from '@/hooks/useTimeEntries';
+import { useStaffing } from '@/hooks/useAssignedProjects';
 import { useSkillSearch, useSkillCatalog } from '@/hooks/useSkills';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -328,6 +329,10 @@ export default function Reports() {
     useAllTimeEntriesByDateRange(f.startDate, f.endDate, { enabled: canManage });
   const { data: myEntries = [], isLoading: myLoading } =
     useTimeEntriesByDateRange(f.startDate, f.endDate, employee?.id, undefined, { enabled: !canManage });
+  // Staffing plan (allocation % + project window per assignment) — feeds the
+  // forward-looking projection and the projected-vs-actual comparison in the
+  // Utilization report. Manager-only, like the rest of the org-wide data here.
+  const { data: staffing = [] } = useStaffing({ enabled: canManage });
 
   const rawEntries = canManage ? allEntries : myEntries;
   const isLoading = canManage ? allLoading : myLoading;
@@ -655,6 +660,105 @@ export default function Reports() {
     return { overloaded, underloaded, balanced, avgUtilizationPct, total: utilizationData.length };
   }, [utilizationData]);
 
+  // ── Utilization report: forward projection from Staffing ───────────────────────
+  // Turns each assignment's allocation % (set in the Staffing panel) into implied
+  // hours/week (% × 40h), for the weeks ahead where the assignment is still
+  // active (within the project's own start/end window). Only counts assignments
+  // that actually have an allocation % set — an assignment with none doesn't
+  // contribute a committed load.
+  const PROJECTION_WEEKS = 8;
+
+  const projectedWeeks = useMemo(() => {
+    const weeks: { start: Date; end: Date }[] = [];
+    let current = addWeeks(startOfWeek(new Date(), { weekStartsOn: 1 }), 1);
+    for (let i = 0; i < PROJECTION_WEEKS; i++) {
+      weeks.push({ start: current, end: addDays(current, 6) });
+      current = addWeeks(current, 1);
+    }
+    return weeks;
+  }, []);
+
+  const projectedUtilizationData = useMemo(() => {
+    if (!canManage || staffing.length === 0) return [];
+    const byPerson = new Map<string, { userId: string; name: string; weekTotals: number[] }>();
+
+    projectedWeeks.forEach((week, weekIdx) => {
+      staffing.forEach(a => {
+        if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
+        const start = a.project_start_date ? parseLocalDate(a.project_start_date) : null;
+        const end = a.project_end_date ? parseLocalDate(a.project_end_date) : null;
+        const activeThisWeek = (!start || start <= week.end) && (!end || end >= week.start);
+        if (!activeThisWeek) return;
+
+        if (!byPerson.has(a.user_id)) {
+          byPerson.set(a.user_id, { userId: a.user_id, name: a.employee_name, weekTotals: new Array(projectedWeeks.length).fill(0) });
+        }
+        byPerson.get(a.user_id)!.weekTotals[weekIdx] += (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
+      });
+    });
+
+    return Array.from(byPerson.values())
+      .map(p => {
+        const avgWeeklyHours = p.weekTotals.reduce((sum, h) => sum + h, 0) / projectedWeeks.length;
+        const utilizationPct = (avgWeeklyHours / WEEKLY_CAPACITY_HOURS) * 100;
+        const status: 'overloaded' | 'balanced' | 'underloaded' =
+          avgWeeklyHours > WEEKLY_CAPACITY_HOURS
+            ? 'overloaded'
+            : avgWeeklyHours < WEEKLY_CAPACITY_HOURS * UNDERLOADED_RATIO
+            ? 'underloaded'
+            : 'balanced';
+        return { employeeId: p.userId, name: p.name, avgWeeklyHours, utilizationPct, status };
+      })
+      .sort((a, b) => b.avgWeeklyHours - a.avgWeeklyHours);
+  }, [staffing, projectedWeeks, canManage]);
+
+  // ── Utilization report: projected (Staffing) vs actual (registered) by project ──
+  // "Projected" = what Staffing currently plans (allocation % → implied hrs/week),
+  // regardless of the date filter. "Actual" = hours actually logged for that
+  // project within the selected filter range, averaged per week. Placed at the
+  // end of the report, per project only — not per person.
+  const projectUtilizationComparison = useMemo(() => {
+    if (!canManage) return [];
+
+    const projectedByProject = new Map<string, { name: string; clientName: string; hoursPerWeek: number; people: number }>();
+    staffing.forEach(a => {
+      if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
+      if (!projectedByProject.has(a.project_id)) {
+        projectedByProject.set(a.project_id, { name: a.project_name, clientName: a.client_name, hoursPerWeek: 0, people: 0 });
+      }
+      const entry = projectedByProject.get(a.project_id)!;
+      entry.hoursPerWeek += (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
+      entry.people += 1;
+    });
+
+    const weeksInRange = Math.max(1, weeklyMatrixData.weeks.length);
+    const actualByProject = new Map<string, number>();
+    filteredEntries.forEach(e => {
+      actualByProject.set(e.project_id, (actualByProject.get(e.project_id) ?? 0) + Number(e.hours));
+    });
+
+    const projectIds = new Set([...projectedByProject.keys(), ...actualByProject.keys()]);
+    return Array.from(projectIds)
+      .map(pid => {
+        const projected = projectedByProject.get(pid);
+        const proj = projectMap.get(pid);
+        const actualHoursPerWeek = (actualByProject.get(pid) ?? 0) / weeksInRange;
+        const projectedHoursPerWeek = projected?.hoursPerWeek ?? 0;
+        const planPct = projectedHoursPerWeek > 0 ? (actualHoursPerWeek / projectedHoursPerWeek) * 100 : null;
+        return {
+          projectId: pid,
+          name: projected?.name ?? proj?.name ?? 'Unknown',
+          clientName: projected?.clientName ?? (proj ? clientMap.get(proj.client_id)?.name : '') ?? '',
+          peopleStaffed: projected?.people ?? 0,
+          projectedHoursPerWeek,
+          actualHoursPerWeek,
+          planPct,
+        };
+      })
+      .filter(r => r.projectedHoursPerWeek > 0 || r.actualHoursPerWeek > 0)
+      .sort((a, b) => b.projectedHoursPerWeek - a.projectedHoursPerWeek);
+  }, [staffing, filteredEntries, weeklyMatrixData.weeks.length, projectMap, clientMap, canManage]);
+
   // ── Filter chips ──────────────────────────────────────────────────────────────
   const chips = useMemo(() => {
     const c: { key: string; label: string; onClear: () => void }[] = [];
@@ -678,6 +782,7 @@ export default function Reports() {
   const showTables = viewMode === 'tables' || viewMode === 'both';
   const barHeight = Math.max(260, employeeChartData.length * 38);
   const utilizationBarHeight = Math.max(260, utilizationData.length * 38);
+  const projectedBarHeight = Math.max(260, projectedUtilizationData.length * 38);
 
   return (
     <div className="space-y-6">
@@ -1255,6 +1360,105 @@ export default function Reports() {
               </Table>
             </CardContent>
           </Card>
+
+          {/* ── Forward projection from Staffing ─────────────────────────── */}
+          {canManage && (
+            <Card className="card-elevated">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4" />Projected Utilization — Next {PROJECTION_WEEKS} Weeks
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  From Staffing: each assignment's allocation % (for the weeks it's active, per its project window) converted to hours/week.
+                  Assignments without an allocation % set aren't counted.
+                </p>
+              </CardHeader>
+              <CardContent>
+                {projectedUtilizationData.length === 0 ? (
+                  <div className="h-[200px] flex items-center justify-center"><ChartEmpty /></div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={projectedBarHeight}>
+                    <BarChart
+                      data={projectedUtilizationData}
+                      layout="vertical"
+                      margin={{ top: 0, right: 24, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                      <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
+                      <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <Tooltip cursor={{ fill: 'hsl(var(--muted)/0.5)' }} formatter={(value: number) => [`${value.toFixed(1)}h/week planned`, 'Projected']} />
+                      <ReferenceLine x={WEEKLY_CAPACITY_HOURS} stroke="#64748b" strokeDasharray="4 4" />
+                      <Bar dataKey="avgWeeklyHours" radius={[0, 3, 3, 0]}>
+                        {projectedUtilizationData.map(d => (
+                          <Cell key={d.employeeId} fill={STATUS_COLORS[d.status]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Projected (Staffing) vs Actual (registered), by project ─────── */}
+          {canManage && (
+            <Card className="card-elevated">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Projected vs Actual — by Project</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Projected: current Staffing allocations, as hours/week. Actual: hours registered in the selected filter range, averaged per week.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="table-header">Project</TableHead>
+                      <TableHead className="table-header">Client</TableHead>
+                      <TableHead className="table-header text-right">Staffed</TableHead>
+                      <TableHead className="table-header text-right">Projected Hrs/Week</TableHead>
+                      <TableHead className="table-header text-right">Actual Hrs/Week</TableHead>
+                      <TableHead className="table-header text-right">Actual vs Plan</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {projectUtilizationComparison.map(row => (
+                      <TableRow key={row.projectId}>
+                        <TableCell className="font-medium text-sm">{row.name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{row.clientName}</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">
+                          {row.peopleStaffed > 0 ? row.peopleStaffed : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">
+                          {row.projectedHoursPerWeek > 0 ? `${row.projectedHoursPerWeek.toFixed(1)}h` : <span className="text-muted-foreground">Not staffed</span>}
+                        </TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">{row.actualHoursPerWeek.toFixed(1)}h</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">
+                          {row.planPct == null ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <span
+                              className="font-medium"
+                              style={{ color: row.planPct > 120 || row.planPct < 80 ? STATUS_COLORS.overloaded : STATUS_COLORS.balanced }}
+                            >
+                              {row.planPct.toFixed(0)}%
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {projectUtilizationComparison.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                          No staffing plan or logged hours for the selected filters.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>

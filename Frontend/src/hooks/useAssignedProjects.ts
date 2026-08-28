@@ -33,10 +33,11 @@ export function useBulkAssignProjects() {
 
 // ── Staffing panel: every assignment, across every employee ────────────────
 
-export function useStaffing() {
+export function useStaffing(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['staffing'],
     queryFn: () => api.get<StaffingAssignment[]>('/employee-projects/staffing'),
+    enabled: options?.enabled ?? true,
   });
 }
 
