@@ -1,5 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from models.employee_projects import EmployeeProject
 from models.projects import Project
@@ -95,10 +96,15 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
     needs to render in one query: who, which project/client/role, how much of
     their time (%), and the project's own time window.
 
-    Internal projects ARE included: staffing someone on an internal project
-    directly (with an allocation %) is how internal/non-billable workload gets
-    counted toward their utilization in the Reports panel — it's opt-in per
-    assignment, not automatic from logged internal hours."""
+    Internal projects ARE included, but only when explicitly staffed (an
+    allocation % set) — every employee gets auto-assigned every internal
+    project just to unlock logging in Weekly Log (see
+    routers/employees.py::_auto_assign_internal_projects), which would
+    otherwise flood this panel with noise: every person × every internal
+    project, none of it a real staffing decision. Client-project assignments
+    are always shown regardless of allocation % — those are never
+    auto-created, so an unallocated one is still a deliberate staffing call
+    that just hasn't had a % set yet."""
     results = (
         db.query(
             EmployeeProject.id,
@@ -121,6 +127,7 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
         .join(Project, EmployeeProject.project_id == Project.id)
         .join(Client, Project.client_id == Client.id)
         .outerjoin(ProjectRole, EmployeeProject.role_id == ProjectRole.id)
+        .filter(or_(Project.is_internal == False, EmployeeProject.allocation_percentage.isnot(None)))  # noqa: E712
         .order_by(Employee.name, Project.name)
         .all()
     )

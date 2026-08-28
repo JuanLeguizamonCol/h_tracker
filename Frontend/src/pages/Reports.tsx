@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks, addDays } from 'date-fns';
+import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks, addDays, differenceInCalendarDays } from 'date-fns';
 import {
   CalendarIcon, Search, Loader2, Filter, X,
   Clock, TrendingUp, Activity, BarChart2, Table as TableIcon,
@@ -649,10 +649,21 @@ export default function Reports() {
     return map;
   }, [filteredEntries, projectMap]);
 
+  // Averaging denominator: the EXACT selected date range (days ÷ 7), not the
+  // count of Monday-aligned week buckets in weeklyMatrixData — those pad out
+  // to full calendar weeks (e.g. a range starting mid-week still gets a whole
+  // week bucket from that Monday), which inflates the week count and drags
+  // the average down below what the person actually logged for the range
+  // picked in the filters.
+  const weeksInSelectedRange = useMemo(
+    () => Math.max(differenceInCalendarDays(f.endDate, f.startDate) + 1, 1) / 7,
+    [f.startDate, f.endDate]
+  );
+
   const utilizationData = useMemo(() => {
     return weeklyMatrixData.rows
       .map(row => {
-        const weeksCounted = row.weekHours.length;
+        const weeksCounted = weeksInSelectedRange;
         const totalHours = row.weekHours.reduce((sum, h) => sum + h, 0);
         const avgWeeklyHours = weeksCounted > 0 ? totalHours / weeksCounted : 0;
         const utilizationPct = (avgWeeklyHours / WEEKLY_CAPACITY_HOURS) * 100;
@@ -677,7 +688,7 @@ export default function Reports() {
         };
       })
       .sort((a, b) => b.avgWeeklyHours - a.avgWeeklyHours);
-  }, [weeklyMatrixData, internalHoursByEmployee]);
+  }, [weeklyMatrixData, internalHoursByEmployee, weeksInSelectedRange]);
 
   const utilizationSummary = useMemo(() => {
     const overloaded = utilizationData.filter(d => d.status === 'overloaded').length;
@@ -748,7 +759,6 @@ export default function Reports() {
   const personProjectComparison = useMemo(() => {
     if (!canManage) return [];
 
-    const weeksInRange = Math.max(1, weeklyMatrixData.weeks.length);
     const actualByPersonProject = new Map<string, number>();
     filteredEntries.forEach(e => {
       const key = `${e.user_id}|${e.project_id}`;
@@ -764,7 +774,7 @@ export default function Reports() {
     staffing.forEach(a => {
       if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
       const key = `${a.user_id}|${a.project_id}`;
-      const actualHoursPerWeek = (actualByPersonProject.get(key) ?? 0) / weeksInRange;
+      const actualHoursPerWeek = (actualByPersonProject.get(key) ?? 0) / weeksInSelectedRange;
       const projectedHoursPerWeek = (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
       const planPct = projectedHoursPerWeek > 0 ? (actualHoursPerWeek / projectedHoursPerWeek) * 100 : null;
 
@@ -794,7 +804,7 @@ export default function Reports() {
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [staffing, filteredEntries, weeklyMatrixData.weeks.length, canManage]);
+  }, [staffing, filteredEntries, weeksInSelectedRange, canManage]);
 
   // ── Filter chips ──────────────────────────────────────────────────────────────
   const chips = useMemo(() => {
@@ -1353,7 +1363,7 @@ export default function Reports() {
               <CardTitle className="text-base">Utilization Detail</CardTitle>
               <p className="text-xs text-muted-foreground">
                 Sorted by average weekly hours · Total = Client + Internal (vacation, holidays, meetings, etc. — counted in full, broken out for visibility)
-                {utilizationData.length > 0 && ` · ${utilizationData[0].weeksCounted} week${utilizationData[0].weeksCounted !== 1 ? 's' : ''} in range`}
+                {` · ${weeksInSelectedRange.toFixed(1)} week${weeksInSelectedRange !== 1 ? 's' : ''} in the selected range`}
               </p>
             </CardHeader>
             <CardContent>

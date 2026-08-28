@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -29,6 +29,11 @@ export default function ProjectEditPage() {
   const { data: managerEmployees = [] } = useManagerEmployees();
   const { data: allEmployees = [] } = useEmployees();
 
+  const internalLocationOptions = useMemo(
+    () => Array.from(new Set(allEmployees.map(e => e.location).filter((l): l is string => !!l?.trim()))).sort(),
+    [allEmployees]
+  );
+
   const [initialized, setInitialized] = useState(false);
   const [name, setName] = useState('');
   const [projectCode, setProjectCode] = useState('');
@@ -41,6 +46,7 @@ export default function ProjectEditPage() {
   const [endDate, setEndDate] = useState('');
   const [status, setStatus] = useState('active');
   const [isInternal, setIsInternal] = useState(false);
+  const [internalLocation, setInternalLocation] = useState('');
   const [referralId, setReferralId] = useState('');
   const [referralType, setReferralType] = useState('percentage');
   const [referralValue, setReferralValue] = useState('');
@@ -67,6 +73,7 @@ export default function ProjectEditPage() {
     setEndDate(project.end_date || '');
     setStatus(project.status || 'active');
     setIsInternal(project.is_internal || false);
+    setInternalLocation(project.location || '');
     setReferralId(project.referral_id || '');
     setReferralType(project.referral_type || 'percentage');
     setReferralValue(project.referral_value != null ? String(project.referral_value) : '');
@@ -105,6 +112,7 @@ export default function ProjectEditPage() {
           end_date: endDate || undefined,
           status,
           is_internal: isInternal,
+          location: isInternal && internalLocation ? internalLocation : null,
           referral_id: referralId || undefined,
           referral_type: referralId ? referralType : undefined,
           referral_value: referralId && referralValue ? parseFloat(referralValue) : undefined,
@@ -260,6 +268,22 @@ export default function ProjectEditPage() {
               <p className="text-xs text-muted-foreground">Locks all time entries to non-billable.</p>
             </div>
           </div>
+
+          {isInternal && (
+            <div className="space-y-1.5 pl-1">
+              <Label>Who gets this automatically</Label>
+              <Select value={internalLocation || '_all'} onValueChange={v => setInternalLocation(v === '_all' ? '' : v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_all">Everyone</SelectItem>
+                  {internalLocationOptions.map(loc => <SelectItem key={loc} value={loc}>{loc} only</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Every employee gets internal projects auto-assigned so they can log time to them. Pick a location to limit that to just that office (e.g. "Colombia Holiday").
+              </p>
+            </div>
+          )}
 
           <div className="space-y-1">
             <Label>Notes</Label>

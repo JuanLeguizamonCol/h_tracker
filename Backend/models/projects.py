@@ -15,6 +15,12 @@ class Project(Base):
     description = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     is_internal = Column(Boolean, nullable=False, default=False)
+    # Internal projects only: who gets auto-assigned (see
+    # routers/employees.py::_auto_assign_internal_projects). Null/blank = every
+    # active employee; a value (matching Employee.location) restricts
+    # auto-assignment to employees at that location. Ignored for client
+    # projects — those are staffed explicitly, never auto-assigned.
+    location = Column(String, nullable=True)
     manager_id = Column(String, ForeignKey("employees.id"), nullable=True)
     # The project owner is the ONLY employee allowed to invoice this project
     # (owners are Admins). Distinct from manager_id (operational manager, may be

@@ -10,6 +10,9 @@ class ProjectBase(BaseModel):
     description: Optional[str] = None
     is_active: bool = True
     is_internal: bool = False
+    # Internal projects only: null = auto-assigned to everyone; a location
+    # value restricts auto-assignment to employees at that location.
+    location: Optional[str] = None
     project_code: Optional[str] = None
     area_category: Optional[str] = None
     business_unit: Optional[str] = None
@@ -42,6 +45,7 @@ class ProjectUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     is_internal: Optional[bool] = None
+    location: Optional[str] = None
     project_code: Optional[str] = None
     area_category: Optional[str] = None
     business_unit: Optional[str] = None
@@ -73,6 +77,7 @@ class ProjectOut(BaseModel):
     description: Optional[str] = None
     is_active: bool = True
     is_internal: bool = False
+    location: Optional[str] = None
     project_code: Optional[str] = None
     area_category: Optional[str] = None
     business_unit: Optional[str] = None

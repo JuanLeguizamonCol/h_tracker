@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, Plus, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -36,6 +36,7 @@ interface Step1Form {
   end_date: string;
   status: string;
   is_internal: boolean;
+  location: string;
   referral_id: string;
   referral_type: string;
   referral_value: string;
@@ -82,6 +83,11 @@ export default function ProjectNewPage() {
   const { data: managerEmployees = [] } = useManagerEmployees();
   const { data: allEmployees = [] } = useEmployees();
 
+  const internalLocationOptions = useMemo(
+    () => Array.from(new Set(allEmployees.map(e => e.location).filter((l): l is string => !!l?.trim()))).sort(),
+    [allEmployees]
+  );
+
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
@@ -98,6 +104,7 @@ export default function ProjectNewPage() {
     end_date: '',
     status: 'active',
     is_internal: false,
+    location: '',
     referral_id: '',
     referral_type: 'percentage',
     referral_value: '',
@@ -209,6 +216,7 @@ export default function ProjectNewPage() {
         end_date: form.end_date || undefined,
         status: form.status,
         is_internal: form.is_internal,
+        location: form.is_internal && form.location ? form.location : undefined,
         referral_id: form.referral_id || undefined,
         referral_type: form.referral_id ? form.referral_type : undefined,
         referral_value: form.referral_id && form.referral_value ? parseFloat(form.referral_value) : undefined,
@@ -444,6 +452,22 @@ export default function ProjectNewPage() {
                 <p className="text-xs text-muted-foreground">Locks all time entries to non-billable.</p>
               </div>
             </div>
+
+            {form.is_internal && (
+              <div className="space-y-1.5 pl-1">
+                <Label>Who gets this automatically</Label>
+                <Select value={form.location || '_all'} onValueChange={v => set('location', v === '_all' ? '' : v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_all">Everyone</SelectItem>
+                    {internalLocationOptions.map(loc => <SelectItem key={loc} value={loc}>{loc} only</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Every employee gets internal projects auto-assigned so they can log time to them. Pick a location to limit that to just that office (e.g. "Colombia Holiday").
+                </p>
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label>Notes</Label>

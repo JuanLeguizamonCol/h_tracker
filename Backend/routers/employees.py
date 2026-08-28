@@ -29,16 +29,28 @@ employees_router = APIRouter(prefix="/employees", tags=["employees"])
 
 
 def _auto_assign_internal_projects(db: Session, employee_id: str) -> None:
-    """Assign all active internal projects to a new employee, skipping any already assigned."""
+    """Assign active internal projects to an employee, skipping any already
+    assigned. A project's `location` scopes this: null/blank reaches every
+    employee (e.g. company-wide Holidays/Meetings); set to a location (e.g.
+    "Colombia") it only reaches employees at that location (e.g. Colombia
+    Holiday). These are plain, unallocated assignments — just enough to let
+    the employee log time to them in Weekly Log; they don't show up in the
+    Staffing panel unless someone later gives them an explicit allocation %."""
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not employee:
+        return
     already = {ep.project_id for ep in db.query(EmployeeProject).filter(EmployeeProject.user_id == employee_id).all()}
     internal_projects = db.query(Project).filter(Project.is_internal == True, Project.is_active == True).all()
     for proj in internal_projects:
-        if proj.id not in already:
-            db.add(EmployeeProject(
-                id=str(uuid.uuid4()),
-                user_id=employee_id,
-                project_id=proj.id,
-            ))
+        if proj.id in already:
+            continue
+        if proj.location and proj.location != employee.location:
+            continue
+        db.add(EmployeeProject(
+            id=str(uuid.uuid4()),
+            user_id=employee_id,
+            project_id=proj.id,
+        ))
     db.commit()
 
 

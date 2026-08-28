@@ -187,6 +187,9 @@ export interface Project {
   description: string | null;
   is_active: boolean;
   is_internal: boolean;
+  // Internal projects only: null = auto-assigned to everyone; a location
+  // value restricts auto-assignment to employees at that location.
+  location: string | null;
   project_code: string | null;
   area_category: string | null;
   business_unit: string | null;
