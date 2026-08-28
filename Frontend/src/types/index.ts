@@ -279,6 +279,7 @@ export interface StaffingAssignment {
   project_id: string;
   project_name: string;
   project_is_active: boolean;
+  project_is_internal: boolean;
   client_id: string;
   client_name: string;
   role_id: string | null;

@@ -632,6 +632,23 @@ export default function Reports() {
   // Reuses the same per-employee-per-week hours as the matrix above, so a week
   // with no logged hours correctly counts as 0% that week (real bench time),
   // not as a week that's simply excluded from the average.
+  //
+  // Registered internal-project hours (vacation, holidays, meetings, etc.) are
+  // NOT a separate opt-in here — unlike the Staffing-based projection, actual
+  // occupancy counts every hour someone logged, client or internal, because
+  // that's real time and matters for performance/metrics review. They're
+  // broken out as their own column below so it's visible how much of the
+  // total is internal overhead vs. client work, not just folded in silently.
+  const internalHoursByEmployee = useMemo(() => {
+    const map = new Map<string, number>();
+    filteredEntries.forEach(e => {
+      if (projectMap.get(e.project_id)?.is_internal) {
+        map.set(e.user_id, (map.get(e.user_id) ?? 0) + Number(e.hours));
+      }
+    });
+    return map;
+  }, [filteredEntries, projectMap]);
+
   const utilizationData = useMemo(() => {
     return weeklyMatrixData.rows
       .map(row => {
@@ -645,10 +662,13 @@ export default function Reports() {
             : avgWeeklyHours < WEEKLY_CAPACITY_HOURS * UNDERLOADED_RATIO
             ? 'underloaded'
             : 'balanced';
+        const internalHours = internalHoursByEmployee.get(row.employeeId) ?? 0;
         return {
           employeeId: row.employeeId,
           name: row.name,
           totalHours,
+          clientHours: totalHours - internalHours,
+          internalHours,
           weeksCounted,
           avgWeeklyHours,
           utilizationPct,
@@ -657,7 +677,7 @@ export default function Reports() {
         };
       })
       .sort((a, b) => b.avgWeeklyHours - a.avgWeeklyHours);
-  }, [weeklyMatrixData]);
+  }, [weeklyMatrixData, internalHoursByEmployee]);
 
   const utilizationSummary = useMemo(() => {
     const overloaded = utilizationData.filter(d => d.status === 'overloaded').length;
@@ -1332,48 +1352,56 @@ export default function Reports() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Utilization Detail</CardTitle>
               <p className="text-xs text-muted-foreground">
-                Sorted by average weekly hours
+                Sorted by average weekly hours · Total = Client + Internal (vacation, holidays, meetings, etc. — counted in full, broken out for visibility)
                 {utilizationData.length > 0 && ` · ${utilizationData[0].weeksCounted} week${utilizationData[0].weeksCounted !== 1 ? 's' : ''} in range`}
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="table-header">Person</TableHead>
-                    <TableHead className="table-header text-right">Avg Hours/Week</TableHead>
-                    <TableHead className="table-header text-right">Utilization</TableHead>
-                    <TableHead className="table-header">Status</TableHead>
-                    <TableHead className="table-header text-right">Total Hours</TableHead>
-                    <TableHead className="table-header text-right">Weeks Over {WEEKLY_CAPACITY_HOURS}h</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {utilizationData.map(d => (
-                    <TableRow key={d.employeeId}>
-                      <TableCell className="font-medium text-sm">{d.name}</TableCell>
-                      <TableCell className="text-right text-sm tabular-nums">{d.avgWeeklyHours.toFixed(1)}h</TableCell>
-                      <TableCell className="text-right text-sm tabular-nums">{d.utilizationPct.toFixed(0)}%</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs" style={{ color: STATUS_COLORS[d.status], borderColor: STATUS_COLORS[d.status] }}>
-                          {STATUS_LABELS[d.status]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right text-sm tabular-nums">{d.totalHours.toFixed(1)}h</TableCell>
-                      <TableCell className="text-right text-sm tabular-nums">
-                        {d.overloadedWeeks > 0 ? d.overloadedWeeks : <span className="text-muted-foreground">—</span>}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {utilizationData.length === 0 && (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                        No data for the selected filters.
-                      </TableCell>
+                      <TableHead className="table-header">Person</TableHead>
+                      <TableHead className="table-header text-right">Avg Hours/Week</TableHead>
+                      <TableHead className="table-header text-right">Utilization</TableHead>
+                      <TableHead className="table-header">Status</TableHead>
+                      <TableHead className="table-header text-right">Client Hrs</TableHead>
+                      <TableHead className="table-header text-right">Internal Hrs</TableHead>
+                      <TableHead className="table-header text-right">Total Hours</TableHead>
+                      <TableHead className="table-header text-right">Weeks Over {WEEKLY_CAPACITY_HOURS}h</TableHead>
                     </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {utilizationData.map(d => (
+                      <TableRow key={d.employeeId}>
+                        <TableCell className="font-medium text-sm">{d.name}</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">{d.avgWeeklyHours.toFixed(1)}h</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">{d.utilizationPct.toFixed(0)}%</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs" style={{ color: STATUS_COLORS[d.status], borderColor: STATUS_COLORS[d.status] }}>
+                            {STATUS_LABELS[d.status]}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">{d.clientHours.toFixed(1)}h</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">
+                          {d.internalHours > 0 ? `${d.internalHours.toFixed(1)}h` : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="text-right text-sm tabular-nums font-medium">{d.totalHours.toFixed(1)}h</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">
+                          {d.overloadedWeeks > 0 ? d.overloadedWeeks : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {utilizationData.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                          No data for the selected filters.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
 

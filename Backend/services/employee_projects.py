@@ -93,8 +93,12 @@ def get_employee_projects_with_details(db: Session, user_id: str) -> List[dict]:
 def get_all_assignments_with_details(db: Session) -> List[dict]:
     """Every employee↔project assignment, with everything the Staffing panel
     needs to render in one query: who, which project/client/role, how much of
-    their time (%), and the project's own time window. Internal projects
-    (no real client) are excluded — this panel is for client staffing only."""
+    their time (%), and the project's own time window.
+
+    Internal projects ARE included: staffing someone on an internal project
+    directly (with an allocation %) is how internal/non-billable workload gets
+    counted toward their utilization in the Reports panel — it's opt-in per
+    assignment, not automatic from logged internal hours."""
     results = (
         db.query(
             EmployeeProject.id,
@@ -106,6 +110,7 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
             Employee.name.label("employee_name"),
             Project.name.label("project_name"),
             Project.is_active.label("project_is_active"),
+            Project.is_internal.label("project_is_internal"),
             Project.start_date.label("project_start_date"),
             Project.end_date.label("project_end_date"),
             Project.client_id,
@@ -116,7 +121,6 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
         .join(Project, EmployeeProject.project_id == Project.id)
         .join(Client, Project.client_id == Client.id)
         .outerjoin(ProjectRole, EmployeeProject.role_id == ProjectRole.id)
-        .filter(Project.is_internal == False)  # noqa: E712
         .order_by(Employee.name, Project.name)
         .all()
     )
@@ -128,6 +132,7 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
             "project_id": r.project_id,
             "project_name": r.project_name,
             "project_is_active": r.project_is_active,
+            "project_is_internal": r.project_is_internal,
             "client_id": r.client_id,
             "client_name": r.client_name,
             "role_id": r.role_id,

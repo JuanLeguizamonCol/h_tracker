@@ -67,6 +67,7 @@ class StaffingAssignmentOut(BaseModel):
     project_id: str
     project_name: str
     project_is_active: bool
+    project_is_internal: bool
     client_id: str
     client_name: str
     role_id: Optional[str] = None

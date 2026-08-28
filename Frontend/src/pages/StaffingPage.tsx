@@ -31,8 +31,10 @@ export default function StaffingPage() {
   const { data: allActiveProjects = [], isLoading: projectsLoading } = useActiveProjects();
   const { data: staffing = [], isLoading: staffingLoading } = useStaffing();
 
-  // This panel is for client staffing only — internal projects don't apply.
-  const projects = useMemo(() => allActiveProjects.filter(p => !p.is_internal), [allActiveProjects]);
+  // Internal projects ARE selectable — staffing someone on one directly (with
+  // an allocation %) is how internal/non-billable workload counts toward
+  // their utilization in Reports. It's opt-in per assignment, not automatic.
+  const projects = allActiveProjects;
 
   const createAssignment = useCreateAssignment();
   const updateAssignment = useUpdateAssignment();
@@ -225,6 +227,7 @@ export default function StaffingPage() {
                         <TableRow key={row.id}>
                           <TableCell className="font-medium break-words">
                             {row.project_name}
+                            {row.project_is_internal && <Badge variant="secondary" className="ml-2 text-xs">Internal</Badge>}
                             {!row.project_is_active && <Badge variant="outline" className="ml-2 text-xs">Inactive</Badge>}
                           </TableCell>
                           <TableCell className="text-muted-foreground break-words">{row.client_name}</TableCell>
@@ -279,7 +282,7 @@ export default function StaffingPage() {
               <Select value={form.projectId} onValueChange={handleProjectChange} disabled={!!editingId}>
                 <SelectTrigger><SelectValue placeholder="Select a project" /></SelectTrigger>
                 <SelectContent>
-                  {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}{p.is_internal ? ' (Internal)' : ''}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
