@@ -718,52 +718,63 @@ export default function Reports() {
     return { weeks: projectedWeeks, rows };
   }, [staffing, projectedWeeks, canManage]);
 
-  // ── Utilization report: projected (Staffing) vs actual (registered) by project ──
-  // "Projected" = what Staffing currently plans (allocation % → implied hrs/week),
-  // regardless of the date filter. "Actual" = hours actually logged for that
-  // project within the selected filter range, averaged per week. Placed at the
-  // end of the report, per project only — not per person.
-  const projectUtilizationComparison = useMemo(() => {
+  // ── Utilization report: projected (Staffing) vs actual (registered), per person ──
+  // "Projected" = what Staffing currently plans for that person on that project
+  // (their allocation % → implied hrs/week), regardless of the date filter.
+  // "Actual" = hours THEY logged on THAT project within the selected filter
+  // range, averaged per week. Grouped by person (their projects underneath),
+  // not by project — that grouping was confusing since it mixed everyone's
+  // hours into one project total.
+  const personProjectComparison = useMemo(() => {
     if (!canManage) return [];
 
-    const projectedByProject = new Map<string, { name: string; clientName: string; hoursPerWeek: number; people: number }>();
+    const weeksInRange = Math.max(1, weeklyMatrixData.weeks.length);
+    const actualByPersonProject = new Map<string, number>();
+    filteredEntries.forEach(e => {
+      const key = `${e.user_id}|${e.project_id}`;
+      actualByPersonProject.set(key, (actualByPersonProject.get(key) ?? 0) + Number(e.hours));
+    });
+
+    type Row = {
+      projectId: string; projectName: string; clientName: string;
+      allocationPct: number; projectedHoursPerWeek: number; actualHoursPerWeek: number; planPct: number | null;
+    };
+    const byPerson = new Map<string, { userId: string; name: string; rows: Row[] }>();
+
     staffing.forEach(a => {
       if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
-      if (!projectedByProject.has(a.project_id)) {
-        projectedByProject.set(a.project_id, { name: a.project_name, clientName: a.client_name, hoursPerWeek: 0, people: 0 });
+      const key = `${a.user_id}|${a.project_id}`;
+      const actualHoursPerWeek = (actualByPersonProject.get(key) ?? 0) / weeksInRange;
+      const projectedHoursPerWeek = (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
+      const planPct = projectedHoursPerWeek > 0 ? (actualHoursPerWeek / projectedHoursPerWeek) * 100 : null;
+
+      if (!byPerson.has(a.user_id)) {
+        byPerson.set(a.user_id, { userId: a.user_id, name: a.employee_name, rows: [] });
       }
-      const entry = projectedByProject.get(a.project_id)!;
-      entry.hoursPerWeek += (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
-      entry.people += 1;
+      byPerson.get(a.user_id)!.rows.push({
+        projectId: a.project_id,
+        projectName: a.project_name,
+        clientName: a.client_name,
+        allocationPct: a.allocation_percentage,
+        projectedHoursPerWeek,
+        actualHoursPerWeek,
+        planPct,
+      });
     });
 
-    const weeksInRange = Math.max(1, weeklyMatrixData.weeks.length);
-    const actualByProject = new Map<string, number>();
-    filteredEntries.forEach(e => {
-      actualByProject.set(e.project_id, (actualByProject.get(e.project_id) ?? 0) + Number(e.hours));
-    });
-
-    const projectIds = new Set([...projectedByProject.keys(), ...actualByProject.keys()]);
-    return Array.from(projectIds)
-      .map(pid => {
-        const projected = projectedByProject.get(pid);
-        const proj = projectMap.get(pid);
-        const actualHoursPerWeek = (actualByProject.get(pid) ?? 0) / weeksInRange;
-        const projectedHoursPerWeek = projected?.hoursPerWeek ?? 0;
-        const planPct = projectedHoursPerWeek > 0 ? (actualHoursPerWeek / projectedHoursPerWeek) * 100 : null;
+    return Array.from(byPerson.values())
+      .map(p => {
+        const totalProjected = p.rows.reduce((sum, r) => sum + r.projectedHoursPerWeek, 0);
+        const totalActual = p.rows.reduce((sum, r) => sum + r.actualHoursPerWeek, 0);
+        const overallPlanPct = totalProjected > 0 ? (totalActual / totalProjected) * 100 : null;
         return {
-          projectId: pid,
-          name: projected?.name ?? proj?.name ?? 'Unknown',
-          clientName: projected?.clientName ?? (proj ? clientMap.get(proj.client_id)?.name : '') ?? '',
-          peopleStaffed: projected?.people ?? 0,
-          projectedHoursPerWeek,
-          actualHoursPerWeek,
-          planPct,
+          ...p,
+          overallPlanPct,
+          rows: p.rows.sort((a, b) => b.projectedHoursPerWeek - a.projectedHoursPerWeek),
         };
       })
-      .filter(r => r.projectedHoursPerWeek > 0 || r.actualHoursPerWeek > 0)
-      .sort((a, b) => b.projectedHoursPerWeek - a.projectedHoursPerWeek);
-  }, [staffing, filteredEntries, weeklyMatrixData.weeks.length, projectMap, clientMap, canManage]);
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [staffing, filteredEntries, weeklyMatrixData.weeks.length, canManage]);
 
   // ── Filter chips ──────────────────────────────────────────────────────────────
   const chips = useMemo(() => {
@@ -1417,64 +1428,79 @@ export default function Reports() {
             </Card>
           )}
 
-          {/* ── Projected (Staffing) vs Actual (registered), by project ─────── */}
+          {/* ── Projected (Staffing) vs Actual (registered), by person ──────── */}
           {canManage && (
-            <Card className="card-elevated">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Projected vs Actual — by Project</CardTitle>
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-base font-semibold text-foreground">Projected vs Actual — by Person</h3>
                 <p className="text-xs text-muted-foreground">
-                  Projected: current Staffing allocations, as hours/week. Actual: hours registered in the selected filter range, averaged per week.
+                  Projected: each person's Staffing allocation on that project, as hours/week. Actual: hours they registered on it in the selected filter range, averaged per week.
                 </p>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="table-header">Project</TableHead>
-                      <TableHead className="table-header">Client</TableHead>
-                      <TableHead className="table-header text-right">Staffed</TableHead>
-                      <TableHead className="table-header text-right">Projected Hrs/Week</TableHead>
-                      <TableHead className="table-header text-right">Actual Hrs/Week</TableHead>
-                      <TableHead className="table-header text-right">Actual vs Plan</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {projectUtilizationComparison.map(row => (
-                      <TableRow key={row.projectId}>
-                        <TableCell className="font-medium text-sm">{row.name}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{row.clientName}</TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">
-                          {row.peopleStaffed > 0 ? row.peopleStaffed : <span className="text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">
-                          {row.projectedHoursPerWeek > 0 ? `${row.projectedHoursPerWeek.toFixed(1)}h` : <span className="text-muted-foreground">Not staffed</span>}
-                        </TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">{row.actualHoursPerWeek.toFixed(1)}h</TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">
-                          {row.planPct == null ? (
-                            <span className="text-muted-foreground">—</span>
-                          ) : (
-                            <span
-                              className="font-medium"
-                              style={{ color: row.planPct > 120 || row.planPct < 80 ? STATUS_COLORS.overloaded : STATUS_COLORS.balanced }}
-                            >
-                              {row.planPct.toFixed(0)}%
-                            </span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {projectUtilizationComparison.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                          No staffing plan or logged hours for the selected filters.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+              </div>
+              {personProjectComparison.length === 0 ? (
+                <Card className="card-elevated">
+                  <CardContent className="py-10 text-center text-muted-foreground text-sm">
+                    No one has an allocation % set in Staffing yet.
+                  </CardContent>
+                </Card>
+              ) : (
+                personProjectComparison.map(person => (
+                  <Card key={person.userId} className="card-elevated">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                      <CardTitle className="text-sm">{person.name}</CardTitle>
+                      {person.overallPlanPct != null && (
+                        <span
+                          className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                          style={{
+                            color: person.overallPlanPct > 120 || person.overallPlanPct < 80 ? STATUS_COLORS.overloaded : STATUS_COLORS.balanced,
+                            backgroundColor: person.overallPlanPct > 120 || person.overallPlanPct < 80 ? '#FEE2E2' : '#D1FAE5',
+                          }}
+                        >
+                          {person.overallPlanPct.toFixed(0)}% of plan overall
+                        </span>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="table-header">Project</TableHead>
+                            <TableHead className="table-header">Client</TableHead>
+                            <TableHead className="table-header text-right">Allocation</TableHead>
+                            <TableHead className="table-header text-right">Projected Hrs/Week</TableHead>
+                            <TableHead className="table-header text-right">Actual Hrs/Week</TableHead>
+                            <TableHead className="table-header text-right">% of Plan</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {person.rows.map(row => (
+                            <TableRow key={row.projectId}>
+                              <TableCell className="font-medium text-sm">{row.projectName}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{row.clientName}</TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">{row.allocationPct}%</TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">{row.projectedHoursPerWeek.toFixed(1)}h</TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">{row.actualHoursPerWeek.toFixed(1)}h</TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">
+                                {row.planPct == null ? (
+                                  <span className="text-muted-foreground">—</span>
+                                ) : (
+                                  <span
+                                    className="font-medium"
+                                    style={{ color: row.planPct > 120 || row.planPct < 80 ? STATUS_COLORS.overloaded : STATUS_COLORS.balanced }}
+                                  >
+                                    {row.planPct.toFixed(0)}%
+                                  </span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
           )}
         </TabsContent>
       </Tabs>
