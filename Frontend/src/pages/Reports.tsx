@@ -65,6 +65,15 @@ function parseLocalDate(s: string): Date {
   return new Date(y, m - 1, d);
 }
 
+// Occupancy cell background for the projected-utilization matrix — red over
+// capacity, amber meaningfully under (< 80%), green in the healthy band.
+function occupancyCellClass(pct: number): string {
+  if (pct <= 0) return '';
+  if (pct > 100) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+  if (pct < UNDERLOADED_RATIO * 100) return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
+  return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+}
+
 // ─── Filter state ─────────────────────────────────────────────────────────────
 
 type Filters = {
@@ -662,25 +671,26 @@ export default function Reports() {
 
   // ── Utilization report: forward projection from Staffing ───────────────────────
   // Turns each assignment's allocation % (set in the Staffing panel) into implied
-  // hours/week (% × 40h), for the weeks ahead where the assignment is still
-  // active (within the project's own start/end window). Only counts assignments
-  // that actually have an allocation % set — an assignment with none doesn't
-  // contribute a committed load.
-  const PROJECTION_WEEKS = 8;
+  // occupancy for the weeks ahead where the assignment is still active (within
+  // the project's own start/end window). Only counts assignments that actually
+  // have an allocation % set — an assignment with none doesn't contribute a
+  // committed load. Rendered as a week-by-week matrix, same shape as the actual
+  // Weekly Hours Matrix above.
+  const PROJECTION_WEEKS = 10;
 
   const projectedWeeks = useMemo(() => {
-    const weeks: { start: Date; end: Date }[] = [];
+    const weeks: { key: string; label: string; start: Date; end: Date }[] = [];
     let current = addWeeks(startOfWeek(new Date(), { weekStartsOn: 1 }), 1);
     for (let i = 0; i < PROJECTION_WEEKS; i++) {
-      weeks.push({ start: current, end: addDays(current, 6) });
+      weeks.push({ key: format(current, 'yyyy-MM-dd'), label: format(current, 'MMM d'), start: current, end: addDays(current, 6) });
       current = addWeeks(current, 1);
     }
     return weeks;
   }, []);
 
-  const projectedUtilizationData = useMemo(() => {
-    if (!canManage || staffing.length === 0) return [];
-    const byPerson = new Map<string, { userId: string; name: string; weekTotals: number[] }>();
+  const projectedMatrixData = useMemo(() => {
+    if (!canManage || staffing.length === 0) return { weeks: projectedWeeks, rows: [] as { employeeId: string; name: string; weekPct: number[] }[] };
+    const byPerson = new Map<string, { userId: string; name: string; weekHours: number[] }>();
 
     projectedWeeks.forEach((week, weekIdx) => {
       staffing.forEach(a => {
@@ -691,25 +701,21 @@ export default function Reports() {
         if (!activeThisWeek) return;
 
         if (!byPerson.has(a.user_id)) {
-          byPerson.set(a.user_id, { userId: a.user_id, name: a.employee_name, weekTotals: new Array(projectedWeeks.length).fill(0) });
+          byPerson.set(a.user_id, { userId: a.user_id, name: a.employee_name, weekHours: new Array(projectedWeeks.length).fill(0) });
         }
-        byPerson.get(a.user_id)!.weekTotals[weekIdx] += (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
+        byPerson.get(a.user_id)!.weekHours[weekIdx] += (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
       });
     });
 
-    return Array.from(byPerson.values())
-      .map(p => {
-        const avgWeeklyHours = p.weekTotals.reduce((sum, h) => sum + h, 0) / projectedWeeks.length;
-        const utilizationPct = (avgWeeklyHours / WEEKLY_CAPACITY_HOURS) * 100;
-        const status: 'overloaded' | 'balanced' | 'underloaded' =
-          avgWeeklyHours > WEEKLY_CAPACITY_HOURS
-            ? 'overloaded'
-            : avgWeeklyHours < WEEKLY_CAPACITY_HOURS * UNDERLOADED_RATIO
-            ? 'underloaded'
-            : 'balanced';
-        return { employeeId: p.userId, name: p.name, avgWeeklyHours, utilizationPct, status };
-      })
-      .sort((a, b) => b.avgWeeklyHours - a.avgWeeklyHours);
+    const rows = Array.from(byPerson.values())
+      .map(p => ({
+        employeeId: p.userId,
+        name: p.name,
+        weekPct: p.weekHours.map(h => (h / WEEKLY_CAPACITY_HOURS) * 100),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return { weeks: projectedWeeks, rows };
   }, [staffing, projectedWeeks, canManage]);
 
   // ── Utilization report: projected (Staffing) vs actual (registered) by project ──
@@ -782,7 +788,6 @@ export default function Reports() {
   const showTables = viewMode === 'tables' || viewMode === 'both';
   const barHeight = Math.max(260, employeeChartData.length * 38);
   const utilizationBarHeight = Math.max(260, utilizationData.length * 38);
-  const projectedBarHeight = Math.max(260, projectedUtilizationData.length * 38);
 
   return (
     <div className="space-y-6">
@@ -1361,40 +1366,52 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          {/* ── Forward projection from Staffing ─────────────────────────── */}
+          {/* ── Forward projection from Staffing — weekly occupancy matrix ── */}
           {canManage && (
             <Card className="card-elevated">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4" />Projected Utilization — Next {PROJECTION_WEEKS} Weeks
+                  <TrendingUp className="h-4 w-4" />Projected Occupancy — Next {PROJECTION_WEEKS} Weeks
                 </CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  From Staffing: each assignment's allocation % (for the weeks it's active, per its project window) converted to hours/week.
+                  From Staffing: each assignment's allocation % for the weeks it's active (per its project window) · Red &gt;100% · Amber &lt;{(UNDERLOADED_RATIO * 100).toFixed(0)}% · Green in between ·
                   Assignments without an allocation % set aren't counted.
                 </p>
               </CardHeader>
               <CardContent>
-                {projectedUtilizationData.length === 0 ? (
-                  <div className="h-[200px] flex items-center justify-center"><ChartEmpty /></div>
+                {projectedMatrixData.rows.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-6 text-sm">No staffing plan with an allocation % set.</p>
                 ) : (
-                  <ResponsiveContainer width="100%" height={projectedBarHeight}>
-                    <BarChart
-                      data={projectedUtilizationData}
-                      layout="vertical"
-                      margin={{ top: 0, right: 24, left: 0, bottom: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                      <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
-                      <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                      <Tooltip cursor={{ fill: 'hsl(var(--muted)/0.5)' }} formatter={(value: number) => [`${value.toFixed(1)}h/week planned`, 'Projected']} />
-                      <ReferenceLine x={WEEKLY_CAPACITY_HOURS} stroke="#64748b" strokeDasharray="4 4" />
-                      <Bar dataKey="avgWeeklyHours" radius={[0, 3, 3, 0]}>
-                        {projectedUtilizationData.map(d => (
-                          <Cell key={d.employeeId} fill={STATUS_COLORS[d.status]} />
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="table-header sticky left-0 bg-background z-10 min-w-[160px] shadow-[1px_0_0_0_hsl(var(--border))]">
+                            Person
+                          </TableHead>
+                          {projectedMatrixData.weeks.map(w => (
+                            <TableHead key={w.key} className="table-header text-center whitespace-nowrap min-w-[90px]">
+                              {w.label}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {projectedMatrixData.rows.map(row => (
+                          <TableRow key={row.employeeId}>
+                            <TableCell className="font-medium text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
+                              {row.name}
+                            </TableCell>
+                            {row.weekPct.map((pct, i) => (
+                              <TableCell key={i} className={`text-center text-sm font-medium tabular-nums transition-colors ${occupancyCellClass(pct)}`}>
+                                {pct > 0 ? `${pct.toFixed(0)}%` : ''}
+                              </TableCell>
+                            ))}
+                          </TableRow>
                         ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
