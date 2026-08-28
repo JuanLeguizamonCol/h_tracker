@@ -3,14 +3,13 @@ import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks } from 'date-fn
 import {
   CalendarIcon, Search, Loader2, Filter, X,
   Clock, TrendingUp, Activity, BarChart2, Table as TableIcon,
-  LayoutDashboard, Download,
+  LayoutDashboard, Download, Gauge, AlertTriangle, TrendingDown, CheckCircle2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import {
   ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
-  PieChart, Pie, Label as PieLabel,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell, ReferenceLine,
   AreaChart, Area,
 } from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,16 +27,28 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const BILLABLE_COLOR = '#3B82F6';
 const NON_BILLABLE_COLOR = '#CBD5E1';
-const PROJECT_COLORS = [
-  '#3B82F6', '#8B5CF6', '#10B981', '#F59E0B',
-  '#EF4444', '#06B6D4', '#EC4899', '#84CC16',
-  '#F97316', '#6366F1',
-];
+
+// Utilization report: capacity is 40h/week. Overloaded = averaging more than
+// that; underloaded = meaningfully below it (under 80%, i.e. <32h/week) so
+// everyone isn't flagged just for logging 38h one week.
+const WEEKLY_CAPACITY_HOURS = 40;
+const UNDERLOADED_RATIO = 0.8;
+const STATUS_COLORS: Record<string, string> = {
+  overloaded: '#EF4444',
+  balanced: '#10B981',
+  underloaded: '#F59E0B',
+};
+const STATUS_LABELS: Record<string, string> = {
+  overloaded: 'Overloaded',
+  balanced: 'Balanced',
+  underloaded: 'Underloaded',
+};
 
 // Sentinel value used when an employee has no `location` set, so it can still
 // be selected in the Location filter and appear as its own group.
@@ -288,22 +299,6 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
         </div>
       ))}
     </div>
-  );
-}
-
-// ─── Donut center label ───────────────────────────────────────────────────────
-
-function DonutCenter({ viewBox, total }: { viewBox?: { cx: number; cy: number }; total: number }) {
-  const { cx = 0, cy = 0 } = viewBox ?? {};
-  return (
-    <>
-      <text x={cx} y={cy - 8} textAnchor="middle" className="fill-foreground text-xl font-bold" style={{ fontSize: 20, fontWeight: 700 }}>
-        {total.toFixed(0)}h
-      </text>
-      <text x={cx} y={cy + 12} textAnchor="middle" style={{ fontSize: 11, fill: '#94a3b8' }}>
-        Total Hours
-      </text>
-    </>
   );
 }
 
@@ -619,6 +614,47 @@ export default function Reports() {
     return { weeks, rows, totals };
   }, [filteredEntries, f.startDate, f.endDate, employeeMap]);
 
+  // ── Utilization report: cargability against a 40h/week benchmark ───────────────
+  // Reuses the same per-employee-per-week hours as the matrix above, so a week
+  // with no logged hours correctly counts as 0% that week (real bench time),
+  // not as a week that's simply excluded from the average.
+  const utilizationData = useMemo(() => {
+    return weeklyMatrixData.rows
+      .map(row => {
+        const weeksCounted = row.weekHours.length;
+        const totalHours = row.weekHours.reduce((sum, h) => sum + h, 0);
+        const avgWeeklyHours = weeksCounted > 0 ? totalHours / weeksCounted : 0;
+        const utilizationPct = (avgWeeklyHours / WEEKLY_CAPACITY_HOURS) * 100;
+        const status: 'overloaded' | 'balanced' | 'underloaded' =
+          avgWeeklyHours > WEEKLY_CAPACITY_HOURS
+            ? 'overloaded'
+            : avgWeeklyHours < WEEKLY_CAPACITY_HOURS * UNDERLOADED_RATIO
+            ? 'underloaded'
+            : 'balanced';
+        return {
+          employeeId: row.employeeId,
+          name: row.name,
+          totalHours,
+          weeksCounted,
+          avgWeeklyHours,
+          utilizationPct,
+          status,
+          overloadedWeeks: row.weekHours.filter(h => h > WEEKLY_CAPACITY_HOURS).length,
+        };
+      })
+      .sort((a, b) => b.avgWeeklyHours - a.avgWeeklyHours);
+  }, [weeklyMatrixData]);
+
+  const utilizationSummary = useMemo(() => {
+    const overloaded = utilizationData.filter(d => d.status === 'overloaded').length;
+    const underloaded = utilizationData.filter(d => d.status === 'underloaded').length;
+    const balanced = utilizationData.length - overloaded - underloaded;
+    const avgUtilizationPct = utilizationData.length
+      ? utilizationData.reduce((sum, d) => sum + d.utilizationPct, 0) / utilizationData.length
+      : 0;
+    return { overloaded, underloaded, balanced, avgUtilizationPct, total: utilizationData.length };
+  }, [utilizationData]);
+
   // ── Filter chips ──────────────────────────────────────────────────────────────
   const chips = useMemo(() => {
     const c: { key: string; label: string; onClear: () => void }[] = [];
@@ -641,6 +677,7 @@ export default function Reports() {
   const showCharts = viewMode === 'charts' || viewMode === 'both';
   const showTables = viewMode === 'tables' || viewMode === 'both';
   const barHeight = Math.max(260, employeeChartData.length * 38);
+  const utilizationBarHeight = Math.max(260, utilizationData.length * 38);
 
   return (
     <div className="space-y-6">
@@ -777,6 +814,14 @@ export default function Reports() {
 
       {/* ── Skills Search (resource staffing) ────────────────────────────── */}
       {canManage && <SkillsSearchPanel />}
+
+      <Tabs defaultValue="hours">
+        <TabsList>
+          <TabsTrigger value="hours" className="gap-1.5"><Clock className="h-4 w-4" />Hours Report</TabsTrigger>
+          <TabsTrigger value="utilization" className="gap-1.5"><Gauge className="h-4 w-4" />Utilization Report</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="hours" className="space-y-6 mt-4">
 
       {/* ── KPI cards ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -958,75 +1003,37 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          {/* ── Employee + Project side by side ─────────────────────────── */}
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* Hours by Employee */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Hours by Employee</CardTitle>
-                <p className="text-xs text-muted-foreground">Click a bar to filter by that employee</p>
-              </CardHeader>
-              <CardContent>
-                {employeeChartData.length === 0 ? <div className="h-[240px] flex items-center justify-center"><ChartEmpty /></div> : (
-                  <ResponsiveContainer width="100%" height={barHeight}>
-                    <BarChart
-                      data={employeeChartData}
-                      layout="vertical"
-                      margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
-                      onClick={data => {
-                        const uid = data?.activePayload?.[0]?.payload?.userId;
-                        if (uid) set('employeeId', uid);
-                      }}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                      <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
-                      <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                      <Tooltip content={<ChartTooltip />} cursor={{ fill: 'hsl(var(--muted)/0.5)' }} />
-                      <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="Billable" stackId="a" fill={BILLABLE_COLOR} radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="Non-billable" stackId="a" fill={NON_BILLABLE_COLOR} radius={[0, 3, 3, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Hours by Project — donut */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Hours by Project</CardTitle>
-                <p className="text-xs text-muted-foreground">Click a slice to filter by that project</p>
-              </CardHeader>
-              <CardContent>
-                {projectPieData.length === 0 ? <div className="h-[240px] flex items-center justify-center"><ChartEmpty /></div> : (
-                  <div className="flex flex-col items-center gap-2">
-                    <ResponsiveContainer width="100%" height={220}>
-                      <PieChart>
-                        <Pie
-                          data={projectPieData}
-                          dataKey="value"
-                          nameKey="name"
-                          innerRadius="52%"
-                          outerRadius="72%"
-                          paddingAngle={2}
-                          onClick={data => { if (data?.id) set('projectId', data.id); }}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {projectPieData.map((_, i) => (
-                            <Cell key={i} fill={PROJECT_COLORS[i % PROJECT_COLORS.length]} stroke="transparent" />
-                          ))}
-                          <PieLabel content={({ viewBox }) => <DonutCenter viewBox={viewBox as { cx: number; cy: number }} total={kpis.total} />} position="center" />
-                        </Pie>
-                        <Tooltip formatter={(v: number) => [`${v.toFixed(1)}h`, 'Hours']} />
-                        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} formatter={(val) => val.length > 20 ? val.slice(0, 18) + '…' : val} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          {/* ── Hours by Employee ────────────────────────────────────────── */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Hours by Employee</CardTitle>
+              <p className="text-xs text-muted-foreground">Click a bar to filter by that employee</p>
+            </CardHeader>
+            <CardContent>
+              {employeeChartData.length === 0 ? <div className="h-[240px] flex items-center justify-center"><ChartEmpty /></div> : (
+                <ResponsiveContainer width="100%" height={barHeight}>
+                  <BarChart
+                    data={employeeChartData}
+                    layout="vertical"
+                    margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
+                    onClick={data => {
+                      const uid = data?.activePayload?.[0]?.payload?.userId;
+                      if (uid) set('employeeId', uid);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
+                    <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'hsl(var(--muted)/0.5)' }} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                    <Bar dataKey="Billable" stackId="a" fill={BILLABLE_COLOR} radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="Non-billable" stackId="a" fill={NON_BILLABLE_COLOR} radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
 
           {/* ── Billable hours by project — full-width stacked bar ───────── */}
           <Card>
@@ -1143,6 +1150,113 @@ export default function Reports() {
 
         </>
       )}
+
+        </TabsContent>
+
+        <TabsContent value="utilization" className="space-y-6 mt-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KpiCard
+              label="Team Avg Utilization" value={`${utilizationSummary.avgUtilizationPct.toFixed(0)}%`}
+              sub={`vs. ${WEEKLY_CAPACITY_HOURS}h/week`} icon={Gauge} color="bg-primary/10 text-primary"
+            />
+            <KpiCard
+              label="Overloaded" value={String(utilizationSummary.overloaded)}
+              sub={`> ${WEEKLY_CAPACITY_HOURS}h/week avg`} icon={AlertTriangle}
+              color="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+            />
+            <KpiCard
+              label="Balanced" value={String(utilizationSummary.balanced)}
+              sub={`${(WEEKLY_CAPACITY_HOURS * UNDERLOADED_RATIO).toFixed(0)}–${WEEKLY_CAPACITY_HOURS}h/week`} icon={CheckCircle2}
+              color="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+            />
+            <KpiCard
+              label="Underloaded" value={String(utilizationSummary.underloaded)}
+              sub={`< ${(WEEKLY_CAPACITY_HOURS * UNDERLOADED_RATIO).toFixed(0)}h/week avg`} icon={TrendingDown}
+              color="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+            />
+          </div>
+
+          <Card className="card-elevated">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Average Weekly Hours by Person</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Benchmark: {WEEKLY_CAPACITY_HOURS}h/week (dashed line) · Red = overloaded · Amber = underloaded · Green = balanced
+              </p>
+            </CardHeader>
+            <CardContent>
+              {utilizationData.length === 0 ? <div className="h-[240px] flex items-center justify-center"><ChartEmpty /></div> : (
+                <ResponsiveContainer width="100%" height={utilizationBarHeight}>
+                  <BarChart
+                    data={utilizationData}
+                    layout="vertical"
+                    margin={{ top: 0, right: 24, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
+                    <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <Tooltip cursor={{ fill: 'hsl(var(--muted)/0.5)' }} formatter={(value: number) => [`${value.toFixed(1)}h/week avg`, 'Hours']} />
+                    <ReferenceLine x={WEEKLY_CAPACITY_HOURS} stroke="#64748b" strokeDasharray="4 4" />
+                    <Bar dataKey="avgWeeklyHours" radius={[0, 3, 3, 0]}>
+                      {utilizationData.map(d => (
+                        <Cell key={d.employeeId} fill={STATUS_COLORS[d.status]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="card-elevated">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Utilization Detail</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Sorted by average weekly hours
+                {utilizationData.length > 0 && ` · ${utilizationData[0].weeksCounted} week${utilizationData[0].weeksCounted !== 1 ? 's' : ''} in range`}
+              </p>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="table-header">Person</TableHead>
+                    <TableHead className="table-header text-right">Avg Hours/Week</TableHead>
+                    <TableHead className="table-header text-right">Utilization</TableHead>
+                    <TableHead className="table-header">Status</TableHead>
+                    <TableHead className="table-header text-right">Total Hours</TableHead>
+                    <TableHead className="table-header text-right">Weeks Over {WEEKLY_CAPACITY_HOURS}h</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {utilizationData.map(d => (
+                    <TableRow key={d.employeeId}>
+                      <TableCell className="font-medium text-sm">{d.name}</TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">{d.avgWeeklyHours.toFixed(1)}h</TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">{d.utilizationPct.toFixed(0)}%</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs" style={{ color: STATUS_COLORS[d.status], borderColor: STATUS_COLORS[d.status] }}>
+                          {STATUS_LABELS[d.status]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">{d.totalHours.toFixed(1)}h</TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">
+                        {d.overloadedWeeks > 0 ? d.overloadedWeeks : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {utilizationData.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                        No data for the selected filters.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
