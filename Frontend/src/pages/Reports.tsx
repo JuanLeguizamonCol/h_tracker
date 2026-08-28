@@ -1489,41 +1489,43 @@ export default function Reports() {
                       )}
                     </CardHeader>
                     <CardContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="table-header">Project</TableHead>
-                            <TableHead className="table-header">Client</TableHead>
-                            <TableHead className="table-header text-right">Allocation</TableHead>
-                            <TableHead className="table-header text-right">Projected Hrs/Week</TableHead>
-                            <TableHead className="table-header text-right">Actual Hrs/Week</TableHead>
-                            <TableHead className="table-header text-right">% of Plan</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {person.rows.map(row => (
-                            <TableRow key={row.projectId}>
-                              <TableCell className="font-medium text-sm">{row.projectName}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{row.clientName}</TableCell>
-                              <TableCell className="text-right text-sm tabular-nums">{row.allocationPct}%</TableCell>
-                              <TableCell className="text-right text-sm tabular-nums">{row.projectedHoursPerWeek.toFixed(1)}h</TableCell>
-                              <TableCell className="text-right text-sm tabular-nums">{row.actualHoursPerWeek.toFixed(1)}h</TableCell>
-                              <TableCell className="text-right text-sm tabular-nums">
-                                {row.planPct == null ? (
-                                  <span className="text-muted-foreground">—</span>
-                                ) : (
-                                  <span
-                                    className="font-medium"
-                                    style={{ color: row.planPct > 120 || row.planPct < 80 ? STATUS_COLORS.overloaded : STATUS_COLORS.balanced }}
-                                  >
-                                    {row.planPct.toFixed(0)}%
-                                  </span>
-                                )}
-                              </TableCell>
+                      <div className="overflow-x-auto">
+                        <Table className="table-fixed">
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="table-header w-[26%]">Project</TableHead>
+                              <TableHead className="table-header w-[26%]">Client</TableHead>
+                              <TableHead className="table-header text-right w-[12%]">Allocation</TableHead>
+                              <TableHead className="table-header text-right w-[16%]">Projected Hrs/Week</TableHead>
+                              <TableHead className="table-header text-right w-[14%]">Actual Hrs/Week</TableHead>
+                              <TableHead className="table-header text-right w-[12%]">% of Plan</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {person.rows.map(row => (
+                              <TableRow key={row.projectId}>
+                                <TableCell className="font-medium text-sm break-words">{row.projectName}</TableCell>
+                                <TableCell className="text-sm text-muted-foreground break-words">{row.clientName}</TableCell>
+                                <TableCell className="text-right text-sm tabular-nums">{row.allocationPct}%</TableCell>
+                                <TableCell className="text-right text-sm tabular-nums">{row.projectedHoursPerWeek.toFixed(1)}h</TableCell>
+                                <TableCell className="text-right text-sm tabular-nums">{row.actualHoursPerWeek.toFixed(1)}h</TableCell>
+                                <TableCell className="text-right text-sm tabular-nums">
+                                  {row.planPct == null ? (
+                                    <span className="text-muted-foreground">—</span>
+                                  ) : (
+                                    <span
+                                      className="font-medium"
+                                      style={{ color: row.planPct > 120 || row.planPct < 80 ? STATUS_COLORS.overloaded : STATUS_COLORS.balanced }}
+                                    >
+                                      {row.planPct.toFixed(0)}%
+                                    </span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </CardContent>
                   </Card>
                 ))
