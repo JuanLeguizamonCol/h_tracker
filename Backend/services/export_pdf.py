@@ -155,7 +155,11 @@ _INVOICE_HTML_TEMPLATE = '''
     }}
 
     .logo-img img {{
-      height: 45pt;
+      /* Letter page = 612pt wide; 1/5 of that = ~122pt, so the logo never
+         crowds the address block next to it. Height is left to scale
+         proportionally with the image's own aspect ratio. */
+      width: 122pt;
+      height: auto;
     }}
 
     .address-cell {{

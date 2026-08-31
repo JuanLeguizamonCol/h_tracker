@@ -70,7 +70,8 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Build & push BACKEND image
-      # Context: ./Backend  |  Dockerfile: backend.Dockerfile (at repo root)
+      # Context: repo root (needs both Backend/ and the sibling assets/ dir —
+      # invoice logos live there) | Dockerfile: backend.Dockerfile (repo root)
       # -----------------------------------------------------------------------
       - name: Build and push backend image
         run: |
@@ -78,7 +79,7 @@ jobs:
             --file backend.Dockerfile \
             --tag ${{ env.ACR_LOGIN_SERVER }}/backend:latest \
             --tag ${{ env.ACR_LOGIN_SERVER }}/backend:${{ github.sha }} \
-            ./Backend
+            .
           docker push ${{ env.ACR_LOGIN_SERVER }}/backend:latest
           docker push ${{ env.ACR_LOGIN_SERVER }}/backend:${{ github.sha }}
 

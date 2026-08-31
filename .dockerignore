@@ -1,5 +1,5 @@
-hours-tracker-frontend/node_modules
-hours-tracker-frontend/dist
+Frontend/node_modules
+Frontend/dist
 __pycache__
 *.pyc
 .git

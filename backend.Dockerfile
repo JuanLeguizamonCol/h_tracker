@@ -6,10 +6,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc libjpeg-dev libpng-dev libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY Backend/requirements.txt .
 RUN pip install --no-cache-dir --timeout=120 --retries=5 -r requirements.txt
 
-COPY . .
+COPY Backend/ .
+# assets/ (invoice logos, legacy signature fallbacks) lives at the repo root,
+# a sibling of Backend/ — baked in here so it's actually present in the built
+# image. Locally, docker-compose's `./assets:/app/assets:ro` volume shadows
+# this with the live host copy so edits don't need a rebuild; in Azure there
+# is no such mount, so without this COPY the image would have no assets/ dir
+# at all and every invoice's logo would silently fall back to plain text.
+COPY assets/ ./assets/
 
 RUN mkdir -p /app/uploads
 
