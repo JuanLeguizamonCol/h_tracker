@@ -8,20 +8,20 @@ from schemas.announcements import AnnouncementCreate, AnnouncementUpdate
 from utils import blob_storage
 import uuid
 
-VALID_VISIBILITY = ("all", "locations")
+VALID_VISIBILITY = ("all", "locations", "roles")
 
 
-def _locations_to_str(locations: Optional[List[str]]) -> Optional[str]:
-    if not locations:
+def _list_to_str(values: Optional[List[str]]) -> Optional[str]:
+    if not values:
         return None
-    cleaned = [l.strip() for l in locations if l and l.strip()]
+    cleaned = [v.strip() for v in values if v and v.strip()]
     return ",".join(cleaned) if cleaned else None
 
 
-def _locations_to_list(locations: Optional[str]) -> List[str]:
-    if not locations:
+def _str_to_list(value: Optional[str]) -> List[str]:
+    if not value:
         return []
-    return [l for l in locations.split(",") if l]
+    return [v for v in value.split(",") if v]
 
 
 def _serialize(db: Session, a: Announcement) -> dict:
@@ -31,7 +31,8 @@ def _serialize(db: Session, a: Announcement) -> dict:
         "title": a.title,
         "body": a.body,
         "visibility": a.visibility,
-        "locations": _locations_to_list(a.locations),
+        "locations": _str_to_list(a.locations),
+        "roles": _str_to_list(a.roles),
         "posted_by": a.posted_by,
         "posted_by_name": poster.name if poster else "Unknown",
         "created_at": a.created_at,
@@ -46,7 +47,8 @@ def create_announcement(db: Session, posted_by: str, data: AnnouncementCreate) -
         title=data.title,
         body=data.body,
         visibility=visibility,
-        locations=_locations_to_str(data.locations) if visibility == "locations" else None,
+        locations=_list_to_str(data.locations) if visibility == "locations" else None,
+        roles=_list_to_str(data.roles) if visibility == "roles" else None,
         posted_by=posted_by,
     )
     db.add(db_a)
@@ -55,10 +57,11 @@ def create_announcement(db: Session, posted_by: str, data: AnnouncementCreate) -
     return _serialize(db, db_a)
 
 
-def list_announcements(db: Session, viewer: Employee, is_privileged: bool) -> List[dict]:
+def list_announcements(db: Session, viewer: Employee, viewer_role: str, is_privileged: bool) -> List[dict]:
     """Admin/manager see every announcement (to manage the board). Employees
-    only see 'all' announcements plus 'locations' ones matching their own
-    Employee.location — enforced here, not just hidden in the UI."""
+    only see 'all' announcements plus 'locations'/'roles' ones matching their
+    own Employee.location / assigned role — enforced here, not just hidden
+    in the UI."""
     rows = db.query(Announcement).order_by(Announcement.created_at.desc()).all()
     if is_privileged:
         return [_serialize(db, a) for a in rows]
@@ -68,7 +71,9 @@ def list_announcements(db: Session, viewer: Employee, is_privileged: bool) -> Li
     for a in rows:
         if a.visibility == "all":
             visible.append(a)
-        elif a.visibility == "locations" and location and location in _locations_to_list(a.locations):
+        elif a.visibility == "locations" and location and location in _str_to_list(a.locations):
+            visible.append(a)
+        elif a.visibility == "roles" and viewer_role in _str_to_list(a.roles):
             visible.append(a)
     return [_serialize(db, a) for a in visible]
 
@@ -83,13 +88,20 @@ def update_announcement(db: Session, announcement_id: str, data: AnnouncementUpd
         return None
     updates = data.model_dump(exclude_unset=True)
     locations = updates.pop("locations", None)
+    roles = updates.pop("roles", None)
     for field, value in updates.items():
         setattr(db_a, field, value)
     if db_a.visibility == "locations":
         if locations is not None:
-            db_a.locations = _locations_to_str(locations)
+            db_a.locations = _list_to_str(locations)
+        db_a.roles = None
+    elif db_a.visibility == "roles":
+        if roles is not None:
+            db_a.roles = _list_to_str(roles)
+        db_a.locations = None
     else:
         db_a.locations = None
+        db_a.roles = None
     db.commit()
     db.refresh(db_a)
     return _serialize(db, db_a)

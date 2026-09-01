@@ -36,8 +36,9 @@ def list_all(
     db: Session = Depends(get_db),
     current_employee: Employee = Depends(get_current_employee),
 ):
-    is_privileged = get_role(db, current_employee.id) in ("admin", "manager")
-    return [_to_out(a) for a in list_announcements(db, current_employee, is_privileged)]
+    viewer_role = get_role(db, current_employee.id)
+    is_privileged = viewer_role in ("admin", "manager")
+    return [_to_out(a) for a in list_announcements(db, current_employee, viewer_role, is_privileged)]
 
 
 @announcements_router.post(
@@ -53,6 +54,8 @@ def create(
 ):
     if data.visibility == "locations" and not data.locations:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one location")
+    if data.visibility == "roles" and not data.roles:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one role")
     return _to_out(create_announcement(db, current_employee.id, data))
 
 
@@ -64,6 +67,8 @@ def create(
 def update(announcement_id: str, data: AnnouncementUpdate, db: Session = Depends(get_db)):
     if data.visibility == "locations" and data.locations is not None and not data.locations:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one location")
+    if data.visibility == "roles" and data.roles is not None and not data.roles:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one role")
     result = update_announcement(db, announcement_id, data)
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")

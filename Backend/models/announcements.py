@@ -13,9 +13,12 @@ class Announcement(Base):
     title = Column(String, nullable=False)
     body = Column(Text, nullable=True)
     # "all" = every employee sees it; "locations" = restricted to employees
-    # whose Employee.location is one of the comma-separated `locations` below.
+    # whose Employee.location is one of the comma-separated `locations` below;
+    # "roles" = restricted to employees whose UserRole.role is one of the
+    # comma-separated `roles` below (admin/manager/employee).
     visibility = Column(String, nullable=False, default="all")
     locations = Column(String, nullable=True)
+    roles = Column(String, nullable=True)
     posted_by = Column(String, ForeignKey("employees.id"), nullable=False)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 

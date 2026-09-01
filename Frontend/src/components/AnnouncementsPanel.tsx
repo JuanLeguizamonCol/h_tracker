@@ -8,6 +8,7 @@ import {
   useUploadAnnouncementAttachment, useDeleteAnnouncementAttachment,
 } from '@/hooks/useAnnouncements';
 import { apiUrl } from '@/lib/api';
+import { AppRole } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,12 @@ function fileHref(fileUrl: string): string {
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
+
+const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'employee', label: 'Employee' },
+];
 
 export function AnnouncementsPanel() {
   const { canManage } = useAuth();
@@ -42,23 +49,32 @@ export function AnnouncementsPanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [visibility, setVisibility] = useState<'all' | 'locations'>('all');
+  const [visibility, setVisibility] = useState<'all' | 'locations' | 'roles'>('all');
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
+  const [selectedRoles, setSelectedRoles] = useState<AppRole[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   function resetForm() {
-    setTitle(''); setBody(''); setVisibility('all'); setSelectedLocations([]); setFiles([]);
+    setTitle(''); setBody(''); setVisibility('all'); setSelectedLocations([]); setSelectedRoles([]); setFiles([]);
   }
 
   function toggleLocation(loc: string) {
     setSelectedLocations(prev => prev.includes(loc) ? prev.filter(l => l !== loc) : [...prev, loc]);
   }
 
+  function toggleRole(role: AppRole) {
+    setSelectedRoles(prev => prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role]);
+  }
+
   async function handlePost() {
     if (!title.trim()) { toast.error('Title is required.'); return; }
     if (visibility === 'locations' && selectedLocations.length === 0) {
       toast.error('Select at least one location.');
+      return;
+    }
+    if (visibility === 'roles' && selectedRoles.length === 0) {
+      toast.error('Select at least one role.');
       return;
     }
     setIsSaving(true);
@@ -68,6 +84,7 @@ export function AnnouncementsPanel() {
         body: body.trim() || null,
         visibility,
         locations: visibility === 'locations' ? selectedLocations : [],
+        roles: visibility === 'roles' ? selectedRoles : [],
       });
       for (const file of files) {
         await uploadAttachment.mutateAsync({ announcementId: announcement.id, file });
@@ -133,6 +150,11 @@ export function AnnouncementsPanel() {
                           {a.locations.join(', ')}
                         </Badge>
                       )}
+                      {a.visibility === 'roles' && (
+                        <Badge variant="outline" className="text-xs capitalize">
+                          {a.roles.join(', ')}
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {a.posted_by_name} · {formatDate(a.created_at)}
@@ -188,6 +210,9 @@ export function AnnouncementsPanel() {
                 <Button type="button" size="sm" variant={visibility === 'locations' ? 'default' : 'outline'} onClick={() => setVisibility('locations')}>
                   Specific locations
                 </Button>
+                <Button type="button" size="sm" variant={visibility === 'roles' ? 'default' : 'outline'} onClick={() => setVisibility('roles')}>
+                  Specific roles
+                </Button>
               </div>
             </div>
             {visibility === 'locations' && (
@@ -205,6 +230,19 @@ export function AnnouncementsPanel() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+            {visibility === 'roles' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Visible to employees with role</Label>
+                <div className="flex flex-wrap gap-3 rounded-md border p-3">
+                  {ROLE_OPTIONS.map(({ value, label }) => (
+                    <label key={value} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox checked={selectedRoles.includes(value)} onCheckedChange={() => toggleRole(value)} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
             <div className="space-y-1.5">

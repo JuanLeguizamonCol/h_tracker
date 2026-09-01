@@ -79,8 +79,9 @@ export interface Announcement {
   id: string;
   title: string;
   body: string | null;
-  visibility: 'all' | 'locations';
+  visibility: 'all' | 'locations' | 'roles';
   locations: string[];
+  roles: AppRole[];
   posted_by: string;
   posted_by_name: string;
   created_at: string;

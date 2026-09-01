@@ -25,8 +25,9 @@ class AnnouncementAttachmentOut(BaseModel):
 class AnnouncementCreate(BaseModel):
     title: str
     body: Optional[str] = None
-    visibility: str = "all"  # "all" | "locations"
+    visibility: str = "all"  # "all" | "locations" | "roles"
     locations: List[str] = []
+    roles: List[str] = []
 
 
 class AnnouncementUpdate(BaseModel):
@@ -34,6 +35,7 @@ class AnnouncementUpdate(BaseModel):
     body: Optional[str] = None
     visibility: Optional[str] = None
     locations: Optional[List[str]] = None
+    roles: Optional[List[str]] = None
 
 
 class AnnouncementOut(BaseModel):
@@ -42,6 +44,7 @@ class AnnouncementOut(BaseModel):
     body: Optional[str] = None
     visibility: str
     locations: List[str]
+    roles: List[str]
     posted_by: str
     posted_by_name: str
     created_at: datetime

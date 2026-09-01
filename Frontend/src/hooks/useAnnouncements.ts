@@ -12,7 +12,7 @@ export function useAnnouncements() {
 export function useCreateAnnouncement() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { title: string; body?: string | null; visibility: 'all' | 'locations'; locations?: string[] }) =>
+    mutationFn: (data: { title: string; body?: string | null; visibility: 'all' | 'locations' | 'roles'; locations?: string[]; roles?: string[] }) =>
       api.post<Announcement>('/announcements', data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['announcements'] }),
   });
@@ -21,7 +21,7 @@ export function useCreateAnnouncement() {
 export function useUpdateAnnouncement() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...updates }: { id: string; title?: string; body?: string | null; visibility?: 'all' | 'locations'; locations?: string[] }) =>
+    mutationFn: ({ id, ...updates }: { id: string; title?: string; body?: string | null; visibility?: 'all' | 'locations' | 'roles'; locations?: string[]; roles?: string[] }) =>
       api.patch<Announcement>(`/announcements/${id}`, updates),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['announcements'] }),
   });
