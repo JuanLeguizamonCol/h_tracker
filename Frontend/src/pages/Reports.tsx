@@ -1227,7 +1227,7 @@ export default function Reports() {
             <Card className="card-elevated">
               <CardHeader><CardTitle className="text-base">Totals by Project</CardTitle></CardHeader>
               <CardContent>
-                <div className="space-y-3">
+                <div className="max-h-[500px] overflow-y-auto space-y-3 pr-1">
                   {projectTotals.map(([projectId, { name, clientName, hours, billableHours, entries }]) => (
                     <div key={projectId} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
                       <div>
