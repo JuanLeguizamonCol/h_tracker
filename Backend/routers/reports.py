@@ -4,12 +4,12 @@ Currently exposes a single endpoint that streams a fully-detailed Excel of the
 time entries matching the same filters used by the Reports page. Non-admin
 callers are transparently restricted to their own entries.
 """
-from typing import Optional
+from typing import List, Optional
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config.database import get_db
@@ -36,12 +36,12 @@ def _is_manager_or_admin(emp: Employee, db: Session) -> bool:
 def export_time_entries_xlsx(
     date_gte: Optional[date] = None,
     date_lte: Optional[date] = None,
-    user_id: Optional[str] = None,
-    project_id: Optional[str] = None,
-    client_id: Optional[str] = None,
-    location: Optional[str] = None,
-    owner_id: Optional[str] = None,
-    manager_id: Optional[str] = None,
+    user_id: Optional[List[str]] = Query(None),
+    project_id: Optional[List[str]] = Query(None),
+    client_id: Optional[List[str]] = Query(None),
+    location: Optional[List[str]] = Query(None),
+    owner_id: Optional[List[str]] = Query(None),
+    manager_id: Optional[List[str]] = Query(None),
     status: Optional[str] = None,
     billing: Optional[str] = None,
     search: Optional[str] = None,
@@ -51,7 +51,7 @@ def export_time_entries_xlsx(
     is_admin = _is_manager_or_admin(current_employee, db)
     # Regular employees can only ever export their own entries, regardless of params.
     if not is_admin:
-        user_id = current_employee.id
+        user_id = [current_employee.id]
 
     q = (
         db.query(TimeEntry, Employee, Project, Client, ProjectRole)
@@ -66,22 +66,24 @@ def export_time_entries_xlsx(
     if date_lte is not None:
         q = q.filter(TimeEntry.date <= date_lte)
     if user_id:
-        q = q.filter(TimeEntry.user_id == user_id)
+        q = q.filter(TimeEntry.user_id.in_(user_id))
     if project_id:
-        q = q.filter(TimeEntry.project_id == project_id)
+        q = q.filter(TimeEntry.project_id.in_(project_id))
     if client_id:
-        q = q.filter(Project.client_id == client_id)
+        q = q.filter(Project.client_id.in_(client_id))
     if owner_id:
-        q = q.filter(Project.owner_id == owner_id)
+        q = q.filter(Project.owner_id.in_(owner_id))
     if manager_id:
-        q = q.filter(Project.manager_id == manager_id)
+        q = q.filter(Project.manager_id.in_(manager_id))
     if location:
-        if location == NO_LOCATION:
-            q = q.filter(
-                (Employee.location.is_(None)) | (func.trim(Employee.location) == "")
-            )
-        else:
-            q = q.filter(func.trim(Employee.location) == location)
+        ors = []
+        if NO_LOCATION in location:
+            ors.append((Employee.location.is_(None)) | (func.trim(Employee.location) == ""))
+        real_locations = [l for l in location if l != NO_LOCATION]
+        if real_locations:
+            ors.append(func.trim(Employee.location).in_(real_locations))
+        if ors:
+            q = q.filter(or_(*ors))
     if status in ("normal", "on_hold"):
         q = q.filter(TimeEntry.status == status)
     if billing == "billable":
@@ -125,24 +127,25 @@ def export_time_entries_xlsx(
         })
 
     # ── Human-readable filter summary for the Summary sheet ──────────────────
+    def _names_for(ids: list[str], model) -> str:
+        rows = db.query(model).filter(model.id.in_(ids)).all()
+        by_id = {r.id: r.name for r in rows}
+        return ", ".join(by_id.get(i, i) for i in ids)
+
     filters: list[str] = []
     if project_id:
-        proj = db.query(Project).filter(Project.id == project_id).first()
-        filters.append(f"Project: {proj.name if proj else project_id}")
+        filters.append(f"Project: {_names_for(project_id, Project)}")
     if client_id:
-        cli = db.query(Client).filter(Client.id == client_id).first()
-        filters.append(f"Client: {cli.name if cli else client_id}")
+        filters.append(f"Client: {_names_for(client_id, Client)}")
     if user_id and is_admin:
-        emp = db.query(Employee).filter(Employee.id == user_id).first()
-        filters.append(f"Employee: {emp.name if emp else user_id}")
+        filters.append(f"Employee: {_names_for(user_id, Employee)}")
     if location:
-        filters.append(f"Location: {'No location' if location == NO_LOCATION else location}")
+        labels = ["No location" if l == NO_LOCATION else l for l in location]
+        filters.append(f"Location: {', '.join(labels)}")
     if owner_id:
-        emp = db.query(Employee).filter(Employee.id == owner_id).first()
-        filters.append(f"Owner: {emp.name if emp else owner_id}")
+        filters.append(f"Owner: {_names_for(owner_id, Employee)}")
     if manager_id:
-        emp = db.query(Employee).filter(Employee.id == manager_id).first()
-        filters.append(f"Manager: {emp.name if emp else manager_id}")
+        filters.append(f"Manager: {_names_for(manager_id, Employee)}")
     if status in ("normal", "on_hold"):
         filters.append(f"Status: {'On Hold' if status == 'on_hold' else 'Normal'}")
     if billing in ("billable", "non_billable"):
@@ -153,8 +156,7 @@ def export_time_entries_xlsx(
     if not is_admin:
         scope = current_employee.name
     elif user_id:
-        emp = db.query(Employee).filter(Employee.id == user_id).first()
-        scope = emp.name if emp else "Single employee"
+        scope = _names_for(user_id, Employee) if len(user_id) <= 3 else f"{len(user_id)} employees"
     else:
         scope = "All employees"
 

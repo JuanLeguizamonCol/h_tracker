@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { MultiFilterSelect } from '@/components/MultiFilterSelect';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -49,10 +50,10 @@ export default function Invoices() {
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
-  const [clientFilter, setClientFilter] = useState<string>('all');
-  const [projectFilter, setProjectFilter] = useState<string>('all');
-  const [ownerFilter, setOwnerFilter] = useState<string>('all');
-  const [managerFilter, setManagerFilter] = useState<string>('all');
+  const [clientFilter, setClientFilter] = useState<string[]>([]);
+  const [projectFilter, setProjectFilter] = useState<string[]>([]);
+  const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
+  const [managerFilter, setManagerFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
 
@@ -168,21 +169,21 @@ export default function Invoices() {
     return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [invoices, projectMap]);
 
-  // Projects available in the filter — narrowed to the selected client, if any.
+  // Projects available in the filter — narrowed to the selected clients, if any.
   const projectOptions = useMemo(() => {
-    const list = clientFilter === 'all' ? projects : projects.filter(p => p.client_id === clientFilter);
+    const list = clientFilter.length === 0 ? projects : projects.filter(p => clientFilter.includes(p.client_id));
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
   }, [projects, clientFilter]);
 
   const activeFilterCount = [
-    statusFilter !== 'all', companyFilter !== 'all', clientFilter !== 'all',
-    projectFilter !== 'all', ownerFilter !== 'all', managerFilter !== 'all',
+    statusFilter !== 'all', companyFilter !== 'all', clientFilter.length > 0,
+    projectFilter.length > 0, ownerFilter.length > 0, managerFilter.length > 0,
     !!dateFrom, !!dateTo,
   ].filter(Boolean).length;
 
   const clearFilters = () => {
-    setStatusFilter('all'); setCompanyFilter('all'); setClientFilter('all');
-    setProjectFilter('all'); setOwnerFilter('all'); setManagerFilter('all');
+    setStatusFilter('all'); setCompanyFilter('all'); setClientFilter([]);
+    setProjectFilter([]); setOwnerFilter([]); setManagerFilter([]);
     setDateFrom(''); setDateTo('');
   };
 
@@ -190,13 +191,13 @@ export default function Invoices() {
     return invoices.filter(inv => {
       if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
       if (companyFilter !== 'all' && (inv.owner_company || 'IPC') !== companyFilter) return false;
-      if (projectFilter !== 'all' && inv.project_id !== projectFilter) return false;
-      if (clientFilter !== 'all') {
+      if (projectFilter.length > 0 && !projectFilter.includes(inv.project_id)) return false;
+      if (clientFilter.length > 0) {
         const project = projectMap.get(inv.project_id);
-        if (!project || project.client_id !== clientFilter) return false;
+        if (!project || !clientFilter.includes(project.client_id)) return false;
       }
-      if (ownerFilter !== 'all' && projectMap.get(inv.project_id)?.owner_id !== ownerFilter) return false;
-      if (managerFilter !== 'all' && projectMap.get(inv.project_id)?.manager_id !== managerFilter) return false;
+      if (ownerFilter.length > 0 && !ownerFilter.includes(projectMap.get(inv.project_id)?.owner_id ?? '')) return false;
+      if (managerFilter.length > 0 && !managerFilter.includes(projectMap.get(inv.project_id)?.manager_id ?? '')) return false;
       if (dateFrom || dateTo) {
         const d = inv.created_at.slice(0, 10);
         if (dateFrom && d < dateFrom) return false;
@@ -334,54 +335,18 @@ export default function Invoices() {
       <Card>
         <CardContent className="p-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Client</Label>
-              <Select value={clientFilter} onValueChange={(v) => { setClientFilter(v); setProjectFilter('all'); }}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All clients</SelectItem>
-                  {[...clients].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Project</Label>
-              <Select value={projectFilter} onValueChange={setProjectFilter}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All projects</SelectItem>
-                  {projectOptions.map(p => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Owner</Label>
-              <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All owners</SelectItem>
-                  {ownerOptions.map(o => (
-                    <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Project Manager</Label>
-              <Select value={managerFilter} onValueChange={setManagerFilter}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All managers</SelectItem>
-                  {managerOptions.map(m => (
-                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <MultiFilterSelect label="Client" selected={clientFilter} allLabel="All clients"
+              options={[...clients].sort((a, b) => a.name.localeCompare(b.name)).map(c => ({ value: c.id, label: c.name }))}
+              onChange={v => { setClientFilter(v); setProjectFilter([]); }} onClear={() => { setClientFilter([]); setProjectFilter([]); }} />
+            <MultiFilterSelect label="Project" selected={projectFilter} allLabel="All projects"
+              options={projectOptions.map(p => ({ value: p.id, label: p.name }))}
+              onChange={setProjectFilter} onClear={() => setProjectFilter([])} />
+            <MultiFilterSelect label="Owner" selected={ownerFilter} allLabel="All owners"
+              options={ownerOptions.map(o => ({ value: o.id, label: o.name }))}
+              onChange={setOwnerFilter} onClear={() => setOwnerFilter([])} />
+            <MultiFilterSelect label="Project Manager" selected={managerFilter} allLabel="All managers"
+              options={managerOptions.map(m => ({ value: m.id, label: m.name }))}
+              onChange={setManagerFilter} onClear={() => setManagerFilter([])} />
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">From (invoice date)</Label>
               <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
