@@ -172,22 +172,22 @@ export default function Employees() {
     const name = quickName.trim();
     const email = quickEmail.trim();
     if (!name) {
-      setQuickError('El nombre es obligatorio.');
+      setQuickError('Name is required.');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setQuickError('Ingresa un correo corporativo válido.');
+      setQuickError('Enter a valid corporate email.');
       return;
     }
     try {
       const created = await createEmployee.mutateAsync({ name, email });
-      toast.success(`${created.name} fue creado. Ya puede iniciar sesión con su cuenta de Microsoft.`);
+      toast.success(`${created.name} was created. They can now sign in with their Microsoft account.`);
       setQuickAddOpen(false);
     } catch (err) {
       const msg =
         err instanceof Error && err.message.includes('409')
-          ? 'Ya existe un empleado con ese correo.'
-          : 'No se pudo crear el empleado. Intenta de nuevo.';
+          ? 'An employee with that email already exists.'
+          : 'Could not create the employee. Please try again.';
       setQuickError(msg);
     }
   };
@@ -317,13 +317,13 @@ export default function Employees() {
           <DialogHeader>
             <DialogTitle>New Employee</DialogTitle>
             <DialogDescription>
-              Crea un empleado rápidamente con solo nombre y correo corporativo. Podrá iniciar
-              sesión con su cuenta de Microsoft, y podrás completar el resto de los datos más tarde.
+              Create an employee quickly with just a name and corporate email. They'll be able to
+              sign in with their Microsoft account, and you can fill in the rest of the details later.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label htmlFor="quick-name">Nombre completo</Label>
+              <Label htmlFor="quick-name">Full name</Label>
               <Input
                 id="quick-name"
                 value={quickName}
@@ -333,7 +333,7 @@ export default function Employees() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="quick-email">Correo corporativo</Label>
+              <Label htmlFor="quick-email">Corporate email</Label>
               <Input
                 id="quick-email"
                 type="email"
@@ -352,12 +352,12 @@ export default function Employees() {
               className="px-0 text-muted-foreground"
               onClick={() => { setQuickAddOpen(false); navigate('/employees/new'); }}
             >
-              Agregar todos los detalles…
+              Add all details…
             </Button>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setQuickAddOpen(false)}>Cancelar</Button>
+              <Button variant="outline" onClick={() => setQuickAddOpen(false)}>Cancel</Button>
               <Button onClick={handleQuickAdd} disabled={createEmployee.isPending}>
-                {createEmployee.isPending ? 'Creando…' : 'Crear empleado'}
+                {createEmployee.isPending ? 'Creating…' : 'Create employee'}
               </Button>
             </div>
           </DialogFooter>
