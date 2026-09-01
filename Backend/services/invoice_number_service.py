@@ -1,13 +1,15 @@
 """
 Invoice number generation service.
 
-Format: "{prefix}{client_number}-{sequence for that client}", e.g. "12-3"
-  (client #12's 3rd invoice).
+Format: "{prefix}{client_number}-{sequence for that client, zero-padded to 3
+  digits}", e.g. client #888888's 12th invoice -> "888888-012".
 
 `prefix` is empty for Impact Point (IPC) invoices and "P" for Pegasus Insights
-(owner_company == "PI") invoices — so the same client's 3rd invoice reads "12-3"
-for IPC and "P12-3" for Pegasus. The sequence itself is shared per client (it is
-cumulative and never resets), only the leading "P" differs.
+(owner_company == "PI") invoices — so the same client's 5th invoice reads
+"888888-005" for IPC and "P888888-005" for Pegasus. The sequence itself is
+shared per client (it is cumulative and never resets), only the leading "P"
+differs. Padding is a minimum width — a sequence past 999 just grows to 4+
+digits ("1000"), never truncates.
 
 Sequence is cumulative per client — never resets, does not depend on year.
 Counter stored in client_invoice_sequences, one row per client.
@@ -36,7 +38,7 @@ def preview_next_number_for_client(
         {"cid": client_id},
     ).scalar()
     seq = (int(row) if row is not None else 0) + 1
-    return f"{company_prefix(owner_company)}{client_number}-{seq}"
+    return f"{company_prefix(owner_company)}{client_number}-{seq:03d}"
 
 
 def atomic_generate_number_for_client(
@@ -58,4 +60,4 @@ def atomic_generate_number_for_client(
         """),
         {"id": str(uuid.uuid4()), "client_id": client_id},
     ).scalar()
-    return f"{company_prefix(owner_company)}{client_number}-{int(result)}"
+    return f"{company_prefix(owner_company)}{client_number}-{int(result):03d}"

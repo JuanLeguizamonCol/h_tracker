@@ -313,7 +313,7 @@ export default function Employees() {
 
       {/* Quick Add Employee Dialog */}
       <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>New Employee</DialogTitle>
             <DialogDescription>
@@ -346,7 +346,7 @@ export default function Employees() {
             </div>
             {quickError && <p className="text-xs text-destructive">{quickError}</p>}
           </div>
-          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+          <DialogFooter className="flex-col-reverse flex-wrap gap-2 sm:flex-row sm:justify-between">
             <Button
               variant="link"
               className="px-0 text-muted-foreground"
