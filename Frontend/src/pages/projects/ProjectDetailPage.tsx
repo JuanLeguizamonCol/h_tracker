@@ -8,6 +8,7 @@ import {
 } from '@/hooks/useProjects';
 import { useProjectRoles, useCreateProjectRole, useUpdateProjectRole, useDeleteProjectRole } from '@/hooks/useProjectRoles';
 import { useSkillCatalog } from '@/hooks/useSkills';
+import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { ProjectRole, AssignableEmployee, ProjectRequiredSkill, SkillCoverage } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,7 @@ import { Switch } from '@/components/ui/switch';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
 const STATUS_COLORS: Record<string, string> = {
+  business_development: 'outline',
   active: 'default',
   on_hold: 'secondary',
   completed: 'outline',
@@ -54,6 +56,7 @@ function ProficiencyStars({ level }: { level: number }) {
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { data: project, isLoading } = useProject(projectId);
 
   if (isLoading || !project) {
@@ -104,10 +107,23 @@ export default function ProjectDetailPage() {
             </div>
           </div>
         </div>
-        <Button size="sm" variant="outline" className="gap-2 shrink-0" onClick={() => navigate(`/projects/${project.id}/edit`)}>
-          <Edit className="h-4 w-4" /> Edit Project
-        </Button>
+        {isAdmin && (
+          <Button size="sm" variant="outline" className="gap-2 shrink-0" onClick={() => navigate(`/projects/${project.id}/edit`)}>
+            <Edit className="h-4 w-4" /> Edit Project
+          </Button>
+        )}
       </div>
+
+      {project.status === 'business_development' && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          Business Development — no hours can be logged to this project until it moves to Active.
+        </div>
+      )}
+      {project.status === 'on_hold' && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          On Hold — hours can still be logged, but won't be billed while the project stays on hold.
+        </div>
+      )}
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>
@@ -160,11 +176,11 @@ export default function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="roles" className="mt-4">
-          <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} /></CardContent></Card>
+          <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} canEdit={isAdmin} /></CardContent></Card>
         </TabsContent>
 
         <TabsContent value="assignments" className="mt-4">
-          <Card><CardContent className="pt-6"><ProjectAssignmentsPanel projectId={project.id} /></CardContent></Card>
+          <Card><CardContent className="pt-6"><ProjectAssignmentsPanel projectId={project.id} canEdit={isAdmin} /></CardContent></Card>
         </TabsContent>
       </Tabs>
     </div>
@@ -181,7 +197,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 // ── Roles & Rates Panel ──────────────────────────────────────────────────────
-function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string; isManagedServices: boolean }) {
+function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectId: string; isManagedServices: boolean; canEdit: boolean }) {
   const { data: roles = [], isLoading } = useProjectRoles(projectId);
   const createRole = useCreateProjectRole();
   const updateRole = useUpdateProjectRole();
@@ -234,9 +250,11 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
           Define roles and hourly rates (USD) for this project.
           {isManagedServices && ' Managed Services: enable a minimum per role to bill max(actual, minimum), and optionally bill hours over that minimum quarterly.'}
         </p>
-        <Button size="sm" className="gap-1.5" onClick={() => { setForm(emptyForm); setIsAddOpen(true); }}>
-          <Plus className="h-4 w-4" /> Add Role
-        </Button>
+        {canEdit && (
+          <Button size="sm" className="gap-1.5" onClick={() => { setForm(emptyForm); setIsAddOpen(true); }}>
+            <Plus className="h-4 w-4" /> Add Role
+          </Button>
+        )}
       </div>
       {roles.length === 0 ? (
         <p className="text-sm text-muted-foreground py-6 text-center">No roles defined.</p>
@@ -248,7 +266,7 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
               <TableHead className="text-right">Rate (USD/h)</TableHead>
               {isManagedServices && <TableHead className="text-right">Min Hours</TableHead>}
               {isManagedServices && <TableHead className="text-right">Additional Hours</TableHead>}
-              <TableHead className="text-right w-24">Actions</TableHead>
+              {canEdit && <TableHead className="text-right w-24">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -270,16 +288,18 @@ function ProjectRolesPanel({ projectId, isManagedServices }: { projectId: string
                       : <span className="text-muted-foreground">Off</span>}
                   </TableCell>
                 )}
-                <TableCell className="text-right">
-                  <div className="flex gap-1 justify-end">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd), min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(role.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </TableCell>
+                {canEdit && (
+                  <TableCell className="text-right">
+                    <div className="flex gap-1 justify-end">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd), min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(role.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -497,7 +517,7 @@ function ManageRequiredSkillsDialog({
 }
 
 // ── Assignments Panel ─────────────────────────────────────────────────────────
-function ProjectAssignmentsPanel({ projectId }: { projectId: string }) {
+function ProjectAssignmentsPanel({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
   const queryClient = useQueryClient();
   const { data: assignments = [], isLoading } = useProjectAssignments(projectId);
   const { data: roles = [] } = useProjectRoles(projectId);
@@ -639,7 +659,8 @@ function ProjectAssignmentsPanel({ projectId }: { projectId: string }) {
         <SkillGapSection projectId={projectId} onManageSkills={() => setManageOpen(true)} />
       )}
 
-      {/* ── Add Employee ── */}
+      {/* ── Add Employee (Admin only — see canEdit) ── */}
+      {canEdit && (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label>Add employee</Label>
@@ -848,6 +869,7 @@ function ProjectAssignmentsPanel({ projectId }: { projectId: string }) {
           </div>
         )}
       </div>
+      )}
 
       {/* ── Assignments table ── */}
       {assignments.length === 0 ? (
@@ -858,7 +880,7 @@ function ProjectAssignmentsPanel({ projectId }: { projectId: string }) {
             <TableRow>
               <TableHead>Employee</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead className="text-right w-16">Actions</TableHead>
+              {canEdit && <TableHead className="text-right w-16">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -866,25 +888,31 @@ function ProjectAssignmentsPanel({ projectId }: { projectId: string }) {
               <TableRow key={a.id}>
                 <TableCell className="font-medium">{a.employee_name}</TableCell>
                 <TableCell>
-                  <Select value={a.role_id || '__none__'} onValueChange={v => handleChangeRole(a.id, v)}>
-                    <SelectTrigger className="w-52 h-8">
-                      <SelectValue placeholder="Select role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">No role</SelectItem>
-                      {roles.map(role => (
-                        <SelectItem key={role.id} value={role.id}>
-                          {role.name} — ${Number(role.hourly_rate_usd)}/h
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {canEdit ? (
+                    <Select value={a.role_id || '__none__'} onValueChange={v => handleChangeRole(a.id, v)}>
+                      <SelectTrigger className="w-52 h-8">
+                        <SelectValue placeholder="Select role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No role</SelectItem>
+                        {roles.map(role => (
+                          <SelectItem key={role.id} value={role.id}>
+                            {role.name} — ${Number(role.hourly_rate_usd)}/h
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    roles.find(r => r.id === a.role_id)?.name || <span className="text-muted-foreground">No role</span>
+                  )}
                 </TableCell>
-                <TableCell className="text-right">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleUnassign(a.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </TableCell>
+                {canEdit && (
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleUnassign(a.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

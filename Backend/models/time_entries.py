@@ -25,6 +25,11 @@ class TimeEntry(Base):
     billable = Column(Boolean, nullable=False, default=True)
     notes = Column(String, nullable=True)
     status = Column(String, nullable=False, default="normal")
+    # Where this hour was actually worked (a US state, or "Colombia"/"Ecuador")
+    # — distinct from the employee's home Employee.location, since a trip is
+    # usually just a day or two, not their whole assignment. Null = same as
+    # the employee's home location at the time (no override was set).
+    location = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     employee = relationship("Employee", back_populates="time_entries")

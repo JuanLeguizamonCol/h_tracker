@@ -8,6 +8,7 @@ import { useEmployee, useEmployees } from '@/hooks/useEmployees';
 import { useEmployeeSkills, useCreateEmployeeSkill, useUpdateEmployeeSkill, useDeleteEmployeeSkill, useSkillCatalog } from '@/hooks/useSkills';
 import { useAssignedProjectsWithDetails } from '@/hooks/useAssignedProjects';
 import { EmployeeProjectsDialog } from '@/components/EmployeeProjectsDialog';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -73,6 +74,7 @@ const EMPTY_SKILL: SkillForm = {
 
 export default function EmployeeProfilePage() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { employeeId } = useParams<{ employeeId: string }>();
 
   const { data: employee, isLoading } = useEmployee(employeeId);
@@ -218,9 +220,11 @@ export default function EmployeeProfilePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setIsProjectsDialogOpen(true)} className="gap-2">
-            <FolderKanban className="h-4 w-4" /> Assign Projects
-          </Button>
+          {isAdmin && (
+            <Button variant="outline" onClick={() => setIsProjectsDialogOpen(true)} className="gap-2">
+              <FolderKanban className="h-4 w-4" /> Assign Projects
+            </Button>
+          )}
           <Button onClick={() => navigate(`/employees/${employeeId}/edit`)} className="gap-2">
             <Edit className="h-4 w-4" /> Edit Profile
           </Button>

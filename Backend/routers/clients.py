@@ -4,7 +4,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config.database import get_db
-from services.clients import create_client, get_clients, get_client, update_client, delete_client
+from services.clients import (
+    create_client, get_clients, get_client, update_client, delete_client,
+    preview_next_client_number,
+)
 from schemas.clients import ClientCreate, ClientUpdate, ClientOut
 from utils.auth_jwt import require_admin
 
@@ -23,6 +26,13 @@ def create_new_client(client_in: ClientCreate, db: Session = Depends(get_db)):
 @clients_router.get("/", response_model=List[ClientOut])
 def list_clients(active: Optional[bool] = None, db: Session = Depends(get_db)):
     return get_clients(db, active=active)
+
+
+# Must come before /{client_id} — otherwise "preview-number" is parsed as a client_id.
+@clients_router.get("/preview-number")
+def preview_client_number(db: Session = Depends(get_db)):
+    """Suggest the next consecutive Client Number, without reserving it."""
+    return {"client_number": preview_next_client_number(db)}
 
 
 @clients_router.get("/{client_id}", response_model=ClientOut)

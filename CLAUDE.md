@@ -93,6 +93,9 @@ AZURE_STORAGE_CONTAINER          invoice-attachments
 COP_TO_USD_RATE / EUR_TO_USD_RATE   4200 / 1.08
 EXPENSIFY_* / FRESHSALES_*        integraciones opcionales
 ENTRA_TENANT_ID / ENTRA_CLIENT_ID  App Registration de Entra ID (SPA, sin secreto) para "Sign in with Microsoft". Vacío = deshabilitado.
+SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_EMAIL / SMTP_FROM_NAME / SMTP_USE_TLS
+                                  cuenta de correo (no-reply) usada para notificaciones internas por email — ver utils/email.py. Sin SMTP_HOST no se envía nada (solo se loguea).
+NEW_CLIENT_NOTIFY_EMAIL          destinatario de la notificación "nuevo cliente creado" (Gail Fornell) — ver services/client_notifications.py. Vacío = notificación deshabilitada.
 ```
 > No existe `AUTH_MODE`. La auth base es siempre usuario/contraseña → JWT propio;
 > "Sign in with Microsoft" (Entra ID) es un método adicional (ver abajo), no un reemplazo.

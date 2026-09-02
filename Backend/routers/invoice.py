@@ -121,8 +121,22 @@ def create_new_invoice(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     _ensure_can_invoice_project(project, current_employee, db)
+    if project.status == "on_hold":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This project is on hold — its hours won't be billed until it's reactivated.",
+        )
 
     invoice = create_invoice(db, invoice_in)
+
+    # Pull in any Weekly Log expenses for this project that haven't been
+    # billed yet (scoped to the invoice's period, if it has one — otherwise
+    # every unbilled expense for the project, same as unlinked time entries).
+    from services.project_expenses import pull_unbilled_expenses_into_invoice
+    pull_unbilled_expenses_into_invoice(db, invoice)
+    db.commit()
+    db.refresh(invoice)
+
     # Notify project manager
     project = db.query(Project).filter(Project.id == invoice.project_id).first()
     if project and project.manager_id:

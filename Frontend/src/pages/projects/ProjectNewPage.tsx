@@ -397,11 +397,18 @@ export default function ProjectNewPage() {
                 <Select value={form.status} onValueChange={v => set('status', v)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="business_development">Business Development</SelectItem>
                     <SelectItem value="active">Active</SelectItem>
                     <SelectItem value="on_hold">On Hold</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
+                {form.status === 'business_development' && (
+                  <p className="text-xs text-muted-foreground">No hours can be logged to this project until it moves to Active.</p>
+                )}
+                {form.status === 'on_hold' && (
+                  <p className="text-xs text-muted-foreground">Hours can still be logged, but won't be billed while on hold.</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Referral</Label>

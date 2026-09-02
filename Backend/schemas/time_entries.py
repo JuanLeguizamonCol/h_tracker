@@ -17,6 +17,9 @@ class TimeEntryBase(BaseModel):
     billable: bool = True
     notes: Optional[str] = None
     status: str = "normal"
+    # Where this hour was actually worked (a US state, or "Colombia"/"Ecuador")
+    # — null means "same as the employee's home location".
+    location: Optional[str] = None
 
 
 class TimeEntryCreate(TimeEntryBase):
@@ -32,6 +35,7 @@ class TimeEntryUpdate(BaseModel):
     billable: Optional[bool] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    location: Optional[str] = None
 
 
 class TimeEntryOut(TimeEntryBase):

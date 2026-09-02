@@ -20,6 +20,7 @@ import {
 import { toast } from 'sonner';
 
 const STATUS_COLORS: Record<string, string> = {
+  business_development: 'outline',
   active: 'default',
   on_hold: 'secondary',
   completed: 'outline',
@@ -88,9 +89,11 @@ export default function Projects() {
           <h1 className="text-2xl font-bold text-foreground">Projects</h1>
           <p className="text-muted-foreground">Manage projects, roles & rates, and employee assignments</p>
         </div>
-        <Button className="gap-2" onClick={() => navigate('/projects/new')}>
-          <Plus className="h-4 w-4" /> New Project
-        </Button>
+        {isAdmin && (
+          <Button className="gap-2" onClick={() => navigate('/projects/new')}>
+            <Plus className="h-4 w-4" /> New Project
+          </Button>
+        )}
       </div>
 
       {/* Search + Filter */}

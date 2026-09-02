@@ -8,7 +8,17 @@ from schemas.announcements import AnnouncementCreate, AnnouncementUpdate
 from utils import blob_storage
 import uuid
 
-VALID_VISIBILITY = ("all", "locations", "roles")
+VALID_VISIBILITY = ("all", "locations", "roles", "pegasus_contractors")
+
+
+def _is_pegasus_contractor(employee: Employee) -> bool:
+    """Fixed audience — not user-selectable like locations/roles, so it needs
+    no extra column: an employee is a 'Pegasus contractor' when their profile
+    has business_unit=Pegasus and employment_type=Contractor."""
+    return (
+        (employee.business_unit or "").strip().lower() == "pegasus"
+        and (employee.employment_type or "").strip().lower() == "contractor"
+    )
 
 
 def _list_to_str(values: Optional[List[str]]) -> Optional[str]:
@@ -59,14 +69,15 @@ def create_announcement(db: Session, posted_by: str, data: AnnouncementCreate) -
 
 def list_announcements(db: Session, viewer: Employee, viewer_role: str, is_privileged: bool) -> List[dict]:
     """Admin/manager see every announcement (to manage the board). Employees
-    only see 'all' announcements plus 'locations'/'roles' ones matching their
-    own Employee.location / assigned role — enforced here, not just hidden
-    in the UI."""
+    only see 'all' announcements plus 'locations'/'roles'/'pegasus_contractors'
+    ones matching their own Employee.location / assigned role / contractor
+    status — enforced here, not just hidden in the UI."""
     rows = db.query(Announcement).order_by(Announcement.created_at.desc()).all()
     if is_privileged:
         return [_serialize(db, a) for a in rows]
 
     location = (viewer.location or "").strip()
+    is_pegasus_contractor = _is_pegasus_contractor(viewer)
     visible = []
     for a in rows:
         if a.visibility == "all":
@@ -74,6 +85,8 @@ def list_announcements(db: Session, viewer: Employee, viewer_role: str, is_privi
         elif a.visibility == "locations" and location and location in _str_to_list(a.locations):
             visible.append(a)
         elif a.visibility == "roles" and viewer_role in _str_to_list(a.roles):
+            visible.append(a)
+        elif a.visibility == "pegasus_contractors" and is_pegasus_contractor:
             visible.append(a)
     return [_serialize(db, a) for a in visible]
 

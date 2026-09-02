@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 function fileHref(fileUrl: string): string {
   return /^https?:\/\//i.test(fileUrl) ? fileUrl : apiUrl(fileUrl);
@@ -49,11 +50,17 @@ export function AnnouncementsPanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [visibility, setVisibility] = useState<'all' | 'locations' | 'roles'>('all');
+  const [visibility, setVisibility] = useState<'all' | 'locations' | 'roles' | 'pegasus_contractors'>('all');
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<AppRole[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [tab, setTab] = useState<'all' | 'pegasus_contractors'>('all');
+
+  const visibleAnnouncements = useMemo(
+    () => tab === 'all' ? announcements : announcements.filter(a => a.visibility === 'pegasus_contractors'),
+    [announcements, tab]
+  );
 
   function resetForm() {
     setTitle(''); setBody(''); setVisibility('all'); setSelectedLocations([]); setSelectedRoles([]); setFiles([]);
@@ -130,16 +137,24 @@ export function AnnouncementsPanel() {
         )}
       </CardHeader>
       <CardContent>
+        <Tabs value={tab} onValueChange={v => setTab(v as 'all' | 'pegasus_contractors')} className="mb-3">
+          <TabsList>
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="pegasus_contractors">Pegasus Contractors</TabsTrigger>
+          </TabsList>
+        </Tabs>
         {isLoading ? (
           <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
-        ) : announcements.length === 0 ? (
+        ) : visibleAnnouncements.length === 0 ? (
           <div className="text-center py-8">
             <Megaphone className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground text-sm">No announcements yet.</p>
+            <p className="text-muted-foreground text-sm">
+              {tab === 'pegasus_contractors' ? 'No announcements for Pegasus Contractors yet.' : 'No announcements yet.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {announcements.map(a => (
+            {visibleAnnouncements.map(a => (
               <div key={a.id} className="rounded-lg border p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -153,6 +168,11 @@ export function AnnouncementsPanel() {
                       {a.visibility === 'roles' && (
                         <Badge variant="outline" className="text-xs capitalize">
                           {a.roles.join(', ')}
+                        </Badge>
+                      )}
+                      {a.visibility === 'pegasus_contractors' && (
+                        <Badge variant="outline" className="text-xs">
+                          Pegasus Contractors
                         </Badge>
                       )}
                     </div>
@@ -212,6 +232,9 @@ export function AnnouncementsPanel() {
                 </Button>
                 <Button type="button" size="sm" variant={visibility === 'roles' ? 'default' : 'outline'} onClick={() => setVisibility('roles')}>
                   Specific roles
+                </Button>
+                <Button type="button" size="sm" variant={visibility === 'pegasus_contractors' ? 'default' : 'outline'} onClick={() => setVisibility('pegasus_contractors')}>
+                  Pegasus Contractors
                 </Button>
               </div>
             </div>

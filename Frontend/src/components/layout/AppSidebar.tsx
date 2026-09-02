@@ -20,8 +20,9 @@ const adminNavigationItems = [
   { title: 'Reports', url: '/reports', icon: BarChart3 },
 ];
 
-// Manager = everything Admin has EXCEPT Invoices.
-const managerNavigationItems = adminNavigationItems.filter(item => item.title !== 'Invoices');
+// Manager = everything Admin has EXCEPT Invoices and Staffing (project
+// creation/assignment is Admin-only — Manager still sees Projects, read-only).
+const managerNavigationItems = adminNavigationItems.filter(item => item.title !== 'Invoices' && item.title !== 'Staffing');
 
 const employeeNavigationItems = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboard },

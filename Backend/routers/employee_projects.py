@@ -16,6 +16,7 @@ from schemas.employee_projects import (
     EmployeeProjectWithDetails as EmployeeProjectWithDetailsOut,
     StaffingAssignmentOut,
 )
+from utils.roles import require_admin
 
 employee_projects_router = APIRouter(prefix="/employee-projects", tags=["employee-projects"])
 
@@ -33,7 +34,8 @@ class UpdateEpBody(BaseModel):
     project_end_date: Optional[date] = None
 
 
-@employee_projects_router.post("/", response_model=EmployeeProjectOut, status_code=status.HTTP_201_CREATED)
+@employee_projects_router.post("/", response_model=EmployeeProjectOut, status_code=status.HTTP_201_CREATED,
+                                dependencies=[Depends(require_admin)])
 def create_new_employee_project(ep_in: EmployeeProjectCreate, db: Session = Depends(get_db)):
     return create_employee_project(db, ep_in)
 
@@ -58,12 +60,14 @@ def get_employee_projects_with_details_route(user_id: str, db: Session = Depends
     return get_employee_projects_with_details(db, user_id)
 
 
-@employee_projects_router.put("/{user_id}/bulk", response_model=List[EmployeeProjectOut])
+@employee_projects_router.put("/{user_id}/bulk", response_model=List[EmployeeProjectOut],
+                               dependencies=[Depends(require_admin)])
 def bulk_replace_assignments_route(user_id: str, body: BulkAssignBody, db: Session = Depends(get_db)):
     return bulk_replace_assignments(db, user_id, body.assignments)
 
 
-@employee_projects_router.put("/{ep_id}", response_model=EmployeeProjectOut)
+@employee_projects_router.put("/{ep_id}", response_model=EmployeeProjectOut,
+                               dependencies=[Depends(require_admin)])
 def update_employee_project_detail(ep_id: str, body: UpdateEpBody, db: Session = Depends(get_db)):
     ep = update_employee_project(db, ep_id, body.model_dump(exclude_unset=True))
     if not ep:
@@ -71,7 +75,8 @@ def update_employee_project_detail(ep_id: str, body: UpdateEpBody, db: Session =
     return ep
 
 
-@employee_projects_router.delete("/{ep_id}", status_code=status.HTTP_204_NO_CONTENT)
+@employee_projects_router.delete("/{ep_id}", status_code=status.HTTP_204_NO_CONTENT,
+                                  dependencies=[Depends(require_admin)])
 def delete_employee_project_detail(ep_id: str, db: Session = Depends(get_db)):
     if not delete_employee_project(db, ep_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee project not found")

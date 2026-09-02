@@ -12,7 +12,7 @@ export function useAnnouncements() {
 export function useCreateAnnouncement() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { title: string; body?: string | null; visibility: 'all' | 'locations' | 'roles'; locations?: string[]; roles?: string[] }) =>
+    mutationFn: (data: { title: string; body?: string | null; visibility: 'all' | 'locations' | 'roles' | 'pegasus_contractors'; locations?: string[]; roles?: string[] }) =>
       api.post<Announcement>('/announcements', data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['announcements'] }),
   });

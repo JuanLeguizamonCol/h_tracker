@@ -6,6 +6,7 @@ from models.project_roles import ProjectRole
 from models.user_roles import UserRole
 from models.employee_projects import EmployeeProject
 from models.time_entries import TimeEntry
+from models.project_expenses import ProjectExpense
 from models.invoice import Invoice
 from models.invoice_lines import InvoiceLine
 from models.invoice_manual_lines import InvoiceManualLine

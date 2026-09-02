@@ -116,7 +116,8 @@ def preview_project_code_endpoint(client_id: str, db: Session = Depends(get_db))
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
-@projects_router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+@projects_router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED,
+                       dependencies=[Depends(require_admin)])
 def create_new_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
     project = create_project(db, project_in)
     if project.is_internal:
@@ -371,7 +372,8 @@ def get_project_detail(project_id: str, db: Session = Depends(get_db)):
     return _with_manager_name(project, db)
 
 
-@projects_router.put("/{project_id}", response_model=ProjectOut)
+@projects_router.put("/{project_id}", response_model=ProjectOut,
+                      dependencies=[Depends(require_admin)])
 def update_project_detail(project_id: str, project_in: ProjectUpdate, db: Session = Depends(get_db)):
     project = update_project(db, project_id, project_in)
     if not project:
@@ -381,7 +383,8 @@ def update_project_detail(project_id: str, project_in: ProjectUpdate, db: Sessio
     return _with_manager_name(project, db)
 
 
-@projects_router.patch("/{project_id}", response_model=ProjectOut)
+@projects_router.patch("/{project_id}", response_model=ProjectOut,
+                        dependencies=[Depends(require_admin)])
 def patch_project_detail(project_id: str, project_in: ProjectUpdate, db: Session = Depends(get_db)):
     project = update_project(db, project_id, project_in)
     if not project:

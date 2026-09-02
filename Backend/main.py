@@ -16,6 +16,7 @@ from routers.project_roles import project_roles_router
 from routers.user_roles import user_roles_router
 from routers.employee_projects import employee_projects_router
 from routers.time_entries import time_entries_router
+from routers.project_expenses import project_expenses_router
 from routers.invoice import invoice_router
 from routers.invoice_lines import invoice_lines_router
 from routers.invoice_manual_lines import invoice_manual_lines_router
@@ -78,6 +79,7 @@ app.include_router(project_roles_router, dependencies=auth_deps)
 app.include_router(user_roles_router, dependencies=auth_deps)
 app.include_router(employee_projects_router, dependencies=auth_deps)
 app.include_router(time_entries_router, dependencies=auth_deps)
+app.include_router(project_expenses_router, dependencies=auth_deps)
 app.include_router(invoice_router, dependencies=invoice_deps)
 app.include_router(invoice_lines_router, dependencies=invoice_deps)
 app.include_router(invoice_manual_lines_router, dependencies=invoice_deps)

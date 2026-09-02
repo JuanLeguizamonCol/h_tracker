@@ -70,6 +70,10 @@ export default function InvoiceNewPage() {
   }, [selectedProjectId]);
 
   const doCreateInvoice = async () => {
+    if (selectedProject?.status === 'on_hold') {
+      toast.error('This project is on hold — reactivate it before invoicing.');
+      return;
+    }
     if (selectedProject?.is_fixed_fee && !selectedProject.fixed_fee_amount) {
       toast.error('This project is marked fixed-fee but has no fee amount set. Add one on the project before invoicing.');
       return;
@@ -284,8 +288,23 @@ export default function InvoiceNewPage() {
             </Select>
           </div>
 
+          {/* On hold — blocks invoicing entirely, no point checking hours */}
+          {selectedProject?.status === 'on_hold' && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 p-4">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-sm text-amber-800 dark:text-amber-300">This project is on hold</p>
+                  <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+                    Its logged hours won't be billed while it's on hold. Reactivate the project first if you need to invoice it.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Checking state */}
-          {isChecking && (
+          {selectedProject?.status !== 'on_hold' && isChecking && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
               <Loader2 className="h-4 w-4 animate-spin" />
               Checking available hours…
@@ -293,7 +312,7 @@ export default function InvoiceNewPage() {
           )}
 
           {/* Has hours — show summary + action */}
-          {!isChecking && checkResult?.has_entries && (
+          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult?.has_entries && (
             <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/40 p-4 space-y-3">
               <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
                 <CheckCircle className="h-4 w-4 flex-shrink-0" />
@@ -322,7 +341,7 @@ export default function InvoiceNewPage() {
           )}
 
           {/* No hours — inline warning */}
-          {!isChecking && checkResult && !checkResult.has_entries && (
+          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult && !checkResult.has_entries && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 p-4 space-y-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />

@@ -79,7 +79,7 @@ export interface Announcement {
   id: string;
   title: string;
   body: string | null;
-  visibility: 'all' | 'locations' | 'roles';
+  visibility: 'all' | 'locations' | 'roles' | 'pegasus_contractors';
   locations: string[];
   roles: AppRole[];
   posted_by: string;
@@ -245,6 +245,20 @@ export interface ProjectRole {
   created_at: string;
 }
 
+export interface ProjectExpense {
+  id: string;
+  project_id: string;
+  user_id: string;
+  employee_name?: string;
+  date: string;
+  category: string;
+  amount_usd: number;
+  description: string | null;
+  // Set once this expense has been pulled into an invoice — null = still unbilled.
+  invoice_id: string | null;
+  created_at: string;
+}
+
 export type TimeEntryStatus = 'normal' | 'on_hold';
 
 export interface TimeEntry {
@@ -257,6 +271,9 @@ export interface TimeEntry {
   billable: boolean;
   notes: string | null;
   status: TimeEntryStatus;
+  // Where this hour was actually worked (US state, or "Colombia"/"Ecuador")
+  // — null means "same as the employee's home location".
+  location: string | null;
   created_at: string;
 }
 

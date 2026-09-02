@@ -18,6 +18,7 @@ from models.employee_projects import EmployeeProject
 from models.project_roles import ProjectRole
 from models.employees import Employee
 from services.invoice_number_service import atomic_generate_number_for_client
+from services.project_expenses import pull_unbilled_expenses_into_invoice, has_unbilled_expenses
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,12 @@ def generate_invoice_for_project_period(
     if existing:
         return {"generated": False, "skipped": True, "reason": "already_exists", "invoice_number": None}
 
+    # 1b. On-hold projects don't bill — hours keep logging normally, they just
+    # stay unbilled (unlinked) until the project is taken off hold, at which
+    # point the next run picks them up like any other unbilled hours.
+    if project.status == "on_hold":
+        return {"generated": False, "skipped": True, "reason": "project_on_hold", "invoice_number": None}
+
     # 2. Collect unlinked billable time entries for the period.
     linked_ids = {
         row[0] for row in db.execute(text("SELECT time_entry_id FROM invoice_time_entries")).fetchall()
@@ -127,10 +134,14 @@ def generate_invoice_for_project_period(
     ).all()
     entries = [e for e in entries if e.id not in linked_ids]
 
+    # A project can have expenses logged (Weekly Log) with no hours at all
+    # this period — still worth generating an invoice for those.
+    pending_expenses = has_unbilled_expenses(db, project.id, period_start, period_end)
+
     # Managed Services is a retainer — it still bills the minimum-hours
     # package even when nobody logged time this period, so it does NOT skip
     # on zero entries like every other billing mode does.
-    if not entries and not project.is_managed_services:
+    if not entries and not pending_expenses and not project.is_managed_services:
         return {"generated": False, "skipped": True, "reason": "no_entries", "invoice_number": None}
 
     company = getattr(project, "owner_company", None) or "IPC"
@@ -180,6 +191,10 @@ def generate_invoice_for_project_period(
 
         # Flush now so the unique-index race is detected before we build lines.
         db.flush()
+
+        # Pull in any Weekly Log expenses for this project/period that haven't
+        # been billed yet — mirrors the time-entry linking below.
+        pull_unbilled_expenses_into_invoice(db, invoice)
 
         # Roles & assignments for rate lookup.
         assignments = db.query(EmployeeProject).filter(

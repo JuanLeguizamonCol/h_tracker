@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from models.employees import Employee
+from models.projects import Project
 from utils.auth_jwt import get_current_employee
 from utils.roles import get_role
 from services.time_entries import (
@@ -25,6 +26,14 @@ def create_new_time_entry(
     # entries for anyone (e.g. corrections).
     if get_role(db, current_employee.id) not in ("admin", "manager") and entry_in.user_id != current_employee.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only log time for yourself")
+    # Business Development projects are prospective work — no hours are
+    # loggable against them until the project actually moves to Active.
+    project = db.query(Project).filter(Project.id == entry_in.project_id).first()
+    if project and project.status == "business_development":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Hours can't be logged to a Business Development project yet.",
+        )
     return create_time_entry(db, entry_in)
 
 

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
-import { ArrowLeft, Loader2, Save, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Loader2, Save, RefreshCw, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useClient, useCreateClient, useUpdateClient } from '@/hooks/useClients';
 import { useSyncFreshSalesAccount } from '@/hooks/useFreshSales';
+import { api } from '@/lib/api';
 import { Client } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -169,6 +170,19 @@ export default function ClientFormPage() {
   const [form, setForm] = useState<FormData>(EMPTY);
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isGeneratingNumber, setIsGeneratingNumber] = useState(false);
+
+  const handleAutogenerateNumber = async () => {
+    setIsGeneratingNumber(true);
+    try {
+      const res = await api.get<{ client_number: string }>('/clients/preview-number');
+      set('client_number', res.client_number);
+    } catch {
+      toast.error('Could not generate a Client Number. Please try again.');
+    } finally {
+      setIsGeneratingNumber(false);
+    }
+  };
 
   const handleSyncCrm = async () => {
     if (!existing?.freshsales_id) return;
@@ -293,13 +307,23 @@ export default function ClientFormPage() {
           <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. TechCorp Inc." />
         </Field>
         <Field label="Client Number">
-          <Input
-            value={form.client_number}
-            onChange={e => set('client_number', e.target.value)}
-            placeholder="e.g. 12"
-          />
+          <div className="flex gap-2">
+            <Input
+              value={form.client_number}
+              onChange={e => set('client_number', e.target.value)}
+              placeholder="e.g. 12"
+            />
+            <Button
+              type="button" variant="outline" size="sm" className="shrink-0 gap-1.5"
+              onClick={handleAutogenerateNumber} disabled={isGeneratingNumber}
+            >
+              {isGeneratingNumber ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+              Autogenerate
+            </Button>
+          </div>
           <p className="text-xs text-muted-foreground mt-1">
             Used to number this client's invoices (e.g. "{form.client_number || '12'}-1", "{form.client_number || '12'}-2"...). Must be unique.
+            Numeric and consecutive — "Autogenerate" picks the next one after the highest already in use.
           </p>
         </Field>
         <Field label="Industry">

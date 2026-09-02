@@ -58,8 +58,8 @@ const App = () => (
               <Route path="/timesheet" element={<ProtectedRoute><MainLayout><Timesheet /></MainLayout></ProtectedRoute>} />
               <Route path="/history" element={<ProtectedRoute><MainLayout><History /></MainLayout></ProtectedRoute>} />
               <Route path="/projects" element={<ProtectedRoute><MainLayout><Projects /></MainLayout></ProtectedRoute>} />
-              <Route path="/projects/new" element={<ProtectedRoute><MainLayout><ProjectNewPage /></MainLayout></ProtectedRoute>} />
-              <Route path="/projects/:projectId/edit" element={<ProtectedRoute><MainLayout><ProjectEditPage /></MainLayout></ProtectedRoute>} />
+              <Route path="/projects/new" element={<ProtectedRoute><MainLayout><AdminGuard adminOnly><ProjectNewPage /></AdminGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/projects/:projectId/edit" element={<ProtectedRoute><MainLayout><AdminGuard adminOnly><ProjectEditPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/projects/:projectId" element={<ProtectedRoute><MainLayout><ProjectDetailPage /></MainLayout></ProtectedRoute>} />
               <Route path="/clients" element={<ProtectedRoute><MainLayout><Clients /></MainLayout></ProtectedRoute>} />
               <Route path="/clients/new" element={<ProtectedRoute><MainLayout><ClientFormPage /></MainLayout></ProtectedRoute>} />
@@ -68,7 +68,7 @@ const App = () => (
               <Route path="/employees/new" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/employees/:employeeId" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeProfilePage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/employees/:employeeId/edit" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/staffing" element={<ProtectedRoute><MainLayout><AdminGuard><StaffingPage /></AdminGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/staffing" element={<ProtectedRoute><MainLayout><AdminGuard adminOnly><StaffingPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices" element={<ProtectedRoute><MainLayout><InvoiceGuard><Invoices /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices/new" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceNewPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices/new/manual" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceManualPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
