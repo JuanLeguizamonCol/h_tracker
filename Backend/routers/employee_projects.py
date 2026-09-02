@@ -27,6 +27,8 @@ class BulkAssignBody(BaseModel):
 class UpdateEpBody(BaseModel):
     role_id: Optional[str] = None
     allocation_percentage: Optional[float] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     project_start_date: Optional[date] = None
     project_end_date: Optional[date] = None
 

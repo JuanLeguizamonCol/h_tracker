@@ -46,6 +46,10 @@ type AssignmentPayload = {
   project_id: string;
   role_id?: string | null;
   allocation_percentage?: number | null;
+  // This assignment's own window — never affects the project.
+  start_date?: string | null;
+  end_date?: string | null;
+  // Separate, explicit opt-in: writes straight to the project's own dates.
   project_start_date?: string | null;
   project_end_date?: string | null;
 };

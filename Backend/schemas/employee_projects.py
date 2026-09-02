@@ -9,11 +9,17 @@ class EmployeeProjectBase(BaseModel):
     project_id: str
     role_id: Optional[str] = None
     allocation_percentage: Optional[float] = None
+    # Optional window scoping just THIS assignment (e.g. "staffed on this
+    # project for Q1 only") — never written to the project itself.
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
 
 
 class EmployeeProjectCreate(EmployeeProjectBase):
-    # When set, written straight back to the project's own start_date/end_date
-    # (single source of truth) — see services/employee_projects.py.
+    # Separate, explicit opt-in: when set, written straight back to the
+    # project's own start_date/end_date (single source of truth for the
+    # project's dates) — see services/employee_projects.py. Distinct from
+    # start_date/end_date above, which only affect this assignment.
     project_start_date: Optional[date] = None
     project_end_date: Optional[date] = None
 
@@ -21,6 +27,8 @@ class EmployeeProjectCreate(EmployeeProjectBase):
 class EmployeeProjectUpdate(BaseModel):
     role_id: Optional[str] = None
     allocation_percentage: Optional[float] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     project_start_date: Optional[date] = None
     project_end_date: Optional[date] = None
 
@@ -41,6 +49,8 @@ class EmployeeProjectWithDetails(BaseModel):
     project_id: str
     role_id: Optional[str] = None
     allocation_percentage: Optional[float] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     assigned_at: datetime
     assigned_by: Optional[str] = None
     project_name: str
@@ -60,7 +70,8 @@ class BulkAssignRequest(BaseModel):
 
 class StaffingAssignmentOut(BaseModel):
     """One row of the Staffing panel: a person, staffed on a project, with
-    their allocation % and the project's own time window."""
+    their allocation %, their own optional assignment window, and the
+    project's own (separate) time window."""
     id: str
     user_id: str
     employee_name: str
@@ -73,6 +84,10 @@ class StaffingAssignmentOut(BaseModel):
     role_id: Optional[str] = None
     role_name: Optional[str] = None
     allocation_percentage: Optional[float] = None
+    # This assignment's own window — never affects the project.
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    # The project's own dates, for context / the opt-in "edit project dates" action.
     project_start_date: Optional[date] = None
     project_end_date: Optional[date] = None
     assigned_at: datetime

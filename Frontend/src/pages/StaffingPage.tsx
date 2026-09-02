@@ -14,17 +14,27 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 
 type AssignForm = {
   employeeId: string;
   projectId: string;
   roleId: string;
   allocation: string;
+  // This assignment's own window — never affects the project.
   startDate: string;
   endDate: string;
+  // Separate, explicit opt-in to change the project's own date range.
+  editProjectDates: boolean;
+  projectStartDate: string;
+  projectEndDate: string;
 };
 
-const EMPTY_FORM: AssignForm = { employeeId: '', projectId: '', roleId: '', allocation: '', startDate: '', endDate: '' };
+const EMPTY_FORM: AssignForm = {
+  employeeId: '', projectId: '', roleId: '', allocation: '',
+  startDate: '', endDate: '',
+  editProjectDates: false, projectStartDate: '', projectEndDate: '',
+};
 
 export default function StaffingPage() {
   const { data: employees = [], isLoading: employeesLoading } = useEmployees();
@@ -51,6 +61,7 @@ export default function StaffingPage() {
   const activeEmployees = useMemo(() => employees.filter(e => e.is_active), [employees]);
 
   const projectById = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
+  const selectedProject = form.projectId ? projectById.get(form.projectId) : undefined;
 
   const grouped = useMemo(() => {
     const map = new Map<string, { employeeName: string; rows: StaffingAssignment[] }>();
@@ -87,23 +98,26 @@ export default function StaffingPage() {
       projectId: row.project_id,
       roleId: row.role_id || '',
       allocation: row.allocation_percentage != null ? String(row.allocation_percentage) : '',
-      startDate: row.project_start_date || '',
-      endDate: row.project_end_date || '',
+      startDate: row.start_date || '',
+      endDate: row.end_date || '',
+      editProjectDates: false,
+      projectStartDate: row.project_start_date || '',
+      projectEndDate: row.project_end_date || '',
     });
     setIsDialogOpen(true);
   }
 
-  // Auto-fill the time window from the selected project's own dates —
-  // editable, but this is where "already exists → auto-assign the window"
-  // happens. Only fills blanks so it never clobbers something the user typed.
+  // Prefills the "project dates" section (used only if the user opts into
+  // editing the project's own range) from the selected project's current
+  // dates — the assignment's own window is separate and starts blank.
   function handleProjectChange(projectId: string) {
     const project = projectById.get(projectId);
     setForm(f => ({
       ...f,
       projectId,
       roleId: '',
-      startDate: f.startDate || project?.start_date || '',
-      endDate: f.endDate || project?.end_date || '',
+      projectStartDate: project?.start_date || '',
+      projectEndDate: project?.end_date || '',
     }));
   }
 
@@ -120,8 +134,12 @@ export default function StaffingPage() {
       const payload = {
         role_id: form.roleId || null,
         allocation_percentage: allocationNum,
-        project_start_date: form.startDate || null,
-        project_end_date: form.endDate || null,
+        start_date: form.startDate || null,
+        end_date: form.endDate || null,
+        ...(form.editProjectDates ? {
+          project_start_date: form.projectStartDate || null,
+          project_end_date: form.projectEndDate || null,
+        } : {}),
       };
       if (editingId) {
         await updateAssignment.mutateAsync({ id: editingId, ...payload });
@@ -165,8 +183,10 @@ export default function StaffingPage() {
             <Users2 className="h-6 w-6 text-primary" /> Staffing
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Assign people to projects, set how much of their time each takes, and the project's time window.
-            Assigning someone here lets them start logging hours against that project in Weekly Log.
+            Assign people to projects and set how much of their time each takes. You can optionally
+            limit an assignment to a specific window without touching the project, or change the
+            project's own dates directly. Assigning someone here lets them start logging hours
+            against that project in Weekly Log.
           </p>
         </div>
         <Button className="gap-2" onClick={openAdd}>
@@ -236,10 +256,14 @@ export default function StaffingPage() {
                             {row.allocation_percentage != null ? `${row.allocation_percentage}%` : <span className="text-muted-foreground">—</span>}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            <span className="inline-flex items-center gap-1">
-                              <CalendarRange className="h-3.5 w-3.5 shrink-0" />
-                              {row.project_start_date || '—'} → {row.project_end_date || '—'}
-                            </span>
+                            {row.start_date || row.end_date ? (
+                              <span className="inline-flex items-center gap-1">
+                                <CalendarRange className="h-3.5 w-3.5 shrink-0" />
+                                {row.start_date || '—'} → {row.end_date || '—'}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground/70">Full project</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex gap-1 justify-end">
@@ -307,17 +331,48 @@ export default function StaffingPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Start date</Label>
+                <Label>Staffed from</Label>
                 <Input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
-                <Label>End date</Label>
+                <Label>Staffed until</Label>
                 <Input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} />
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Prefilled from the project when it already has dates. Changing it here updates the project's dates everywhere — invoicing, reports, everything stays in sync.
+              Optional — limits when this person is staffed on the project, without touching the project's own dates.
+              {selectedProject?.start_date || selectedProject?.end_date
+                ? ` Project runs ${selectedProject?.start_date || '—'} → ${selectedProject?.end_date || '—'}.`
+                : ''}
             </p>
+
+            <div className="rounded-md border p-3 space-y-3">
+              <label className={`flex items-center gap-2 text-sm ${form.projectId ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                <Checkbox
+                  checked={form.editProjectDates}
+                  onCheckedChange={v => setForm(f => ({ ...f, editProjectDates: !!v }))}
+                  disabled={!form.projectId}
+                />
+                Also change the project's own date range
+              </label>
+              {form.editProjectDates && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">Project start</Label>
+                      <Input type="date" value={form.projectStartDate} onChange={e => setForm(f => ({ ...f, projectStartDate: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">Project end</Label>
+                      <Input type="date" value={form.projectEndDate} onChange={e => setForm(f => ({ ...f, projectEndDate: e.target.value }))} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Updates the project itself — invoicing, reports, everything stays in sync.
+                  </p>
+                </>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>

@@ -266,6 +266,10 @@ export interface EmployeeProject {
   project_id: string;
   role_id: string | null;
   allocation_percentage: number | null;
+  // Optional window scoping just this assignment — independent of the
+  // project's own start_date/end_date.
+  start_date: string | null;
+  end_date: string | null;
   assigned_at: string;
   assigned_by: string | null;
 }
@@ -289,6 +293,10 @@ export interface StaffingAssignment {
   role_id: string | null;
   role_name: string | null;
   allocation_percentage: number | null;
+  // This assignment's own window — never affects the project.
+  start_date: string | null;
+  end_date: string | null;
+  // The project's own (separate) dates, for context / editing them directly.
   project_start_date: string | null;
   project_end_date: string | null;
   assigned_at: string;

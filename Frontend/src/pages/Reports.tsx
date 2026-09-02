@@ -707,10 +707,10 @@ export default function Reports() {
   // ── Utilization report: forward projection from Staffing ───────────────────────
   // Turns each assignment's allocation % (set in the Staffing panel) into implied
   // occupancy for the weeks ahead where the assignment is still active (within
-  // the project's own start/end window). Only counts assignments that actually
-  // have an allocation % set — an assignment with none doesn't contribute a
-  // committed load. Rendered as a week-by-week matrix, same shape as the actual
-  // Weekly Hours Matrix above.
+  // the assignment's own window if one was set, else the project's start/end
+  // window). Only counts assignments that actually have an allocation % set —
+  // an assignment with none doesn't contribute a committed load. Rendered as a
+  // week-by-week matrix, same shape as the actual Weekly Hours Matrix above.
   const PROJECTION_WEEKS = 10;
 
   const projectedWeeks = useMemo(() => {
@@ -730,8 +730,13 @@ export default function Reports() {
     projectedWeeks.forEach((week, weekIdx) => {
       staffing.forEach(a => {
         if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
-        const start = a.project_start_date ? parseLocalDate(a.project_start_date) : null;
-        const end = a.project_end_date ? parseLocalDate(a.project_end_date) : null;
+        // The assignment's own window takes precedence when set (e.g. "staffed
+        // on this project for Q1 only"); otherwise fall back to the project's
+        // own dates.
+        const startStr = a.start_date ?? a.project_start_date;
+        const endStr = a.end_date ?? a.project_end_date;
+        const start = startStr ? parseLocalDate(startStr) : null;
+        const end = endStr ? parseLocalDate(endStr) : null;
         const activeThisWeek = (!start || start <= week.end) && (!end || end >= week.start);
         if (!activeThisWeek) return;
 
