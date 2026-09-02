@@ -469,6 +469,12 @@ export default function Timesheet() {
     setIsSaving(true);
     try {
       const promises: Promise<unknown>[] = [];
+      // Recorded as each mutation actually confirms — merged into local state
+      // directly below instead of relying on a background query refetch,
+      // which runs async and isn't guaranteed to land before the next
+      // render (see note above the setRows call further down).
+      type CellResult = { projectId: string; billable: boolean; dateStr: string; removed?: boolean; id?: string };
+      const cellResults: CellResult[] = [];
 
       for (const id of pendingDeletions) {
         promises.push(deleteTimeEntry.mutateAsync(id));
@@ -487,33 +493,67 @@ export default function Timesheet() {
 
           if (dayEntry.id) {
             if (dayEntry.dirty && dayEntry.hours <= 0) {
-              promises.push(deleteTimeEntry.mutateAsync(dayEntry.id));
+              promises.push(
+                deleteTimeEntry.mutateAsync(dayEntry.id).then(() => {
+                  cellResults.push({ projectId: row.projectId, billable: row.billable, dateStr, removed: true });
+                })
+              );
             } else {
-              promises.push(updateTimeEntry.mutateAsync({
-                id: dayEntry.id,
-                updates: { hours: dayEntry.hours, notes: dayEntry.notes || null, billable, role_id: roleId, location },
-              }));
+              promises.push(
+                updateTimeEntry.mutateAsync({
+                  id: dayEntry.id,
+                  updates: { hours: dayEntry.hours, notes: dayEntry.notes || null, billable, role_id: roleId, location },
+                }).then(() => {
+                  cellResults.push({ projectId: row.projectId, billable: row.billable, dateStr, id: dayEntry.id });
+                })
+              );
             }
           } else if (dayEntry.dirty && dayEntry.hours > 0) {
-            promises.push(createTimeEntry.mutateAsync({
-              user_id: employee.id,
-              project_id: row.projectId,
-              date: dateStr,
-              hours: dayEntry.hours,
-              billable,
-              notes: dayEntry.notes || null,
-              status: 'normal',
-              role_id: roleId,
-              location,
-            }));
+            promises.push(
+              createTimeEntry.mutateAsync({
+                user_id: employee.id,
+                project_id: row.projectId,
+                date: dateStr,
+                hours: dayEntry.hours,
+                billable,
+                notes: dayEntry.notes || null,
+                status: 'normal',
+                role_id: roleId,
+                location,
+              }).then(created => {
+                cellResults.push({ projectId: row.projectId, billable: row.billable, dateStr, id: created.id });
+              })
+            );
           }
         }
       }
 
       await Promise.all(promises);
+
+      // Apply the server-confirmed results straight to local state. The
+      // previous approach reset prevWeekKeyRef so the load-effect would
+      // rebuild `rows` from the refetched week — but invalidateQueries()
+      // (called from each mutation's onSuccess) resolves the refetch in the
+      // background, not before this point, so that rebuild often ran against
+      // the still-stale cached data and silently reverted whatever was just
+      // saved (the fix for the "my changes don't stick" bug).
+      setRows(prev => prev.map(row => {
+        const relevant = cellResults.filter(r => r.projectId === row.projectId && r.billable === row.billable);
+        if (relevant.length === 0) return row;
+        const days = { ...row.days };
+        for (const r of relevant) {
+          if (r.removed) {
+            delete days[r.dateStr];
+          } else {
+            const existing = days[r.dateStr];
+            if (existing) days[r.dateStr] = { ...existing, id: r.id, dirty: false };
+          }
+        }
+        return { ...row, days };
+      }));
+
       setPendingDeletions([]);
       setDirtyLocationDays(new Set());
-      prevWeekKeyRef.current = ''; // allow re-init from refreshed server data
       toast.success("Saved — you're all set.");
     } catch (error) {
       toast.error('Something went wrong while saving. Please try again.');
@@ -765,6 +805,15 @@ export default function Timesheet() {
                               : undefined
                             }
                             onChange={e => handleUpdateHours(row.projectId, row.billable, dateStr, parseFloat(e.target.value) || 0)}
+                            onBlur={() => {
+                              // Snap to the nearest 15-minute increment once the
+                              // user leaves the field — typing stays free-form,
+                              // but nothing off-step can ever actually get saved.
+                              if (hours > 0 && isOffHoursStep(hours)) {
+                                const rounded = Math.round(hours / HOURS_STEP) * HOURS_STEP;
+                                handleUpdateHours(row.projectId, row.billable, dateStr, rounded);
+                              }
+                            }}
                             className={`w-full h-8 text-center text-sm px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
                               hours > MAX_HOURS_PER_DAY || isOffHoursStep(hours) ? 'border-destructive text-destructive focus-visible:ring-destructive' : ''
                             }`}

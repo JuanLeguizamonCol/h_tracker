@@ -398,7 +398,7 @@ def generate_time_entries_report_xlsx(rows: list[dict], meta: dict) -> bytes:
     ws.sheet_view.showGridLines = False
 
     headers = [
-        "Date", "Employee", "Corporate Email", "Location", "Department",
+        "Date", "Employee", "Corporate Email", "Location", "Work Location", "Department",
         "Business Unit", "Title", "Client", "Project", "Project Code",
         "Role", "Hours", "Billable", "Rate (USD)", "Amount (USD)",
         "Status", "Notes", "Created At",
@@ -422,6 +422,7 @@ def generate_time_entries_report_xlsx(rows: list[dict], meta: dict) -> bytes:
             r.get("employee_name") or "",
             r.get("email") or "",
             r.get("location") or "",
+            r.get("work_location") or "",
             r.get("department") or "",
             r.get("business_unit") or "",
             r.get("title") or "",
@@ -438,12 +439,12 @@ def generate_time_entries_report_xlsx(rows: list[dict], meta: dict) -> bytes:
             str(r.get("created_at") or ""),
         ], stripe=i % 2 == 0)
         # Hours use a plain numeric format, not currency.
-        ws.cell(row=i, column=12).number_format = HOURS_FMT
+        ws.cell(row=i, column=13).number_format = HOURS_FMT
 
     # Totals row
     totals_row = len(rows) + 2
     ws.cell(row=totals_row, column=1, value="TOTALS").font = LABEL_FONT
-    for col, val, fmt in [(12, total_hours, HOURS_FMT), (15, billable_amount, MONEY_FMT)]:
+    for col, val, fmt in [(13, total_hours, HOURS_FMT), (16, billable_amount, MONEY_FMT)]:
         c = ws.cell(row=totals_row, column=col, value=_money(val))
         c.font = TOTAL_FONT
         c.number_format = fmt
@@ -451,10 +452,10 @@ def generate_time_entries_report_xlsx(rows: list[dict], meta: dict) -> bytes:
         c.fill = LIGHT_BLUE_FILL
 
     _set_col_widths(ws, {
-        "A": 12, "B": 22, "C": 26, "D": 18, "E": 16,
-        "F": 16, "G": 20, "H": 22, "I": 24, "J": 14,
-        "K": 18, "L": 9, "M": 9, "N": 11, "O": 12,
-        "P": 10, "Q": 30, "R": 20,
+        "A": 12, "B": 22, "C": 26, "D": 18, "E": 18,
+        "F": 16, "G": 16, "H": 20, "I": 22, "J": 24,
+        "K": 14, "L": 18, "M": 9, "N": 9, "O": 11,
+        "P": 12, "Q": 10, "R": 30, "S": 20,
     })
     ws.freeze_panes = "A2"
 

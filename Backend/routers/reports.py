@@ -40,6 +40,7 @@ def export_time_entries_xlsx(
     project_id: Optional[List[str]] = Query(None),
     client_id: Optional[List[str]] = Query(None),
     location: Optional[List[str]] = Query(None),
+    work_location: Optional[List[str]] = Query(None),
     owner_id: Optional[List[str]] = Query(None),
     manager_id: Optional[List[str]] = Query(None),
     status: Optional[str] = None,
@@ -84,6 +85,19 @@ def export_time_entries_xlsx(
             ors.append(func.trim(Employee.location).in_(real_locations))
         if ors:
             q = q.filter(or_(*ors))
+    if work_location:
+        # Where the hours were actually worked — the entry's own location if
+        # it has one, else the employee's home location (same fallback as
+        # the Reports page's Work Location filter).
+        resolved = func.coalesce(func.nullif(func.trim(TimeEntry.location), ""), func.trim(Employee.location))
+        ors = []
+        if NO_LOCATION in work_location:
+            ors.append(resolved.is_(None) | (resolved == ""))
+        real_locations = [l for l in work_location if l != NO_LOCATION]
+        if real_locations:
+            ors.append(resolved.in_(real_locations))
+        if ors:
+            q = q.filter(or_(*ors))
     if status in ("normal", "on_hold"):
         q = q.filter(TimeEntry.status == status)
     if billing == "billable":
@@ -110,6 +124,7 @@ def export_time_entries_xlsx(
             "employee_name": emp.name,
             "email": emp.email,
             "location": emp.location,
+            "work_location": te.location or emp.location,
             "department": emp.department,
             "business_unit": emp.business_unit,
             "title": emp.title,
@@ -142,6 +157,9 @@ def export_time_entries_xlsx(
     if location:
         labels = ["No location" if l == NO_LOCATION else l for l in location]
         filters.append(f"Location: {', '.join(labels)}")
+    if work_location:
+        labels = ["No location" if l == NO_LOCATION else l for l in work_location]
+        filters.append(f"Work Location: {', '.join(labels)}")
     if owner_id:
         filters.append(f"Owner: {_names_for(owner_id, Employee)}")
     if manager_id:

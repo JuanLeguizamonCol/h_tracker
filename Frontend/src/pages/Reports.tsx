@@ -19,6 +19,7 @@ import { useEmployees } from '@/hooks/useEmployees';
 import { useAllTimeEntriesByDateRange, useTimeEntriesByDateRange } from '@/hooks/useTimeEntries';
 import { useStaffing } from '@/hooks/useAssignedProjects';
 import { useSkillSearch, useSkillCatalog } from '@/hooks/useSkills';
+import { TimeEntry } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
@@ -84,6 +85,9 @@ type Filters = {
   projectId: string[];
   clientId: string[];
   location: string[];
+  // Where the hours were actually worked (TimeEntry.location — e.g. a state
+  // for a business trip), NOT the employee's home Employee.location above.
+  workLocation: string[];
   ownerId: string[];
   managerId: string[];
   status: string;
@@ -98,6 +102,7 @@ const INIT: Filters = {
   projectId: [],
   clientId: [],
   location: [],
+  workLocation: [],
   ownerId: [],
   managerId: [],
   status: 'all',
@@ -359,6 +364,14 @@ export default function Reports() {
     [employeeMap]
   );
 
+  // Where an entry's hours were actually worked (TimeEntry.location — set
+  // when someone travels, e.g. a state for tax purposes). Falls back to the
+  // employee's home location when the entry itself has no override.
+  const workLocationOf = useMemo(
+    () => (entry: TimeEntry) => entry.location?.trim() || locationKeyOf(entry.user_id),
+    [locationKeyOf]
+  );
+
   // ── Cascade: available options ────────────────────────────────────────────────
   const availableProjects = useMemo(() => {
     const ids = new Set(rawEntries
@@ -405,6 +418,17 @@ export default function Reports() {
       .map(k => ({ value: k, label: k === NO_LOCATION ? NO_LOCATION_LABEL : k }));
   }, [rawEntries, f.projectId, f.clientId, f.employeeId, projectMap, locationKeyOf]);
 
+  // Distinct work locations (TimeEntry.location, falling back to the
+  // employee's home location) present in the current entries — separate
+  // from the Location filter above, which is employee-based only.
+  const availableWorkLocations = useMemo(() => {
+    const keys = new Set<string>();
+    rawEntries.forEach(e => keys.add(workLocationOf(e)));
+    return [...keys]
+      .sort((a, b) => (a === NO_LOCATION ? 1 : b === NO_LOCATION ? -1 : a.localeCompare(b)))
+      .map(k => ({ value: k, label: k === NO_LOCATION ? NO_LOCATION_LABEL : k }));
+  }, [rawEntries, workLocationOf]);
+
   // Distinct project owners / managers present in the current entries.
   const availableOwners = useMemo(() => {
     const byId = new Map<string, string>();
@@ -439,7 +463,7 @@ export default function Reports() {
     });
   };
 
-  const clearAll = () => setF(prev => ({ ...prev, employeeId: [], projectId: [], clientId: [], location: [], ownerId: [], managerId: [], status: 'all', billing: 'all', search: '' }));
+  const clearAll = () => setF(prev => ({ ...prev, employeeId: [], projectId: [], clientId: [], location: [], workLocation: [], ownerId: [], managerId: [], status: 'all', billing: 'all', search: '' }));
 
   // ── Excel export (server-generated, honours the current filters) ───────────────
   const handleExportExcel = async () => {
@@ -452,6 +476,7 @@ export default function Reports() {
       f.projectId.forEach(v => params.append('project_id', v));
       f.clientId.forEach(v => params.append('client_id', v));
       f.location.forEach(v => params.append('location', v));
+      f.workLocation.forEach(v => params.append('work_location', v));
       f.ownerId.forEach(v => params.append('owner_id', v));
       f.managerId.forEach(v => params.append('manager_id', v));
       if (f.status !== 'all') params.set('status', f.status);
@@ -465,7 +490,7 @@ export default function Reports() {
       setIsExporting(false);
     }
   };
-  const hasActiveFilters = f.employeeId.length > 0 || f.projectId.length > 0 || f.clientId.length > 0 || f.location.length > 0 || f.ownerId.length > 0 || f.managerId.length > 0 || f.status !== 'all' || f.billing !== 'all' || !!f.search;
+  const hasActiveFilters = f.employeeId.length > 0 || f.projectId.length > 0 || f.clientId.length > 0 || f.location.length > 0 || f.workLocation.length > 0 || f.ownerId.length > 0 || f.managerId.length > 0 || f.status !== 'all' || f.billing !== 'all' || !!f.search;
 
   // ── Filtered entries (single source of truth) ─────────────────────────────────
   const filteredEntries = useMemo(() => rawEntries.filter(e => {
@@ -473,6 +498,7 @@ export default function Reports() {
     if (f.projectId.length > 0 && !f.projectId.includes(e.project_id)) return false;
     if (f.clientId.length > 0 && !f.clientId.includes(projectMap.get(e.project_id)?.client_id ?? '')) return false;
     if (f.location.length > 0 && !f.location.includes(locationKeyOf(e.user_id))) return false;
+    if (f.workLocation.length > 0 && !f.workLocation.includes(workLocationOf(e))) return false;
     if (f.ownerId.length > 0 && !f.ownerId.includes(projectMap.get(e.project_id)?.owner_id ?? '')) return false;
     if (f.managerId.length > 0 && !f.managerId.includes(projectMap.get(e.project_id)?.manager_id ?? '')) return false;
     if (f.status === 'normal' && e.status !== 'normal') return false;
@@ -823,6 +849,7 @@ export default function Reports() {
     if (f.projectId.length > 0)  c.push({ key: 'proj', label: `Project: ${namesFor(f.projectId, id => projectMap.get(id)?.name ?? id)}`,    onClear: () => set('projectId', []) });
     if (f.clientId.length > 0)   c.push({ key: 'cli',  label: `Client: ${namesFor(f.clientId, id => clientMap.get(id)?.name ?? id)}`,        onClear: () => set('clientId', []) });
     if (f.location.length > 0)   c.push({ key: 'loc',  label: `Location: ${namesFor(f.location, l => l === NO_LOCATION ? NO_LOCATION_LABEL : l)}`, onClear: () => set('location', []) });
+    if (f.workLocation.length > 0) c.push({ key: 'wloc', label: `Work Location: ${namesFor(f.workLocation, l => l === NO_LOCATION ? NO_LOCATION_LABEL : l)}`, onClear: () => set('workLocation', []) });
     if (f.ownerId.length > 0)    c.push({ key: 'own',  label: `Owner: ${namesFor(f.ownerId, id => availableOwners.find(o => o.value === id)?.label ?? id)}`, onClear: () => set('ownerId', []) });
     if (f.managerId.length > 0)  c.push({ key: 'mgr',  label: `Manager: ${namesFor(f.managerId, id => availableManagers.find(m => m.value === id)?.label ?? id)}`, onClear: () => set('managerId', []) });
     if (f.status !== 'all')     c.push({ key: 'st',   label: `Status: ${f.status === 'on_hold' ? 'On Hold' : 'Normal'}`,        onClear: () => set('status', 'all') });
@@ -926,6 +953,9 @@ export default function Reports() {
                 options={availableLocations}
                 onChange={v => set('location', v)} onClear={() => set('location', [])} />
             )}
+            <MultiFilterSelect label="Work Location" selected={f.workLocation} allLabel="All Work Locations"
+              options={availableWorkLocations}
+              onChange={v => set('workLocation', v)} onClear={() => set('workLocation', [])} />
             {canManage && (
               <MultiFilterSelect label="Owner" selected={f.ownerId} allLabel="All Owners"
                 options={availableOwners}
@@ -1257,6 +1287,7 @@ export default function Reports() {
                         <TableHead className="table-header">Date</TableHead>
                         {canManage && <TableHead className="table-header">Employee</TableHead>}
                         <TableHead className="table-header">Project</TableHead>
+                        <TableHead className="table-header">Location</TableHead>
                         <TableHead className="table-header text-right">Hours</TableHead>
                         <TableHead className="table-header">Status</TableHead>
                       </TableRow>
@@ -1271,6 +1302,11 @@ export default function Reports() {
                             </TableCell>
                           )}
                           <TableCell className="text-sm">{projectMap.get(entry.project_id)?.name ?? 'Unknown'}</TableCell>
+                          <TableCell className="text-sm">
+                            {entry.location
+                              ? <span>{entry.location}</span>
+                              : <span className="text-muted-foreground">{employeeMap.get(entry.user_id)?.location ?? '—'}</span>}
+                          </TableCell>
                           <TableCell className="text-right font-medium">{Number(entry.hours)}h</TableCell>
                           <TableCell>
                             <div className="flex gap-1 flex-wrap">
@@ -1286,7 +1322,7 @@ export default function Reports() {
                       ))}
                       {sortedEntries.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={canManage ? 5 : 4} className="text-center text-muted-foreground py-8">
+                          <TableCell colSpan={canManage ? 6 : 5} className="text-center text-muted-foreground py-8">
                             No entries match the selected filters.
                           </TableCell>
                         </TableRow>
