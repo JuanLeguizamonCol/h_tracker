@@ -121,4 +121,15 @@ export const api = {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }),
+  // Opens a freshly-generated file (PDF) inline in a new tab instead of
+  // saving it to disk — the quickest way to confirm a regenerated document
+  // (e.g. after a fix) without hunting for/overwriting a downloaded file.
+  // Always bypasses the browser cache (see apiFetchBlob).
+  preview: (path: string) =>
+    apiFetchBlob(path).then(blob => {
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      // Delay revocation — the new tab needs time to actually load the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }),
 };

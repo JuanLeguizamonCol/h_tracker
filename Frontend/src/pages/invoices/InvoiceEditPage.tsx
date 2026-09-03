@@ -343,6 +343,22 @@ export default function InvoiceEditPage() {
     }
   };
 
+  const [regeneratingPdf, setRegeneratingPdf] = useState(false);
+  const handleRegeneratePdf = async () => {
+    if (!invoiceId) return;
+    setRegeneratingPdf(true);
+    try {
+      // Always hits the backend fresh (no-store) and opens the result inline
+      // — no downloaded file to second-guess if it's the latest version.
+      await api.preview(`/invoices/${invoiceId}/export/pdf`);
+      toast.success('PDF regenerated.');
+    } catch {
+      toast.error('Failed to regenerate PDF.');
+    } finally {
+      setRegeneratingPdf(false);
+    }
+  };
+
   const handleExpensifyPreview = async () => {
     setExpensifyPreviewing(true);
     setExpensifyPreview(null);
@@ -454,6 +470,17 @@ export default function InvoiceEditPage() {
               <Clock className="h-4 w-4" /> View in Hours Tracker
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleRegeneratePdf}
+            disabled={regeneratingPdf}
+            title="Force a fresh PDF and open it in a new tab — bypasses any cached copy"
+          >
+            {regeneratingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Regenerate PDF
+          </Button>
           <Button
             variant="outline"
             size="sm"
