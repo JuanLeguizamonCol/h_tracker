@@ -634,21 +634,6 @@ export default function Timesheet() {
           <ChevronRight className="h-4 w-4" />
         </Button>
 
-        <Select onValueChange={handleSetWeekLocation}>
-          <SelectTrigger className="h-9 w-[200px] gap-1.5 text-sm">
-            <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <SelectValue placeholder="Set whole week's location" />
-          </SelectTrigger>
-          <SelectContent>
-            {WORK_LOCATION_GROUPS.map(group => (
-              <SelectGroup key={group.label}>
-                <SelectLabel>{group.label}</SelectLabel>
-                {group.options.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
-              </SelectGroup>
-            ))}
-          </SelectContent>
-        </Select>
-
         <div className="flex-1" />
         <AddProjectDropdown projects={addableProjects} onAdd={handleAddProject} />
       </div>
@@ -688,10 +673,25 @@ export default function Timesheet() {
 
               {/* Location row — where each day's hours were actually worked;
                   defaults to the employee's home location, overridable per day
-                  for a short trip (see the week-level picker above for longer ones). */}
+                  for a short trip (use the blue "Set week" picker on the left for longer ones). */}
               <div className="grid border-b bg-muted/30" style={{ gridTemplateColumns: GRID_COLS }}>
-                <div className="sticky left-0 z-10 bg-muted/30 px-3 py-1.5 border-r flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                  <MapPin className="h-3.5 w-3.5" /> Location
+                <div className="sticky left-0 z-10 bg-muted/30 px-3 py-1.5 border-r flex flex-col gap-1">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                    <MapPin className="h-3.5 w-3.5" /> Location
+                  </span>
+                  <Select onValueChange={handleSetWeekLocation}>
+                    <SelectTrigger className="h-6 w-fit gap-1 px-2 text-[11px] font-medium bg-blue-600 text-white border-blue-600 hover:bg-blue-700 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0">
+                      <SelectValue placeholder="Set week" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WORK_LOCATION_GROUPS.map(group => (
+                        <SelectGroup key={group.label}>
+                          <SelectLabel>{group.label}</SelectLabel>
+                          {group.options.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 {weekDates.map((date, i) => {
                   const dateStr = format(date, 'yyyy-MM-dd');
@@ -733,15 +733,18 @@ export default function Timesheet() {
               {rows.map((row, rowIdx) => {
                 const rowTotal = Object.values(row.days).reduce((s, d) => s + d.hours, 0);
                 const isOdd = rowIdx % 2 !== 0;
+                // Non-billable rows get a distinctly darker gray so they stand
+                // out from billable ones, instead of the regular zebra stripe.
+                const rowBg = !row.billable ? 'bg-slate-200/70 dark:bg-slate-800/50' : (isOdd ? 'bg-muted/20' : '');
 
                 return (
                   <div
                     key={`${row.projectId}-${row.billable}`}
-                    className={`grid items-stretch border-b last:border-b-0 group ${isOdd ? 'bg-muted/20' : ''}`}
+                    className={`grid items-stretch border-b last:border-b-0 group ${rowBg}`}
                     style={{ gridTemplateColumns: GRID_COLS }}
                   >
                     {/* Project info — sticky */}
-                    <div className={`sticky left-0 z-10 px-3 py-2.5 border-r flex flex-col justify-center gap-0.5 ${isOdd ? 'bg-muted/20' : 'bg-card'}`}>
+                    <div className={`sticky left-0 z-10 px-3 py-2.5 border-r flex flex-col justify-center gap-0.5 ${rowBg || 'bg-card'}`}>
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-sm font-medium text-foreground truncate leading-snug">
                           {row.projectName}
@@ -759,7 +762,7 @@ export default function Timesheet() {
                       )}
                       {!row.isInternal && (
                         <div className="flex items-center gap-1.5 mt-1">
-                          <span className={`inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-semibold ${
+                          <span className={`inline-flex items-center rounded-full px-1.5 py-0 text-[13px] font-semibold ${
                             row.billable
                               ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
                               : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
