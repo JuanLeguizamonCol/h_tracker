@@ -56,6 +56,11 @@ class InvoiceOut(BaseModel):
     signatory_title: Optional[str] = None
     signatory_employee_id: Optional[str] = None
     owner_company: Optional[str] = 'IPC'
+    bill_to_contact: Optional[str] = None
+    bill_to_title: Optional[str] = None
+    bill_to_company: Optional[str] = None
+    bill_to_address: Optional[str] = None
+    bill_to_city_state_zip: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -92,6 +97,8 @@ class InvoiceEditLine(BaseModel):
     employee_name: str
     title: Optional[str] = None
     role: Optional[str] = None
+    role_id: Optional[str] = None
+    project_role_rate: Optional[float] = None
     hours: float
     hourly_rate: float
     discount_type: Optional[str] = None
@@ -157,6 +164,9 @@ class OnHoldEntryPatch(BaseModel):
 
 class InvoicePatch(BaseModel):
     status: Optional[str] = None
+    # Admin-only — see patch_invoice. Manually renumbering an already-issued
+    # invoice is a deliberate correction, not part of the normal auto flow.
+    invoice_number: Optional[str] = None
     cap_amount: Optional[float] = None
     fixed_fee_amount: Optional[float] = None
     issue_date: Optional[date] = None
@@ -168,6 +178,13 @@ class InvoicePatch(BaseModel):
     signatory_title: Optional[str] = None
     signatory_employee_id: Optional[str] = None
     owner_company: Optional[str] = None
+    # Per-invoice "Bill To" overrides — empty string clears back to the
+    # client's own field, None leaves it untouched.
+    bill_to_contact: Optional[str] = None
+    bill_to_title: Optional[str] = None
+    bill_to_company: Optional[str] = None
+    bill_to_address: Optional[str] = None
+    bill_to_city_state_zip: Optional[str] = None
     lines: Optional[List[InvoiceLinePatch]] = None
     expenses: Optional[List[InvoiceExpensePatch]] = None
     on_hold_entries: Optional[List[OnHoldEntryPatch]] = None

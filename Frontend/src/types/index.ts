@@ -341,10 +341,17 @@ export interface Invoice {
   invoice_number: string | null;
   issue_date: string | null;
   due_date: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
   signatory_name?: string | null;
   signatory_title?: string | null;
   signatory_employee_id?: string | null;
   owner_company: string;
+  bill_to_contact?: string | null;
+  bill_to_title?: string | null;
+  bill_to_company?: string | null;
+  bill_to_address?: string | null;
+  bill_to_city_state_zip?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -370,6 +377,10 @@ export interface InvoiceEditLine {
   employee_name: string;
   title: string | null;
   role: string | null;
+  role_id?: string | null;
+  // Current rate on the project's role, when this line has one — 0 means the
+  // role has no rate assigned yet, so fixing it here also updates the project.
+  project_role_rate?: number | null;
   hours: number;
   hourly_rate: number;
   discount_type: 'amount' | 'percent' | null;
@@ -380,7 +391,12 @@ export interface InvoiceEditLine {
 
 export interface InvoiceEditData {
   invoice: Invoice;
-  client: { id: string; name: string; email: string | null; phone: string | null } | null;
+  client: {
+    id: string; name: string; email: string | null; phone: string | null;
+    manager_name?: string | null; job_title?: string | null;
+    street_address_1?: string | null; street_address_2?: string | null;
+    city?: string | null; state?: string | null; zip?: string | null;
+  } | null;
   project: {
     id: string; name: string; client_id: string;
     is_fixed_fee?: boolean;
@@ -437,6 +453,11 @@ export interface InvoicePatch {
   signatory_title?: string | null;
   signatory_employee_id?: string | null;
   owner_company?: string | null;
+  bill_to_contact?: string | null;
+  bill_to_title?: string | null;
+  bill_to_company?: string | null;
+  bill_to_address?: string | null;
+  bill_to_city_state_zip?: string | null;
   lines?: InvoiceLinePatch[];
   expenses?: InvoiceExpensePatch[];
   on_hold_entries?: OnHoldEntryPatch[];
@@ -494,6 +515,7 @@ export interface InvoiceLine {
   user_id: string;
   employee_name: string;
   role_name: string | null;
+  role_id?: string | null;
   hours: number;
   rate_snapshot: number;
   amount: number;

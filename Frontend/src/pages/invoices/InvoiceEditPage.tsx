@@ -4,7 +4,8 @@ import { ArrowLeft, Save, Loader2, Plus, Trash2, Clock, FileDown, FileSpreadshee
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useInvoiceEditData, usePatchInvoice } from '@/hooks/useInvoices';
-import { InvoiceEditLine, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
+import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch } from '@/types';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,6 +46,19 @@ type LocalExpense = Partial<InvoiceExpense> & {
   _tempId?: string;
 };
 
+// Mirrors the backend's fallback (services/export_pdf.py) so the "Bill To"
+// fields start pre-filled with what the PDF would show today, not blank.
+function defaultBillTo(client: InvoiceEditData['client']) {
+  if (!client) return { contact: '', title: '', company: '', address: '', cityStateZip: '' };
+  const contact = client.manager_name || client.name || '';
+  const title = client.job_title || '';
+  const company = client.name || '';
+  const address = [client.street_address_1, client.street_address_2].filter(Boolean).join(', ');
+  const cityState = [client.city, client.state].filter(Boolean).join(', ');
+  const cityStateZip = client.zip ? `${cityState} ${client.zip}`.trim() : cityState;
+  return { contact, title, company, address, cityStateZip };
+}
+
 function computeLineTotals(line: LocalLine) {
   const subtotal = line._hours * line._rate;
   const discountDollars =
@@ -60,6 +74,7 @@ export default function InvoiceEditPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const navigate = useNavigate();
   const patchInvoice = usePatchInvoice();
+  const { isAdmin } = useAuth();
 
   const { data, isLoading } = useInvoiceEditData(invoiceId);
 
@@ -78,6 +93,11 @@ export default function InvoiceEditPage() {
   const [signatoryTitle, setSignatoryTitle] = useState('');
   const [ownerCompany, setOwnerCompany] = useState<CompanyCode>('IPC');
   const [fixedFeeAmount, setFixedFeeAmount] = useState<string>('');
+  const [billToContact, setBillToContact] = useState('');
+  const [billToTitle, setBillToTitle] = useState('');
+  const [billToCompany, setBillToCompany] = useState('');
+  const [billToAddress, setBillToAddress] = useState('');
+  const [billToCityStateZip, setBillToCityStateZip] = useState('');
   const [initialized, setInitialized] = useState(false);
 
   // Export state
@@ -131,6 +151,12 @@ export default function InvoiceEditPage() {
     const company = ((data.invoice as any).owner_company || data.project?.owner_company || 'IPC') as CompanyCode;
     setOwnerCompany(company);
     setFixedFeeAmount(data.invoice.fixed_fee_amount != null ? String(data.invoice.fixed_fee_amount) : '');
+    const billToDefaults = defaultBillTo(data.client);
+    setBillToContact(data.invoice.bill_to_contact || billToDefaults.contact);
+    setBillToTitle(data.invoice.bill_to_title || billToDefaults.title);
+    setBillToCompany(data.invoice.bill_to_company || billToDefaults.company);
+    setBillToAddress(data.invoice.bill_to_address || billToDefaults.address);
+    setBillToCityStateZip(data.invoice.bill_to_city_state_zip || billToDefaults.cityStateZip);
     setIsDirty(false);
     setInitialized(true);
   }
@@ -273,6 +299,7 @@ export default function InvoiceEditPage() {
         id: invoiceId,
         patch: {
           status,
+          ...(isAdmin && invoiceNumber !== (data?.invoice.invoice_number || '') ? { invoice_number: invoiceNumber } : {}),
           cap_amount: capAmount ? parseFloat(capAmount) : null,
           fixed_fee_amount: isFlatBilling ? (parseFloat(fixedFeeAmount) || 0) : undefined,
           issue_date: issueDate || null,
@@ -283,6 +310,11 @@ export default function InvoiceEditPage() {
           signatory_name: signatoryName || null,
           signatory_title: signatoryTitle || null,
           owner_company: ownerCompany,
+          bill_to_contact: billToContact || null,
+          bill_to_title: billToTitle || null,
+          bill_to_company: billToCompany || null,
+          bill_to_address: billToAddress || null,
+          bill_to_city_state_zip: billToCityStateZip || null,
           lines: linePatches,
           expenses: expensePatches,
           on_hold_entries: onHoldEntries,
@@ -518,13 +550,22 @@ export default function InvoiceEditPage() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Invoice Number</Label>
-                  <div
-                    title="Invoice number is locked to the client and never changes after creation"
-                    className="flex items-center gap-1.5 rounded-md border border-input bg-muted/40 px-2.5 py-1.5 text-sm h-8 cursor-default select-none"
-                  >
-                    <span className="font-mono font-semibold flex-1 truncate">{invoiceNumber || '—'}</span>
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">Locked</span>
-                  </div>
+                  {isAdmin ? (
+                    <Input
+                      className="h-8 font-mono"
+                      value={invoiceNumber}
+                      onChange={e => { setInvoiceNumber(e.target.value); setIsDirty(true); }}
+                      title="Admin-only: manually renumber this invoice"
+                    />
+                  ) : (
+                    <div
+                      title="Only Admin users can change the invoice number"
+                      className="flex items-center gap-1.5 rounded-md border border-input bg-muted/40 px-2.5 py-1.5 text-sm h-8 cursor-default select-none"
+                    >
+                      <span className="font-mono font-semibold flex-1 truncate">{invoiceNumber || '—'}</span>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">Locked</span>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Issue Date</Label>
@@ -600,6 +641,61 @@ export default function InvoiceEditPage() {
                     value={notes}
                     onChange={e => setNotes(e.target.value)}
                     placeholder="Internal notes…"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Bill To (PDF cover letter) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Bill To (PDF)</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Pre-filled from the client record — edit here to fix a wrong or duplicated
+                field on this invoice only, without changing the client.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Contact Name</Label>
+                  <Input
+                    className="h-8"
+                    value={billToContact}
+                    onChange={e => { setBillToContact(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Contact Title</Label>
+                  <Input
+                    className="h-8"
+                    value={billToTitle}
+                    onChange={e => { setBillToTitle(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Company Name</Label>
+                  <Input
+                    className="h-8"
+                    value={billToCompany}
+                    onChange={e => { setBillToCompany(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label className="text-xs">Address</Label>
+                  <Input
+                    className="h-8"
+                    value={billToAddress}
+                    onChange={e => { setBillToAddress(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">City, State ZIP</Label>
+                  <Input
+                    className="h-8"
+                    value={billToCityStateZip}
+                    onChange={e => { setBillToCityStateZip(e.target.value); setIsDirty(true); }}
                   />
                 </div>
               </div>
@@ -717,29 +813,36 @@ export default function InvoiceEditPage() {
                               {!isFlatBilling && (
                                 <>
                                   <TableCell className="text-right">
-                                    <div className="flex items-center justify-end gap-1">
-                                      <span className="text-xs text-muted-foreground">$</span>
-                                      <Input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={line._rateInput}
-                                        onFocus={e => e.target.select()}
-                                        onChange={e => {
-                                          const raw = e.target.value;
-                                          const num = parseFloat(raw);
-                                          updateLine(line.id, {
-                                            _rateInput: raw,
-                                            ...(raw !== '' && !isNaN(num) ? { _rate: num } : {}),
-                                          });
-                                        }}
-                                        onBlur={e => {
-                                          const num = parseFloat(e.target.value);
-                                          const resolved = isNaN(num) ? 0 : num;
-                                          updateLine(line.id, { _rate: resolved, _rateInput: String(resolved) });
-                                        }}
-                                        className="w-20 h-7 text-right text-sm"
-                                      />
+                                    <div className="flex flex-col items-end gap-0.5">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <span className="text-xs text-muted-foreground">$</span>
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={line._rateInput}
+                                          onFocus={e => e.target.select()}
+                                          onChange={e => {
+                                            const raw = e.target.value;
+                                            const num = parseFloat(raw);
+                                            updateLine(line.id, {
+                                              _rateInput: raw,
+                                              ...(raw !== '' && !isNaN(num) ? { _rate: num } : {}),
+                                            });
+                                          }}
+                                          onBlur={e => {
+                                            const num = parseFloat(e.target.value);
+                                            const resolved = isNaN(num) ? 0 : num;
+                                            updateLine(line.id, { _rate: resolved, _rateInput: String(resolved) });
+                                          }}
+                                          className="w-20 h-7 text-right text-sm"
+                                        />
+                                      </div>
+                                      {line.role_id && line.project_role_rate === 0 && line._rate > 0 && (
+                                        <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                                          Will also set on project
+                                        </span>
+                                      )}
                                     </div>
                                   </TableCell>
                                   <TableCell className="text-right text-sm">

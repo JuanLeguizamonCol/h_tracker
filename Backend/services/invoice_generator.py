@@ -248,6 +248,7 @@ def generate_invoice_for_project_period(
                 user_id=uid,
                 employee_name=data["name"],
                 role_name=role.name if role else None,
+                role_id=role.id if role else None,
                 hours=data["hours"],
                 rate_snapshot=rate,
                 amount=amount,

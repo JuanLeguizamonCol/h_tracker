@@ -445,19 +445,29 @@ def generate_invoice_html(edit_data: dict) -> str:
     signatory_title = invoice.get("signatory_title") or ""
 
     # ── Client fields ─────────────────────────────────────────────────────────
-    client_company = client.get("name") or "—"
-    client_contact = client.get("manager_name") or client.get("name") or "—"
-    client_title = client.get("job_title") or client.get("manager_title") or ""
+    # Per-invoice "Bill To" overrides (see schemas/invoice.py) win when set —
+    # they let an admin fix a duplicated/wrong field for one invoice (e.g. no
+    # manager_name on file, so the contact line repeats the company name)
+    # without touching the shared Client record.
+    default_company = client.get("name") or "—"
+    default_contact = client.get("manager_name") or client.get("name") or "—"
+    default_title = client.get("job_title") or client.get("manager_title") or ""
 
     addr1 = client.get("street_address_1") or ""
     addr2 = client.get("street_address_2") or ""
-    client_address = ", ".join(part for part in [addr1, addr2] if part) or client.get("address") or ""
+    default_address = ", ".join(part for part in [addr1, addr2] if part) or client.get("address") or ""
     city = client.get("city") or ""
     state = client.get("state") or ""
     zip_ = client.get("zip") or ""
-    client_city_state_zip = ", ".join(part for part in [city, state] if part)
+    default_city_state_zip = ", ".join(part for part in [city, state] if part)
     if zip_:
-        client_city_state_zip = f"{client_city_state_zip} {zip_}".strip(", ")
+        default_city_state_zip = f"{default_city_state_zip} {zip_}".strip(", ")
+
+    client_company = invoice.get("bill_to_company") or default_company
+    client_contact = invoice.get("bill_to_contact") or default_contact
+    client_title = invoice.get("bill_to_title") or default_title
+    client_address = invoice.get("bill_to_address") or default_address
+    client_city_state_zip = invoice.get("bill_to_city_state_zip") or default_city_state_zip
 
     # Salutation: contact name + colon  →  "Dear John Smith:"
     greeting = f"{client_contact}:"

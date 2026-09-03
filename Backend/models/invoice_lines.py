@@ -14,6 +14,9 @@ class InvoiceLine(Base):
     user_id = Column(String, nullable=True)  # nullable — no FK, allows manual lines without an employee
     employee_name = Column(String, nullable=False)
     role_name = Column(String, nullable=True)
+    # The ProjectRole this line was billed at, if any — lets a rate fix made
+    # in the invoice panel be pushed back onto the project (see patch_invoice).
+    role_id = Column(String, ForeignKey("project_roles.id"), nullable=True)
     hours = Column(Numeric(10, 2), nullable=False)
     rate_snapshot = Column(Numeric(10, 2), nullable=False)
     amount = Column(Numeric(12, 2), nullable=False)

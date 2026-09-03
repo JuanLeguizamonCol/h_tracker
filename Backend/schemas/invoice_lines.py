@@ -9,6 +9,7 @@ class InvoiceLineBase(BaseModel):
     user_id: Optional[str] = None
     employee_name: str
     role_name: Optional[str] = None
+    role_id: Optional[str] = None
     hours: float
     rate_snapshot: float
     amount: float
@@ -23,6 +24,7 @@ class InvoiceLineUpdate(BaseModel):
     user_id: Optional[str] = None
     employee_name: Optional[str] = None
     role_name: Optional[str] = None
+    role_id: Optional[str] = None
     hours: Optional[float] = None
     rate_snapshot: Optional[float] = None
     amount: Optional[float] = None

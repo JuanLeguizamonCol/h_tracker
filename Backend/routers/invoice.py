@@ -26,6 +26,7 @@ from models.invoice_expenses import InvoiceExpense
 from models.time_entries import TimeEntry
 from models.scheduler_log import SchedulerLog
 from models.projects import Project
+from models.project_roles import ProjectRole
 from models.clients import Client
 from models.employees import Employee
 from models.user_roles import UserRole
@@ -292,6 +293,13 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
         .all()
     ) if line_user_ids else {}
 
+    # Current rates for any ProjectRole a line was billed at — used to hint
+    # in the panel when a line's rate can be pushed back onto the project.
+    line_role_ids = {ln.role_id for ln in invoice.lines if ln.role_id}
+    rate_by_role_id = dict(
+        db.query(ProjectRole.id, ProjectRole.hourly_rate_usd).filter(ProjectRole.id.in_(line_role_ids)).all()
+    ) if line_role_ids else {}
+
     lines_out = []
     for line in invoice.lines:
         # Preserve prior semantics: fall back to the line's own hours when there
@@ -303,6 +311,8 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "employee_name": line.employee_name,
             "title": line.role_name,
             "role": role_by_user.get(line.user_id),
+            "role_id": line.role_id,
+            "project_role_rate": float(rate_by_role_id[line.role_id]) if line.role_id in rate_by_role_id else None,
             "hours": float(line.hours),
             "hourly_rate": float(line.rate_snapshot),
             "discount_type": line.discount_type,
@@ -349,6 +359,11 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "signatory_employee_id": invoice.signatory_employee_id,
             "signatory_signature_file_name": signatory.signature_file_name if signatory else None,
             "owner_company": invoice.owner_company or "IPC",
+            "bill_to_contact": invoice.bill_to_contact,
+            "bill_to_title": invoice.bill_to_title,
+            "bill_to_company": invoice.bill_to_company,
+            "bill_to_address": invoice.bill_to_address,
+            "bill_to_city_state_zip": invoice.bill_to_city_state_zip,
             "created_at": invoice.created_at,
             "updated_at": invoice.updated_at,
         },
@@ -446,13 +461,31 @@ def patch_invoice(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
     _ensure_can_access_invoice(invoice, current_employee, db)
 
+    # Manual invoice-number override — Admin only. A deliberate correction
+    # (e.g. re-sequencing after a mistake), not part of the normal
+    # auto-generated numbering flow, so it's gated tighter than the rest of
+    # the panel (project owner).
+    if patch_in.invoice_number is not None and patch_in.invoice_number != invoice.invoice_number:
+        if get_role(db, current_employee.id) != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Admin users can manually change an invoice number.",
+            )
+        new_number = patch_in.invoice_number.strip()
+        if not new_number:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice number cannot be empty.")
+        invoice.invoice_number = new_number
+
     # Update simple invoice fields
     # Note: owner_company no longer drives invoice numbering — the number is
-    # locked to the client at creation time and never changes.
+    # locked to the client at creation time and only an Admin can change it
+    # afterward (handled above).
     simple_fields = [
         "status", "cap_amount", "fixed_fee_amount", "issue_date", "due_date",
         "period_start", "period_end", "notes", "signatory_name", "signatory_title",
         "signatory_employee_id", "owner_company",
+        "bill_to_contact", "bill_to_title", "bill_to_company",
+        "bill_to_address", "bill_to_city_state_zip",
     ]
     for field in simple_fields:
         value = getattr(patch_in, field)
@@ -470,6 +503,15 @@ def patch_invoice(
                 if line_patch.hours is not None:
                     line.hours = line_patch.hours
                 if line_patch.rate_snapshot is not None:
+                    # If the project never had a rate for this line's role
+                    # (role assigned but hourly_rate_usd left at 0), fixing it
+                    # here also sets it on the project so future invoices for
+                    # this role bill correctly without needing the same fix
+                    # again.
+                    if line.role_id and line_patch.rate_snapshot != float(line.rate_snapshot):
+                        role = db.query(ProjectRole).filter(ProjectRole.id == line.role_id).first()
+                        if role and float(role.hourly_rate_usd or 0) == 0:
+                            role.hourly_rate_usd = line_patch.rate_snapshot
                     line.rate_snapshot = line_patch.rate_snapshot
                 if line_patch.discount_type is not None:
                     line.discount_type = line_patch.discount_type
@@ -547,7 +589,14 @@ def patch_invoice(
             else:
                 delete_on_hold_entry(db, invoice_id=invoice_id, line_id=entry.line_id)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That invoice number is already in use by another invoice.",
+        )
     db.refresh(invoice)
     return invoice
 

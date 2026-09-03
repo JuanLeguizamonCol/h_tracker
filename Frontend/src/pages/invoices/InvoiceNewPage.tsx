@@ -121,6 +121,7 @@ export default function InvoiceNewPage() {
             user_id: eh.userId,
             employee_name: eh.name,
             role_name: role?.name || null,
+            role_id: role?.id || null,
             hours: eh.hours,
             rate_snapshot: rate,
             amount: eh.hours * rate,

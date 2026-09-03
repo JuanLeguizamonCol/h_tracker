@@ -53,6 +53,15 @@ class Invoice(Base):
     # signature IMAGE is resolved from this employee, not from name matching.
     signatory_employee_id = Column(String, ForeignKey("employees.id"), nullable=True)
     owner_company = Column(String(10), nullable=True, default='IPC')
+    # Per-invoice "Bill To" overrides — null falls back to the client's own
+    # fields (see services/export_pdf.py). Lets an admin fix a duplicated or
+    # wrong field (e.g. no manager_name on file, so contact == company) on a
+    # single invoice without editing the shared Client record.
+    bill_to_contact = Column(String, nullable=True)
+    bill_to_title = Column(String, nullable=True)
+    bill_to_company = Column(String, nullable=True)
+    bill_to_address = Column(String, nullable=True)
+    bill_to_city_state_zip = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
