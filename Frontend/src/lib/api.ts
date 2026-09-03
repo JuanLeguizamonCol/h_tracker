@@ -44,7 +44,9 @@ async function apiFetchBlob(path: string): Promise<Blob> {
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const response = await fetch(apiUrl(path), { headers });
+  // Exports (PDF/XLSX) must always be freshly generated — never served from
+  // the browser's HTTP cache, which would silently mask a fix on the backend.
+  const response = await fetch(apiUrl(path), { headers, cache: 'no-store' });
   if (response.status === 401) {
     clearStoredToken();
     window.location.href = '/auth';

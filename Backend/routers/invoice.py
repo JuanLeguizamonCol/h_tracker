@@ -38,6 +38,12 @@ import uuid
 
 invoice_router = APIRouter(prefix="/invoices", tags=["invoices"])
 
+# Exported files (PDF/XLSX) must always reflect the latest data/assets on
+# disk — without this, browsers can silently reuse a stale cached response
+# for the same URL (e.g. after fixing the invoice logo or editing a field),
+# making a real fix look like it "didn't work".
+_NO_CACHE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
 
 def _ensure_can_invoice_project(project: Project, employee: Employee, db: Session) -> None:
     """Only the project's owner may invoice it. Legacy projects without an owner
@@ -414,7 +420,7 @@ def export_invoices_report(
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', **_NO_CACHE_HEADERS},
     )
 
 
@@ -617,7 +623,7 @@ def export_invoice_pdf(
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="INV-{inv_label}.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="INV-{inv_label}.pdf"', **_NO_CACHE_HEADERS},
     )
 
 
@@ -637,7 +643,7 @@ def export_invoice_xlsx(
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="INV-{inv_label}.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="INV-{inv_label}.xlsx"', **_NO_CACHE_HEADERS},
     )
 
 

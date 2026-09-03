@@ -66,7 +66,9 @@ COMPANY_PROFILES: dict[str, dict] = {
         "address":        "",
         "city_state_zip": "",
         "phone":          "",
-        "logo_file":      os.path.join(LOGOS_DIR, "logo_pi.png"),
+        # Pegasus has no separate logo file — both companies bill under the
+        # same Impact Point logo.
+        "logo_file":      LOGO_FILE,
         "bank": {
             "bank_name":      "",
             "aba":            "",

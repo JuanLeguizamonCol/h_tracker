@@ -482,9 +482,12 @@ def generate_invoice_html(edit_data: dict) -> str:
     company_phone = profile["phone"]
 
     # ── Logo ──────────────────────────────────────────────────────────────────
+    # Every company profile shares the same Impact Point logo file (see
+    # invoice_config.py) — this only falls back to text if that file itself
+    # is missing from the running container's assets/logos/.
     logo_file = profile.get("logo_file") or LOGO_FILE
     logo_uri = _get_image_base64(logo_file)
-    if logo_uri is None and owner_company != "IPC":
+    if logo_uri is None:
         logger.warning("⚠️ %s not found in assets/logos/ — using text fallback", logo_file)
     if logo_uri:
         logo_img = f'<img src="{logo_uri}" alt="Logo"/>'
