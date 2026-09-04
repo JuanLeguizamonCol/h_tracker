@@ -18,6 +18,17 @@ COPY Backend/ .
 # at all and every invoice's logo would silently fall back to plain text.
 COPY assets/ ./assets/
 
+# invoice_config.py falls back to computing ASSETS_DIR as two directories up
+# from its own file (services/../../assets) — correct when running from the
+# repo source tree (Backend/services/../../ = repo root), but wrong in this
+# image: `COPY Backend/ .` flattens Backend/'s contents straight into /app,
+# so services/ ends up only one level below /app, not two below the repo
+# root. That relative math then lands on /assets (doesn't exist) instead of
+# the /app/assets copied above — silently falling back to text instead of
+# the logo in every invoice PDF. Set it explicitly so the container never
+# depends on that path arithmetic.
+ENV ASSETS_DIR=/app/assets
+
 RUN mkdir -p /app/uploads
 
 EXPOSE 8000

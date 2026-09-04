@@ -186,3 +186,7 @@ nul
 !Frontend/src/lib/**
 # Local-only reusable infra template (not part of this app)
 infra-template/
+
+
+#Graphify
+graphify-out/
