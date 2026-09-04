@@ -5,12 +5,20 @@ export interface Signatory {
   title: string;
 }
 
+export interface CompanyBank {
+  bank_name: string;
+  aba: string;
+  account_name: string;
+  account_number: string;
+}
+
 export interface CompanyProfile {
   name: string;
   legal_name: string;
   address: string;
   city_state_zip: string;
   phone: string;
+  bank: CompanyBank;
 }
 
 export const SIGNATORIES: Record<CompanyCode, Signatory[]> = {
@@ -32,6 +40,12 @@ export const COMPANY_PROFILES: Record<CompanyCode, CompanyProfile> = {
     address:        '104 Crandon Blvd., Suite #404',
     city_state_zip: 'Key Biscayne, FL, 33149',
     phone:          '+1 (786) 208 - 0588',
+    bank: {
+      bank_name:      'Capital One',
+      aba:            '065000090',
+      account_name:   'Impact Point Co., LLC',
+      account_number: '3316971352',
+    },
   },
   PI: {
     name:           'Pegasus Insights',
@@ -39,6 +53,12 @@ export const COMPANY_PROFILES: Record<CompanyCode, CompanyProfile> = {
     address:        '',
     city_state_zip: '',
     phone:          '',
+    bank: {
+      bank_name:      '',
+      aba:            '',
+      account_name:   'Pegasus Insights LLC',
+      account_number: '',
+    },
   },
 };
 

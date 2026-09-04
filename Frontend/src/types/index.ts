@@ -352,6 +352,10 @@ export interface Invoice {
   bill_to_company?: string | null;
   bill_to_address?: string | null;
   bill_to_city_state_zip?: string | null;
+  bank_name?: string | null;
+  bank_aba?: string | null;
+  bank_account_name?: string | null;
+  bank_account_number?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -458,6 +462,10 @@ export interface InvoicePatch {
   bill_to_company?: string | null;
   bill_to_address?: string | null;
   bill_to_city_state_zip?: string | null;
+  bank_name?: string | null;
+  bank_aba?: string | null;
+  bank_account_name?: string | null;
+  bank_account_number?: string | null;
   lines?: InvoiceLinePatch[];
   expenses?: InvoiceExpensePatch[];
   on_hold_entries?: OnHoldEntryPatch[];

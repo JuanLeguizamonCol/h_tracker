@@ -61,6 +61,10 @@ class InvoiceOut(BaseModel):
     bill_to_company: Optional[str] = None
     bill_to_address: Optional[str] = None
     bill_to_city_state_zip: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_aba: Optional[str] = None
+    bank_account_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -185,6 +189,10 @@ class InvoicePatch(BaseModel):
     bill_to_company: Optional[str] = None
     bill_to_address: Optional[str] = None
     bill_to_city_state_zip: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_aba: Optional[str] = None
+    bank_account_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
     lines: Optional[List[InvoiceLinePatch]] = None
     expenses: Optional[List[InvoiceExpensePatch]] = None
     on_hold_entries: Optional[List[OnHoldEntryPatch]] = None

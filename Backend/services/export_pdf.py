@@ -475,7 +475,16 @@ def generate_invoice_html(edit_data: dict) -> str:
     # ── Company profile ───────────────────────────────────────────────────────
     owner_company = invoice.get("owner_company") or "IPC"
     profile = COMPANY_PROFILES.get(owner_company, COMPANY_PROFILES["IPC"])
-    bank = profile["bank"]
+    default_bank = profile["bank"]
+
+    # Per-invoice ACH overrides — win when set, since Pegasus (PI) has no
+    # bank profile on file today and IPC's may need a one-off correction.
+    bank = {
+        "bank_name": invoice.get("bank_name") or default_bank["bank_name"],
+        "aba": invoice.get("bank_aba") or default_bank["aba"],
+        "account_name": invoice.get("bank_account_name") or default_bank["account_name"],
+        "account_number": invoice.get("bank_account_number") or default_bank["account_number"],
+    }
 
     company_address = profile["address"]
     company_city_state_zip = profile["city_state_zip"]

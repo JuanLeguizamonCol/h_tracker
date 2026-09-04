@@ -62,6 +62,13 @@ class Invoice(Base):
     bill_to_company = Column(String, nullable=True)
     bill_to_address = Column(String, nullable=True)
     bill_to_city_state_zip = Column(String, nullable=True)
+    # Per-invoice ACH/bank overrides — null falls back to the owner company's
+    # static bank profile (see services/invoice_config.py), which is blank
+    # for Pegasus (PI) until filled in on an invoice.
+    bank_name = Column(String, nullable=True)
+    bank_aba = Column(String, nullable=True)
+    bank_account_name = Column(String, nullable=True)
+    bank_account_number = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))

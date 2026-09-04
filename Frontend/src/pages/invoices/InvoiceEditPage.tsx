@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
-import { getSignatoriesForCompany, type CompanyCode } from '@/lib/invoice/signatories';
+import { getSignatoriesForCompany, getCompanyProfile, type CompanyCode } from '@/lib/invoice/signatories';
 
 const EXPENSE_CATEGORIES = ['Airfare', 'Hotel', 'Parking / Transportation', 'Meals', 'Other'];
 
@@ -98,6 +98,10 @@ export default function InvoiceEditPage() {
   const [billToCompany, setBillToCompany] = useState('');
   const [billToAddress, setBillToAddress] = useState('');
   const [billToCityStateZip, setBillToCityStateZip] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [bankAba, setBankAba] = useState('');
+  const [bankAccountName, setBankAccountName] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [initialized, setInitialized] = useState(false);
 
   // Export state
@@ -157,6 +161,11 @@ export default function InvoiceEditPage() {
     setBillToCompany(data.invoice.bill_to_company || billToDefaults.company);
     setBillToAddress(data.invoice.bill_to_address || billToDefaults.address);
     setBillToCityStateZip(data.invoice.bill_to_city_state_zip || billToDefaults.cityStateZip);
+    const defaultBank = getCompanyProfile(company).bank;
+    setBankName(data.invoice.bank_name || defaultBank.bank_name);
+    setBankAba(data.invoice.bank_aba || defaultBank.aba);
+    setBankAccountName(data.invoice.bank_account_name || defaultBank.account_name);
+    setBankAccountNumber(data.invoice.bank_account_number || defaultBank.account_number);
     setIsDirty(false);
     setInitialized(true);
   }
@@ -315,6 +324,10 @@ export default function InvoiceEditPage() {
           bill_to_company: billToCompany || null,
           bill_to_address: billToAddress || null,
           bill_to_city_state_zip: billToCityStateZip || null,
+          bank_name: bankName || null,
+          bank_aba: bankAba || null,
+          bank_account_name: bankAccountName || null,
+          bank_account_number: bankAccountNumber || null,
           lines: linePatches,
           expenses: expensePatches,
           on_hold_entries: onHoldEntries,
@@ -546,6 +559,11 @@ export default function InvoiceEditPage() {
                         setIsDirty(true);
                         setSignatoryName('');
                         setSignatoryTitle('');
+                        const bank = getCompanyProfile(co).bank;
+                        setBankName(bank.bank_name);
+                        setBankAba(bank.aba);
+                        setBankAccountName(bank.account_name);
+                        setBankAccountNumber(bank.account_number);
                       }}
                       className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-semibold transition-colors ${
                         ownerCompany === co
@@ -723,6 +741,53 @@ export default function InvoiceEditPage() {
                     className="h-8"
                     value={billToCityStateZip}
                     onChange={e => { setBillToCityStateZip(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ACH / Bank Details (PDF) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">ACH Instructions (PDF)</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Pre-filled from the owner company's bank profile — Pegasus (PI) has none on file
+                by default, so fill it in here for this invoice.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1">
+                  <Label className="text-xs">Bank</Label>
+                  <Input
+                    className="h-8"
+                    value={bankName}
+                    onChange={e => { setBankName(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">ABA</Label>
+                  <Input
+                    className="h-8"
+                    value={bankAba}
+                    onChange={e => { setBankAba(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Account Name</Label>
+                  <Input
+                    className="h-8"
+                    value={bankAccountName}
+                    onChange={e => { setBankAccountName(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Account Number</Label>
+                  <Input
+                    className="h-8"
+                    value={bankAccountNumber}
+                    onChange={e => { setBankAccountNumber(e.target.value); setIsDirty(true); }}
                   />
                 </div>
               </div>

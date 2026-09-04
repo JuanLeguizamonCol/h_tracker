@@ -370,6 +370,10 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "bill_to_company": invoice.bill_to_company,
             "bill_to_address": invoice.bill_to_address,
             "bill_to_city_state_zip": invoice.bill_to_city_state_zip,
+            "bank_name": invoice.bank_name,
+            "bank_aba": invoice.bank_aba,
+            "bank_account_name": invoice.bank_account_name,
+            "bank_account_number": invoice.bank_account_number,
             "created_at": invoice.created_at,
             "updated_at": invoice.updated_at,
         },
@@ -492,6 +496,7 @@ def patch_invoice(
         "signatory_employee_id", "owner_company",
         "bill_to_contact", "bill_to_title", "bill_to_company",
         "bill_to_address", "bill_to_city_state_zip",
+        "bank_name", "bank_aba", "bank_account_name", "bank_account_number",
     ]
     for field in simple_fields:
         value = getattr(patch_in, field)
