@@ -449,20 +449,6 @@ export default function Reports() {
     return [...byId].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
   }, [rawEntries, projectMap]);
 
-  // ── Project auto-fill client ─────────────────────────────────────────────────
-  // Only auto-syncs the Client filter when the Project filter narrows to
-  // exactly one project — with several projects selected there's no single
-  // client to infer, so the Client filter is left untouched.
-  const handleProjectChange = (vals: string[]) => {
-    setF(prev => {
-      const next = { ...prev, projectId: vals };
-      if (vals.length === 1) {
-        const proj = projectMap.get(vals[0]);
-        if (proj?.client_id) next.clientId = [proj.client_id];
-      }
-      return next;
-    });
-  };
 
   const clearAll = () => setF(prev => ({ ...prev, employeeId: [], projectId: [], clientId: [], location: [], workLocation: [], ownerId: [], managerId: [], status: 'all', billing: 'all', search: '' }));
 
@@ -1023,7 +1009,7 @@ export default function Reports() {
               onChange={v => set('clientId', v)} onClear={() => set('clientId', [])} />
             <MultiFilterSelect label="Project" selected={f.projectId} allLabel="All Projects"
               options={availableProjects.map(p => ({ value: p.id, label: p.name }))}
-              onChange={handleProjectChange} onClear={() => set('projectId', [])} />
+              onChange={v => set('projectId', v)} onClear={() => set('projectId', [])} />
             {canManage && (
               <MultiFilterSelect label="Employee" selected={f.employeeId} allLabel="All Employees"
                 options={availableEmployees.map(e => ({ value: e.id, label: e.name }))}
