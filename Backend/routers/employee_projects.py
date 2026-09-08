@@ -16,7 +16,7 @@ from schemas.employee_projects import (
     EmployeeProjectWithDetails as EmployeeProjectWithDetailsOut,
     StaffingAssignmentOut,
 )
-from utils.roles import require_admin
+from utils.roles import require_admin, require_manager_or_admin
 
 employee_projects_router = APIRouter(prefix="/employee-projects", tags=["employee-projects"])
 
@@ -67,7 +67,7 @@ def bulk_replace_assignments_route(user_id: str, body: BulkAssignBody, db: Sessi
 
 
 @employee_projects_router.put("/{ep_id}", response_model=EmployeeProjectOut,
-                               dependencies=[Depends(require_admin)])
+                               dependencies=[Depends(require_manager_or_admin)])
 def update_employee_project_detail(ep_id: str, body: UpdateEpBody, db: Session = Depends(get_db)):
     ep = update_employee_project(db, ep_id, body.model_dump(exclude_unset=True))
     if not ep:

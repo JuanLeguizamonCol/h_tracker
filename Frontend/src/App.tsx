@@ -68,7 +68,7 @@ const App = () => (
               <Route path="/employees/new" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/employees/:employeeId" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeProfilePage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/employees/:employeeId/edit" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/staffing" element={<ProtectedRoute><MainLayout><AdminGuard adminOnly><StaffingPage /></AdminGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/staffing" element={<ProtectedRoute><MainLayout><StaffingPage /></MainLayout></ProtectedRoute>} />
               <Route path="/invoices" element={<ProtectedRoute><MainLayout><InvoiceGuard><Invoices /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices/new" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceNewPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices/new/manual" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceManualPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />

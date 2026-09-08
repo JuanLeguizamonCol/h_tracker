@@ -20,15 +20,19 @@ const adminNavigationItems = [
   { title: 'Reports', url: '/reports', icon: BarChart3 },
 ];
 
-// Manager = everything Admin has EXCEPT Invoices and Staffing (project
-// creation/assignment is Admin-only — Manager still sees Projects, read-only).
-const managerNavigationItems = adminNavigationItems.filter(item => item.title !== 'Invoices' && item.title !== 'Staffing');
+// Manager = everything Admin has EXCEPT Invoices (creating/assigning
+// projects and roles is still Admin-only, but Manager can edit an existing
+// assignment's Role/Hours/Window inline in Staffing).
+const managerNavigationItems = adminNavigationItems.filter(item => item.title !== 'Invoices');
 
+// Staffing is visible read-only to everyone — only Admin/Manager can edit an
+// assignment inline (see StaffingPage's canManage gate).
 const employeeNavigationItems = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboard },
   { title: 'Weekly Log', url: '/timesheet', icon: Clock },
   { title: 'History', url: '/history', icon: Calendar },
   { title: 'My Profile', url: '/profile', icon: UserCircle },
+  { title: 'Staffing', url: '/staffing', icon: Users2 },
   { title: 'Reports', url: '/reports', icon: BarChart3 },
 ];
 

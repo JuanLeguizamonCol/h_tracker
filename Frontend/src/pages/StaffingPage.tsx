@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { CalendarRange, Loader2, Plus, Pencil, Trash2, Search, Users2, AlertTriangle } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useActiveProjects } from '@/hooks/useProjects';
-import { useProjectRoles } from '@/hooks/useProjectRoles';
+import { useProjectRoles, useAllProjectRoles } from '@/hooks/useProjectRoles';
 import { useStaffing, useCreateAssignment, useUpdateAssignment, useDeleteAssignment } from '@/hooks/useAssignedProjects';
 import { StaffingAssignment } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -42,9 +43,15 @@ const EMPTY_FORM: AssignForm = {
 };
 
 export default function StaffingPage() {
+  // Staffing is visible to everyone (read-only for Employees). Inline edits
+  // to Role/Hours/Window are Admin + Manager; creating/deleting an
+  // assignment (and the full dialog, incl. changing the project's own
+  // dates) stays Admin-only, matching the backend's POST/DELETE guards.
+  const { isAdmin, canManage } = useAuth();
   const { data: employees = [], isLoading: employeesLoading } = useEmployees();
   const { data: allActiveProjects = [], isLoading: projectsLoading } = useActiveProjects();
   const { data: staffing = [], isLoading: staffingLoading } = useStaffing();
+  const { data: allProjectRoles = [] } = useAllProjectRoles();
 
   // Internal projects ARE selectable — staffing someone on one directly (with
   // an allocation %) is how internal/non-billable workload counts toward
@@ -66,8 +73,96 @@ export default function StaffingPage() {
   const activeEmployees = useMemo(() => employees.filter(e => e.is_active), [employees]);
   const employeeById = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees]);
 
+  const rolesByProject = useMemo(() => {
+    const map = new Map<string, typeof allProjectRoles>();
+    allProjectRoles.forEach(r => {
+      if (!map.has(r.project_id)) map.set(r.project_id, []);
+      map.get(r.project_id)!.push(r);
+    });
+    return map;
+  }, [allProjectRoles]);
+
   const projectById = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
   const selectedProject = form.projectId ? projectById.get(form.projectId) : undefined;
+
+  // ── Inline editing (Role / Hours / Window) ──────────────────────────────
+  // Local drafts only exist while a field is actively being typed in — once
+  // committed (or left unchanged), the row falls back to reading straight
+  // from server data again, so a refetch after another edit can't clobber
+  // an in-progress edit on a different row.
+  const [hoursDrafts, setHoursDrafts] = useState<Record<string, string>>({});
+  const [dateDrafts, setDateDrafts] = useState<Record<string, { start: string; end: string }>>({});
+
+  function maxHoursFor(row: StaffingAssignment): number {
+    return Number(employeeById.get(row.user_id)?.max_weekly_hours ?? DEFAULT_MAX_WEEKLY_HOURS);
+  }
+
+  function hoursValueFor(row: StaffingAssignment): string {
+    if (hoursDrafts[row.id] !== undefined) return hoursDrafts[row.id];
+    const maxHours = maxHoursFor(row);
+    return row.allocation_percentage != null
+      ? ((row.allocation_percentage / 100) * maxHours).toFixed(1).replace(/\.0$/, '')
+      : '';
+  }
+
+  function dateValuesFor(row: StaffingAssignment): { start: string; end: string } {
+    return dateDrafts[row.id] ?? { start: row.start_date || '', end: row.end_date || '' };
+  }
+
+  async function commitRole(row: StaffingAssignment, roleId: string) {
+    const newRoleId = roleId === '_none' ? null : roleId;
+    if (newRoleId === (row.role_id || null)) return;
+    try {
+      await updateAssignment.mutateAsync({ id: row.id, role_id: newRoleId });
+      toast.success('Role updated.');
+    } catch {
+      toast.error('Failed to update role.');
+    }
+  }
+
+  async function commitHours(row: StaffingAssignment) {
+    if (hoursDrafts[row.id] === undefined) return;
+    const raw = hoursDrafts[row.id];
+    const maxHours = maxHoursFor(row);
+    const hoursNum = raw === '' ? null : parseFloat(raw);
+    if (hoursNum != null && (isNaN(hoursNum) || hoursNum < 0 || hoursNum > maxHours)) {
+      toast.error(`Hours must be between 0 and ${maxHours} (this person's max weekly hours).`);
+      setHoursDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
+      return;
+    }
+    const allocationNum = hoursNum != null ? Math.round((hoursNum / maxHours) * 1000) / 10 : null;
+    if (allocationNum === (row.allocation_percentage ?? null)) {
+      setHoursDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
+      return;
+    }
+    try {
+      await updateAssignment.mutateAsync({ id: row.id, allocation_percentage: allocationNum });
+      toast.success('Hours updated.');
+    } catch {
+      toast.error('Failed to update hours.');
+    } finally {
+      setHoursDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
+    }
+  }
+
+  async function commitWindow(row: StaffingAssignment) {
+    const draft = dateDrafts[row.id];
+    if (!draft) return;
+    const newStart = draft.start || null;
+    const newEnd = draft.end || null;
+    if (newStart === (row.start_date || null) && newEnd === (row.end_date || null)) {
+      setDateDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
+      return;
+    }
+    try {
+      await updateAssignment.mutateAsync({ id: row.id, start_date: newStart, end_date: newEnd });
+      toast.success('Window updated.');
+    } catch {
+      toast.error('Failed to update window.');
+    } finally {
+      setDateDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
+    }
+  }
 
   // Capacity baseline for whoever is selected in the dialog — the hours
   // input is converted against THIS number, not a fixed 40, since it comes
@@ -211,15 +306,16 @@ export default function StaffingPage() {
             <Users2 className="h-6 w-6 text-primary" /> Staffing
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Assign people to projects and set how much of their time each takes. You can optionally
-            limit an assignment to a specific window without touching the project, or change the
-            project's own dates directly. Assigning someone here lets them start logging hours
-            against that project in Weekly Log.
+            {canManage
+              ? 'Assign people to projects and set how much of their time each takes. Edit Role, Hours, and Window directly in the table — click a project to add a new assignment or change its own dates.'
+              : "Who's staffed on which project, and how much of their time it takes. Ask an Admin or Manager to make changes here."}
           </p>
         </div>
-        <Button className="gap-2" onClick={openAdd}>
-          <Plus className="h-4 w-4" /> New Assignment
-        </Button>
+        {isAdmin && (
+          <Button className="gap-2" onClick={openAdd}>
+            <Plus className="h-4 w-4" /> New Assignment
+          </Button>
+        )}
       </div>
 
       <div className="relative max-w-sm">
@@ -254,9 +350,11 @@ export default function StaffingPage() {
                       </Badge>
                     )}
                   </CardTitle>
-                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAddFor(group.userId)}>
-                    <Plus className="h-3.5 w-3.5" /> Add Project
-                  </Button>
+                  {isAdmin && (
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAddFor(group.userId)}>
+                      <Plus className="h-3.5 w-3.5" /> Add Project
+                    </Button>
+                  )}
                 </CardHeader>
                 <CardContent>
                   <Table className="table-fixed">
@@ -279,19 +377,71 @@ export default function StaffingPage() {
                             {!row.project_is_active && <Badge variant="outline" className="ml-2 text-xs">Inactive</Badge>}
                           </TableCell>
                           <TableCell className="text-muted-foreground break-words">{row.client_name}</TableCell>
-                          <TableCell className="break-words">{row.role_name || <span className="text-muted-foreground">—</span>}</TableCell>
+
+                          {/* Role — inline Select for Admin/Manager, plain text otherwise */}
+                          <TableCell className="break-words">
+                            {canManage ? (
+                              <Select
+                                value={row.role_id || '_none'}
+                                onValueChange={v => commitRole(row, v)}
+                              >
+                                <SelectTrigger className="h-8 text-sm">
+                                  <SelectValue placeholder="No role" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="_none">No role</SelectItem>
+                                  {(rolesByProject.get(row.project_id) ?? []).map(r => (
+                                    <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              row.role_name || <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+
+                          {/* Hours/wk — inline Input for Admin/Manager, plain text otherwise */}
                           <TableCell className="text-right">
-                            {row.allocation_percentage != null ? (
+                            {canManage ? (
+                              <Input
+                                type="number" min="0" max={maxHoursFor(row)} step="1"
+                                className="h-8 text-sm text-right"
+                                value={hoursValueFor(row)}
+                                onFocus={e => e.target.select()}
+                                onChange={e => setHoursDrafts(d => ({ ...d, [row.id]: e.target.value }))}
+                                onBlur={() => commitHours(row)}
+                              />
+                            ) : row.allocation_percentage != null ? (
                               <span>
-                                {((row.allocation_percentage / 100) * Number(employeeById.get(row.user_id)?.max_weekly_hours ?? DEFAULT_MAX_WEEKLY_HOURS)).toFixed(1)}h
+                                {((row.allocation_percentage / 100) * maxHoursFor(row)).toFixed(1)}h
                                 <span className="text-muted-foreground text-xs ml-1">({row.allocation_percentage}%)</span>
                               </span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
+
+                          {/* Window — inline date pair for Admin/Manager, plain text otherwise */}
                           <TableCell className="text-sm text-muted-foreground">
-                            {row.start_date || row.end_date ? (
+                            {canManage ? (
+                              <div className="flex items-center gap-1">
+                                <Input
+                                  type="date"
+                                  className="h-8 text-xs px-1.5"
+                                  value={dateValuesFor(row).start}
+                                  onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), start: e.target.value } }))}
+                                  onBlur={() => commitWindow(row)}
+                                />
+                                <span>→</span>
+                                <Input
+                                  type="date"
+                                  className="h-8 text-xs px-1.5"
+                                  value={dateValuesFor(row).end}
+                                  onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), end: e.target.value } }))}
+                                  onBlur={() => commitWindow(row)}
+                                />
+                              </div>
+                            ) : row.start_date || row.end_date ? (
                               <span className="inline-flex items-center gap-1">
                                 <CalendarRange className="h-3.5 w-3.5 shrink-0" />
                                 {row.start_date || '—'} → {row.end_date || '—'}
@@ -300,15 +450,18 @@ export default function StaffingPage() {
                               <span className="text-muted-foreground/70">Full project</span>
                             )}
                           </TableCell>
+
                           <TableCell className="text-right">
-                            <div className="flex gap-1 justify-end">
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(row)}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(row)}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
+                            {isAdmin && (
+                              <div className="flex gap-1 justify-end">
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(row)} title="Full edit (incl. project dates)">
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(row)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
