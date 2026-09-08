@@ -60,8 +60,8 @@ export default function InvoiceManualPage() {
   const [issueDate, setIssueDate] = useState(todayStr);
   const [dueDate, setDueDate] = useState('');
   const [status, setStatus] = useState('draft');
-  const [periodStart, setPeriodStart] = useState('');
-  const [periodEnd, setPeriodEnd] = useState('');
+  const [periodStart, setPeriodStart] = useState(searchParams.get('period_start') || '');
+  const [periodEnd, setPeriodEnd] = useState(searchParams.get('period_end') || '');
 
   // Financials
   const [discountPct, setDiscountPct] = useState('');

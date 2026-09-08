@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
@@ -32,6 +33,10 @@ export default function InvoiceNewPage() {
   const updateInvoice = useUpdateInvoice();
 
   const [selectedProjectId, setSelectedProjectId] = useState('');
+  // Optional — not every invoice covers a calendar month. Blank means "every
+  // pending unlinked billable hour", same as before this was added.
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
@@ -53,7 +58,7 @@ export default function InvoiceNewPage() {
     [activeProjects, selectedProjectId]
   );
 
-  // Auto-check hours whenever project changes
+  // Auto-check hours whenever the project or the chosen period changes
   useEffect(() => {
     if (!selectedProjectId) {
       setCheckResult(null);
@@ -62,12 +67,15 @@ export default function InvoiceNewPage() {
     let cancelled = false;
     setIsChecking(true);
     setCheckResult(null);
-    api.get<CheckResult>(`/invoices/check-hours?project_id=${selectedProjectId}`)
+    const params = new URLSearchParams({ project_id: selectedProjectId });
+    if (periodStart) params.set('period_start', periodStart);
+    if (periodEnd) params.set('period_end', periodEnd);
+    api.get<CheckResult>(`/invoices/check-hours?${params.toString()}`)
       .then(res => { if (!cancelled) setCheckResult(res); })
       .catch(() => { if (!cancelled) setCheckResult(null); })
       .finally(() => { if (!cancelled) setIsChecking(false); });
     return () => { cancelled = true; };
-  }, [selectedProjectId]);
+  }, [selectedProjectId, periodStart, periodEnd]);
 
   const doCreateInvoice = async () => {
     if (selectedProject?.status === 'on_hold') {
@@ -78,13 +86,31 @@ export default function InvoiceNewPage() {
       toast.error('This project is marked fixed-fee but has no fee amount set. Add one on the project before invoicing.');
       return;
     }
+    if (periodStart && periodEnd && periodStart > periodEnd) {
+      toast.error('Period "From" must be before "To".');
+      return;
+    }
     setIsCreating(true);
     try {
       const invoice = await createInvoice.mutateAsync({ project_id: selectedProjectId });
+      // Record the chosen period on the invoice itself so the edit panel,
+      // PDF, and any later reporting reflect what was actually billed —
+      // not every invoice covers a full calendar month.
+      if (periodStart || periodEnd) {
+        await updateInvoice.mutateAsync({
+          id: invoice.id,
+          updates: { period_start: periodStart || null, period_end: periodEnd || null },
+        });
+      }
 
       const linkedIds = new Set(await api.get<string[]>('/invoice-time-entries/linked-ids'));
+      const entriesParams = new URLSearchParams({
+        project_id: selectedProjectId, billable: 'true', status: 'normal',
+      });
+      if (periodStart) entriesParams.set('date_gte', periodStart);
+      if (periodEnd) entriesParams.set('date_lte', periodEnd);
       const entries = await api.get<{ id: string; user_id: string; hours: number; billable: boolean; status: string }[]>(
-        `/time-entries?project_id=${selectedProjectId}&billable=true&status=normal`
+        `/time-entries?${entriesParams.toString()}`
       );
       const availableEntries = entries.filter(e => !linkedIds.has(e.id));
 
@@ -289,6 +315,30 @@ export default function InvoiceNewPage() {
             </Select>
           </div>
 
+          {selectedProject?.status !== 'on_hold' && (
+            <div className="space-y-2">
+              <Label>Period (optional)</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  type="date"
+                  value={periodStart}
+                  onChange={e => setPeriodStart(e.target.value)}
+                  aria-label="Period from"
+                />
+                <Input
+                  type="date"
+                  value={periodEnd}
+                  onChange={e => setPeriodEnd(e.target.value)}
+                  aria-label="Period to"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave blank to pull every pending billable hour regardless of date. Set a range when
+                this invoice doesn't cover a full calendar month.
+              </p>
+            </div>
+          )}
+
           {/* On hold — blocks invoicing entirely, no point checking hours */}
           {selectedProject?.status === 'on_hold' && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 p-4">
@@ -351,9 +401,12 @@ export default function InvoiceNewPage() {
                     No hours logged for this project
                   </p>
                   <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
-                    There are no billable hours recorded for{' '}
+                    There are no unbilled billable hours recorded for{' '}
                     <span className="font-semibold">"{selectedProject?.name}"</span>{' '}
-                    in the current period. Would you like to create a blank invoice and fill in the details manually?
+                    {periodStart || periodEnd
+                      ? <>between <span className="font-semibold">{periodStart || 'the start'}</span> and{' '}
+                          <span className="font-semibold">{periodEnd || 'now'}</span></>
+                      : 'for any date'}. Would you like to create a blank invoice and fill in the details manually?
                   </p>
                   {selectedProject?.is_managed_services && selectedProject.managed_services_min_hours && (
                     <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
@@ -373,7 +426,12 @@ export default function InvoiceNewPage() {
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => navigate(`/invoices/new/manual?project_id=${selectedProjectId}`)}
+                  onClick={() => {
+                    const params = new URLSearchParams({ project_id: selectedProjectId });
+                    if (periodStart) params.set('period_start', periodStart);
+                    if (periodEnd) params.set('period_end', periodEnd);
+                    navigate(`/invoices/new/manual?${params.toString()}`);
+                  }}
                   className="flex-1"
                 >
                   <Clock className="h-4 w-4 mr-2" />

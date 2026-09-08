@@ -193,10 +193,14 @@ def check_hours(
         TimeEntry.billable == True,
         TimeEntry.status == 'normal',
     )
-    if period_start and period_end:
-        start = datetime.strptime(period_start, "%Y-%m-%d").date()
-        end = datetime.strptime(period_end, "%Y-%m-%d").date()
-        q = q.filter(TimeEntry.date >= start, TimeEntry.date <= end)
+    # Each bound applies independently — mirrors GET /time-entries's
+    # date_gte/date_lte — so a caller who only sets one end of the range
+    # (an open-ended period) gets a preview that matches what actually gets
+    # linked at creation time, not a count that silently ignores it.
+    if period_start:
+        q = q.filter(TimeEntry.date >= datetime.strptime(period_start, "%Y-%m-%d").date())
+    if period_end:
+        q = q.filter(TimeEntry.date <= datetime.strptime(period_end, "%Y-%m-%d").date())
     entries = q.all()
     available = [e for e in entries if e.id not in linked_ids]
 
