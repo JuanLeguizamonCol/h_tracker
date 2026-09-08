@@ -40,6 +40,9 @@ export interface Employee {
   employment_status: string | null;
   billing_currency: string | null;
   notes: string | null;
+  // Capacity baseline Staffing uses to convert an "hours per project" entry
+  // into an allocation percentage — defaults to 40.
+  max_weekly_hours: number;
   // Read-only — set via POST/DELETE /profile/signature (admins only).
   signature_url: string | null;
 }

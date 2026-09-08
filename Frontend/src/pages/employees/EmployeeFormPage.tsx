@@ -83,6 +83,8 @@ type FormData = {
   end_date: string;
   employment_status: string;
   notes: string;
+  // Capacity baseline for Staffing's hours→allocation% conversion.
+  max_weekly_hours: string;
   // Account access (create-only)
   user_role: string;
 };
@@ -96,7 +98,7 @@ const EMPTY: FormData = {
   emergency_contact_name: '', emergency_contact_phone: '',
   location: '', country: '', state: '', city: '', timezone: '', street_address: '', zip_code: '', work_mode: '',
   corporate_phone: '', employee_code: '', employment_type: '', start_date: '', end_date: '',
-  employment_status: '', notes: '',
+  employment_status: '', notes: '', max_weekly_hours: '40',
 };
 
 function employeeToForm(e: Employee): FormData {
@@ -132,6 +134,7 @@ function employeeToForm(e: Employee): FormData {
     end_date: e.end_date || '',
     employment_status: e.employment_status || '',
     notes: e.notes || '',
+    max_weekly_hours: e.max_weekly_hours != null ? String(e.max_weekly_hours) : '40',
     user_role: 'employee',
   };
 }
@@ -169,6 +172,7 @@ function toPayload(f: FormData): Partial<Employee> & { name: string; email: stri
     end_date: f.end_date || null,
     employment_status: f.employment_status || null,
     notes: f.notes || null,
+    max_weekly_hours: f.max_weekly_hours ? parseFloat(f.max_weekly_hours) : 40,
   };
 }
 
@@ -467,6 +471,14 @@ export default function EmployeeFormPage() {
         </Field>
         <Field label="Business Unit">
           <Input value={form.business_unit} onChange={e => set('business_unit', e.target.value)} placeholder="Platform" />
+        </Field>
+        <Field label="Max Weekly Hours">
+          <Input
+            type="number" min="1" step="1"
+            value={form.max_weekly_hours}
+            onChange={e => set('max_weekly_hours', e.target.value)}
+            placeholder="40"
+          />
         </Field>
         <Field label="Employment Type">
           <Select value={form.employment_type || '_none'} onValueChange={v => set('employment_type', v === '_none' ? '' : v)}>

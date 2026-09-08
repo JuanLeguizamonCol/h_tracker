@@ -16,11 +16,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 
+const DEFAULT_MAX_WEEKLY_HOURS = 40;
+
 type AssignForm = {
   employeeId: string;
   projectId: string;
   roleId: string;
-  allocation: string;
+  // Hours per week on THIS project — the allocation % sent to the backend is
+  // derived from this against the employee's own max_weekly_hours (set on
+  // their profile), so nobody has to compute the percentage by hand.
+  hoursPerWeek: string;
   // This assignment's own window — never affects the project.
   startDate: string;
   endDate: string;
@@ -31,7 +36,7 @@ type AssignForm = {
 };
 
 const EMPTY_FORM: AssignForm = {
-  employeeId: '', projectId: '', roleId: '', allocation: '',
+  employeeId: '', projectId: '', roleId: '', hoursPerWeek: '',
   startDate: '', endDate: '',
   editProjectDates: false, projectStartDate: '', projectEndDate: '',
 };
@@ -59,9 +64,20 @@ export default function StaffingPage() {
   const { data: projectRoles = [] } = useProjectRoles(form.projectId || undefined);
 
   const activeEmployees = useMemo(() => employees.filter(e => e.is_active), [employees]);
+  const employeeById = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees]);
 
   const projectById = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
   const selectedProject = form.projectId ? projectById.get(form.projectId) : undefined;
+
+  // Capacity baseline for whoever is selected in the dialog — the hours
+  // input is converted against THIS number, not a fixed 40, since it comes
+  // from the employee's own profile.
+  const selectedMaxWeeklyHours = form.employeeId
+    ? Number(employeeById.get(form.employeeId)?.max_weekly_hours ?? DEFAULT_MAX_WEEKLY_HOURS)
+    : DEFAULT_MAX_WEEKLY_HOURS;
+  const hoursPreviewPct = form.hoursPerWeek && selectedMaxWeeklyHours > 0
+    ? (parseFloat(form.hoursPerWeek) / selectedMaxWeeklyHours) * 100
+    : null;
 
   const grouped = useMemo(() => {
     const map = new Map<string, { employeeName: string; rows: StaffingAssignment[] }>();
@@ -93,11 +109,18 @@ export default function StaffingPage() {
 
   function openEdit(row: StaffingAssignment) {
     setEditingId(row.id);
+    // Convert the stored allocation % back to hours against THIS person's
+    // own capacity, so the dialog shows what was actually entered rather
+    // than a raw percentage.
+    const maxHours = Number(employeeById.get(row.user_id)?.max_weekly_hours ?? DEFAULT_MAX_WEEKLY_HOURS);
+    const hours = row.allocation_percentage != null
+      ? ((row.allocation_percentage / 100) * maxHours).toFixed(1).replace(/\.0$/, '')
+      : '';
     setForm({
       employeeId: row.user_id,
       projectId: row.project_id,
       roleId: row.role_id || '',
-      allocation: row.allocation_percentage != null ? String(row.allocation_percentage) : '',
+      hoursPerWeek: hours,
       startDate: row.start_date || '',
       endDate: row.end_date || '',
       editProjectDates: false,
@@ -124,11 +147,16 @@ export default function StaffingPage() {
   async function handleSave() {
     if (!form.employeeId) { toast.error('Select a person.'); return; }
     if (!form.projectId) { toast.error('Select a project.'); return; }
-    const allocationNum = form.allocation ? parseFloat(form.allocation) : null;
-    if (allocationNum != null && (allocationNum < 0 || allocationNum > 100)) {
-      toast.error('Allocation must be between 0 and 100.');
+    const hoursNum = form.hoursPerWeek ? parseFloat(form.hoursPerWeek) : null;
+    if (hoursNum != null && (hoursNum < 0 || hoursNum > selectedMaxWeeklyHours)) {
+      toast.error(`Hours must be between 0 and ${selectedMaxWeeklyHours} (this person's max weekly hours).`);
       return;
     }
+    // Derived from hours against the employee's own capacity — never entered
+    // directly — so it always reflects what's set on their profile.
+    const allocationNum = hoursNum != null
+      ? Math.round((hoursNum / selectedMaxWeeklyHours) * 1000) / 10
+      : null;
     setIsSaving(true);
     try {
       const payload = {
@@ -237,7 +265,7 @@ export default function StaffingPage() {
                         <TableHead className="w-[22%]">Project</TableHead>
                         <TableHead className="w-[22%]">Client</TableHead>
                         <TableHead className="w-[16%]">Role</TableHead>
-                        <TableHead className="w-[10%] text-right">Allocation</TableHead>
+                        <TableHead className="w-[12%] text-right">Hours/wk</TableHead>
                         <TableHead className="w-[20%]">Window</TableHead>
                         <TableHead className="w-24 text-right">Actions</TableHead>
                       </TableRow>
@@ -253,7 +281,14 @@ export default function StaffingPage() {
                           <TableCell className="text-muted-foreground break-words">{row.client_name}</TableCell>
                           <TableCell className="break-words">{row.role_name || <span className="text-muted-foreground">—</span>}</TableCell>
                           <TableCell className="text-right">
-                            {row.allocation_percentage != null ? `${row.allocation_percentage}%` : <span className="text-muted-foreground">—</span>}
+                            {row.allocation_percentage != null ? (
+                              <span>
+                                {((row.allocation_percentage / 100) * Number(employeeById.get(row.user_id)?.max_weekly_hours ?? DEFAULT_MAX_WEEKLY_HOURS)).toFixed(1)}h
+                                <span className="text-muted-foreground text-xs ml-1">({row.allocation_percentage}%)</span>
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {row.start_date || row.end_date ? (
@@ -321,13 +356,21 @@ export default function StaffingPage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Allocation (% of their time)</Label>
+              <Label>Hours per week on this project</Label>
               <Input
-                type="number" min="0" max="100" step="5"
-                value={form.allocation}
-                onChange={e => setForm(f => ({ ...f, allocation: e.target.value }))}
-                placeholder="e.g. 50"
+                type="number" min="0" max={selectedMaxWeeklyHours} step="1"
+                value={form.hoursPerWeek}
+                onChange={e => setForm(f => ({ ...f, hoursPerWeek: e.target.value }))}
+                placeholder="e.g. 20"
               />
+              <p className="text-xs text-muted-foreground">
+                {form.employeeId
+                  ? `Based on their ${selectedMaxWeeklyHours}h/week capacity (set on their profile).`
+                  : `Based on a ${selectedMaxWeeklyHours}h/week default — select a person to use their own capacity.`}
+                {hoursPreviewPct != null && (
+                  <span className="ml-1 font-medium text-foreground">≈ {hoursPreviewPct.toFixed(1)}% allocated.</span>
+                )}
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">

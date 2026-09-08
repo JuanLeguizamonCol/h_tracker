@@ -625,17 +625,33 @@ export default function Reports() {
   // made up those hours, without a second data pass on expand.
   const weeklyMatrixData = useMemo(() => {
     // Generate all week start dates (Monday-aligned) covering the selected range
-    const weeks: { key: string; label: string }[] = [];
+    const weeks: { key: string; label: string; start: Date }[] = [];
     let current = startOfWeek(f.startDate, { weekStartsOn: 1 });
     while (current <= f.endDate) {
       const weekN = Math.ceil(current.getDate() / 7);
       weeks.push({
         key: format(current, 'yyyy-MM-dd'),
         label: `${format(current, 'MMM')}-Week${weekN}`,
+        start: current,
       });
       current = addWeeks(current, 1);
     }
     const weekIndex = new Map(weeks.map((w, i) => [w.key, i]));
+
+    // Group weeks into their calendar month — a week that spans a month
+    // boundary is bucketed by its Monday (matches the week's own label,
+    // which is also keyed off that Monday). Each group becomes one "full
+    // month" subtotal column after that month's weekly columns.
+    const monthGroups: { key: string; label: string; weekIndices: number[] }[] = [];
+    weeks.forEach((w, i) => {
+      const monthKey = format(w.start, 'yyyy-MM');
+      let group = monthGroups.find(g => g.key === monthKey);
+      if (!group) {
+        group = { key: monthKey, label: format(w.start, 'MMM yyyy'), weekIndices: [] };
+        monthGroups.push(group);
+      }
+      group.weekIndices.push(i);
+    });
 
     // Build userId → weekKey → hours map, and userId → projectId → weekKey → hours
     const hoursMap: Record<string, Record<string, number>> = {};
@@ -653,6 +669,10 @@ export default function Reports() {
       perProject[weekKey] = (perProject[weekKey] ?? 0) + Number(e.hours);
     });
 
+    // Sum a row's week-hours into one total per month group, in group order.
+    const monthTotalsFor = (weekHours: number[]) =>
+      monthGroups.map(g => g.weekIndices.reduce((sum, i) => sum + weekHours[i], 0));
+
     // Rows sorted by employee name
     const employeeIds = [...new Set(filteredEntries.map(e => e.user_id))];
     const rows = employeeIds
@@ -665,28 +685,36 @@ export default function Reports() {
               projectId,
               name: projectMap.get(projectId)?.name ?? 'Deleted Project',
               weekHours,
+              monthTotals: monthTotalsFor(weekHours),
               total: weekHours.reduce((s, h) => s + h, 0),
             };
           })
           .sort((a, b) => b.total - a.total);
+        const weekHours = weeks.map(w => hoursMap[uid]?.[w.key] ?? 0);
         return {
           employeeId: uid,
           name: employeeMap.get(uid)?.name ?? 'Deleted Employee',
-          weekHours: weeks.map(w => hoursMap[uid]?.[w.key] ?? 0),
+          weekHours,
+          monthTotals: monthTotalsFor(weekHours),
+          total: weekHours.reduce((s, h) => s + h, 0),
           projects,
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Totals per week column
+    // Totals per week column, per month column, and the grand total.
     const totals = weeks.map((_, i) => rows.reduce((sum, r) => sum + r.weekHours[i], 0));
+    const monthTotals = monthTotalsFor(totals);
+    const grandTotal = totals.reduce((sum, t) => sum + t, 0);
 
     // Highest single cell across the whole matrix (employee rows) — used as
     // the reference for the heatmap gradient so shading is comparable across
-    // every row and its drill-down.
+    // every row and its drill-down. Month/grand totals aren't heat-shaded
+    // (they're aggregates, not directly comparable to a single week), so
+    // they don't factor into this.
     const maxCellHours = Math.max(1, ...rows.map(r => Math.max(0, ...r.weekHours)));
 
-    return { weeks, weekIndex, rows, totals, maxCellHours };
+    return { weeks, weekIndex, monthGroups, rows, totals, monthTotals, grandTotal, maxCellHours };
   }, [filteredEntries, f.startDate, f.endDate, employeeMap, projectMap]);
 
   const [expandedMatrixRows, setExpandedMatrixRows] = useState<Set<string>>(new Set());
@@ -1076,7 +1104,8 @@ export default function Reports() {
         <CardHeader>
           <CardTitle className="text-base">Weekly Hours Matrix</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Hours per employee per week · Darker cells mean more hours · Click an employee to drill down by project
+            Hours per employee per week, with full-month subtotals and a grand total per row ·
+            Darker cells mean more hours · Click an employee to drill down by project, with its own project total
           </p>
         </CardHeader>
         <CardContent>
@@ -1087,13 +1116,34 @@ export default function Reports() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="table-header sticky left-0 bg-background z-10 min-w-[200px] shadow-[1px_0_0_0_hsl(var(--border))]">
+                    <TableHead rowSpan={2} className="table-header sticky left-0 bg-background z-10 min-w-[200px] align-bottom shadow-[1px_0_0_0_hsl(var(--border))]">
                       Employee
                     </TableHead>
-                    {weeklyMatrixData.weeks.map(w => (
-                      <TableHead key={w.key} className="table-header text-center whitespace-nowrap min-w-[100px]">
-                        {w.label}
+                    {weeklyMatrixData.monthGroups.map(g => (
+                      <TableHead
+                        key={g.key}
+                        colSpan={g.weekIndices.length + 1}
+                        className="table-header text-center whitespace-nowrap border-l border-border"
+                      >
+                        {g.label}
                       </TableHead>
+                    ))}
+                    <TableHead rowSpan={2} className="table-header text-center whitespace-nowrap min-w-[90px] align-bottom border-l-2 border-border">
+                      Total
+                    </TableHead>
+                  </TableRow>
+                  <TableRow>
+                    {weeklyMatrixData.monthGroups.map(g => (
+                      <Fragment key={g.key}>
+                        {g.weekIndices.map(wi => (
+                          <TableHead key={weeklyMatrixData.weeks[wi].key} className="table-header text-center whitespace-nowrap min-w-[100px]">
+                            {weeklyMatrixData.weeks[wi].label}
+                          </TableHead>
+                        ))}
+                        <TableHead className="table-header text-center whitespace-nowrap min-w-[90px] border-l border-border bg-muted/20">
+                          Month Total
+                        </TableHead>
+                      </Fragment>
                     ))}
                   </TableRow>
                 </TableHeader>
@@ -1119,30 +1169,50 @@ export default function Reports() {
                               {row.name}
                             </div>
                           </TableCell>
-                          {row.weekHours.map((hours, i) => (
-                            <TableCell
-                              key={i}
-                              className="text-center text-sm font-medium tabular-nums transition-colors"
-                              style={heatCellStyle(hours, weeklyMatrixData.maxCellHours)}
-                            >
-                              {hours > 0 ? `${hours.toFixed(1)}h` : ''}
-                            </TableCell>
+                          {weeklyMatrixData.monthGroups.map((g, gi) => (
+                            <Fragment key={g.key}>
+                              {g.weekIndices.map(wi => (
+                                <TableCell
+                                  key={wi}
+                                  className="text-center text-sm font-medium tabular-nums transition-colors"
+                                  style={heatCellStyle(row.weekHours[wi], weeklyMatrixData.maxCellHours)}
+                                >
+                                  {row.weekHours[wi] > 0 ? `${row.weekHours[wi].toFixed(1)}h` : ''}
+                                </TableCell>
+                              ))}
+                              <TableCell className="text-center text-sm font-semibold tabular-nums border-l border-border bg-muted/20">
+                                {row.monthTotals[gi] > 0 ? `${row.monthTotals[gi].toFixed(1)}h` : ''}
+                              </TableCell>
+                            </Fragment>
                           ))}
+                          <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l-2 border-border">
+                            {row.total > 0 ? `${row.total.toFixed(1)}h` : ''}
+                          </TableCell>
                         </TableRow>
                         {isExpanded && row.projects.map(proj => (
                           <TableRow key={`${row.employeeId}-${proj.projectId}`} className="bg-muted/20">
                             <TableCell className="text-xs text-muted-foreground sticky left-0 bg-muted/20 z-10 shadow-[1px_0_0_0_hsl(var(--border))] pl-9">
                               {proj.name}
                             </TableCell>
-                            {proj.weekHours.map((hours, i) => (
-                              <TableCell
-                                key={i}
-                                className="text-center text-xs tabular-nums transition-colors"
-                                style={heatCellStyle(hours, weeklyMatrixData.maxCellHours)}
-                              >
-                                {hours > 0 ? `${hours.toFixed(1)}h` : ''}
-                              </TableCell>
+                            {weeklyMatrixData.monthGroups.map((g, gi) => (
+                              <Fragment key={g.key}>
+                                {g.weekIndices.map(wi => (
+                                  <TableCell
+                                    key={wi}
+                                    className="text-center text-xs tabular-nums transition-colors"
+                                    style={heatCellStyle(proj.weekHours[wi], weeklyMatrixData.maxCellHours)}
+                                  >
+                                    {proj.weekHours[wi] > 0 ? `${proj.weekHours[wi].toFixed(1)}h` : ''}
+                                  </TableCell>
+                                ))}
+                                <TableCell className="text-center text-xs font-medium tabular-nums border-l border-border bg-muted/30">
+                                  {proj.monthTotals[gi] > 0 ? `${proj.monthTotals[gi].toFixed(1)}h` : ''}
+                                </TableCell>
+                              </Fragment>
                             ))}
+                            <TableCell className="text-center text-xs font-bold tabular-nums text-primary border-l-2 border-border">
+                              {proj.total > 0 ? `${proj.total.toFixed(1)}h` : ''}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </Fragment>
@@ -1153,14 +1223,21 @@ export default function Reports() {
                     <TableCell className="font-bold text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
                       Total
                     </TableCell>
-                    {weeklyMatrixData.totals.map((total, i) => (
-                      <TableCell
-                        key={i}
-                        className="text-center text-sm font-bold tabular-nums text-primary"
-                      >
-                        {total > 0 ? `${total.toFixed(1)}h` : ''}
-                      </TableCell>
+                    {weeklyMatrixData.monthGroups.map((g, gi) => (
+                      <Fragment key={g.key}>
+                        {g.weekIndices.map(wi => (
+                          <TableCell key={wi} className="text-center text-sm font-bold tabular-nums text-primary">
+                            {weeklyMatrixData.totals[wi] > 0 ? `${weeklyMatrixData.totals[wi].toFixed(1)}h` : ''}
+                          </TableCell>
+                        ))}
+                        <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l border-border bg-muted/20">
+                          {weeklyMatrixData.monthTotals[gi] > 0 ? `${weeklyMatrixData.monthTotals[gi].toFixed(1)}h` : ''}
+                        </TableCell>
+                      </Fragment>
                     ))}
+                    <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l-2 border-border">
+                      {weeklyMatrixData.grandTotal > 0 ? `${weeklyMatrixData.grandTotal.toFixed(1)}h` : ''}
+                    </TableCell>
                   </TableRow>
                 </TableBody>
               </Table>

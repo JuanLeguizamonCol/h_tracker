@@ -1,5 +1,5 @@
 from config.database import Base
-from sqlalchemy import Column, String, Boolean, ForeignKey, DateTime, Date, Text, Integer
+from sqlalchemy import Column, String, Boolean, ForeignKey, DateTime, Date, Text, Integer, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
@@ -52,6 +52,10 @@ class Employee(Base):
     employment_status = Column(String, nullable=True)
     billing_currency = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
+    # Capacity baseline Staffing uses to convert an "hours per project" entry
+    # into an allocation percentage (hours / max_weekly_hours * 100) instead
+    # of making the admin compute the percentage by hand.
+    max_weekly_hours = Column(Numeric(5, 2), nullable=False, default=40)
 
     # Signature image (admins only) — uploaded via /profile/signature, used on
     # invoices this admin signs as the owning project's owner. `signature_url`

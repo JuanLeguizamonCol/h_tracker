@@ -40,6 +40,8 @@ class EmployeeBase(BaseModel):
     employment_status: Optional[str] = None
     billing_currency: Optional[str] = None
     notes: Optional[str] = None
+    # Capacity baseline for Staffing's hours→allocation% conversion.
+    max_weekly_hours: float = 40
 
 
 class EmployeeCreate(EmployeeBase):
@@ -84,6 +86,7 @@ class EmployeeUpdate(BaseModel):
     employment_status: Optional[str] = None
     billing_currency: Optional[str] = None
     notes: Optional[str] = None
+    max_weekly_hours: Optional[float] = None
 
 
 class EmployeeOut(EmployeeBase):
