@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks, addDays, differenceInCalendarDays } from 'date-fns';
 import {
   CalendarIcon, Search, Loader2, Filter, X,
   Clock, TrendingUp, Activity, BarChart2, Table as TableIcon,
   LayoutDashboard, Download, Gauge, AlertTriangle, TrendingDown, CheckCircle2,
+  ChevronRight, ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -619,6 +620,9 @@ export default function Reports() {
   );
 
   // ── Weekly Hours Matrix data ──────────────────────────────────────────────────
+  // Each employee row also carries a project-level breakdown (same week
+  // buckets) so the row can be expanded into a drill-down of which projects
+  // made up those hours, without a second data pass on expand.
   const weeklyMatrixData = useMemo(() => {
     // Generate all week start dates (Monday-aligned) covering the selected range
     const weeks: { key: string; label: string }[] = [];
@@ -631,32 +635,81 @@ export default function Reports() {
       });
       current = addWeeks(current, 1);
     }
+    const weekIndex = new Map(weeks.map((w, i) => [w.key, i]));
 
-    // Build userId → weekKey → hours map
+    // Build userId → weekKey → hours map, and userId → projectId → weekKey → hours
     const hoursMap: Record<string, Record<string, number>> = {};
+    const projectHoursMap: Record<string, Record<string, Record<string, number>>> = {};
     filteredEntries.forEach(e => {
       // Local parse so a Sun/Mon boundary entry isn't shifted into the wrong week.
       const weekStart = startOfWeek(parseLocalDate(e.date), { weekStartsOn: 1 });
       const weekKey = format(weekStart, 'yyyy-MM-dd');
       if (!hoursMap[e.user_id]) hoursMap[e.user_id] = {};
       hoursMap[e.user_id][weekKey] = (hoursMap[e.user_id][weekKey] ?? 0) + Number(e.hours);
+
+      if (!projectHoursMap[e.user_id]) projectHoursMap[e.user_id] = {};
+      if (!projectHoursMap[e.user_id][e.project_id]) projectHoursMap[e.user_id][e.project_id] = {};
+      const perProject = projectHoursMap[e.user_id][e.project_id];
+      perProject[weekKey] = (perProject[weekKey] ?? 0) + Number(e.hours);
     });
 
     // Rows sorted by employee name
     const employeeIds = [...new Set(filteredEntries.map(e => e.user_id))];
     const rows = employeeIds
-      .map(uid => ({
-        employeeId: uid,
-        name: employeeMap.get(uid)?.name ?? 'Deleted Employee',
-        weekHours: weeks.map(w => hoursMap[uid]?.[w.key] ?? 0),
-      }))
+      .map(uid => {
+        const projectEntries = Object.entries(projectHoursMap[uid] ?? {});
+        const projects = projectEntries
+          .map(([projectId, byWeek]) => {
+            const weekHours = weeks.map(w => byWeek[w.key] ?? 0);
+            return {
+              projectId,
+              name: projectMap.get(projectId)?.name ?? 'Deleted Project',
+              weekHours,
+              total: weekHours.reduce((s, h) => s + h, 0),
+            };
+          })
+          .sort((a, b) => b.total - a.total);
+        return {
+          employeeId: uid,
+          name: employeeMap.get(uid)?.name ?? 'Deleted Employee',
+          weekHours: weeks.map(w => hoursMap[uid]?.[w.key] ?? 0),
+          projects,
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
 
     // Totals per week column
     const totals = weeks.map((_, i) => rows.reduce((sum, r) => sum + r.weekHours[i], 0));
 
-    return { weeks, rows, totals };
-  }, [filteredEntries, f.startDate, f.endDate, employeeMap]);
+    // Highest single cell across the whole matrix (employee rows) — used as
+    // the reference for the heatmap gradient so shading is comparable across
+    // every row and its drill-down.
+    const maxCellHours = Math.max(1, ...rows.map(r => Math.max(0, ...r.weekHours)));
+
+    return { weeks, weekIndex, rows, totals, maxCellHours };
+  }, [filteredEntries, f.startDate, f.endDate, employeeMap, projectMap]);
+
+  const [expandedMatrixRows, setExpandedMatrixRows] = useState<Set<string>>(new Set());
+  const toggleMatrixRow = (employeeId: string) => {
+    setExpandedMatrixRows(prev => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) next.delete(employeeId); else next.add(employeeId);
+      return next;
+    });
+  };
+
+  // Blue heatmap gradient — intensity relative to the matrix's own max cell,
+  // so it reads correctly whether the busiest week was 20h or 60h. Text
+  // flips to white once the fill gets dark enough to need it.
+  const heatCellStyle = (hours: number, max: number): { backgroundColor?: string; color?: string } => {
+    if (hours <= 0) return {};
+    const intensity = Math.min(hours / max, 1);
+    const alpha = 0.10 + intensity * 0.75;
+    return {
+      backgroundColor: `rgba(37, 99, 235, ${alpha.toFixed(2)})`,
+      color: alpha > 0.5 ? '#fff' : undefined,
+    };
+  };
 
   // ── Utilization report: cargability against a 40h/week benchmark ───────────────
   // Reuses the same per-employee-per-week hours as the matrix above, so a week
@@ -1023,7 +1076,7 @@ export default function Reports() {
         <CardHeader>
           <CardTitle className="text-base">Weekly Hours Matrix</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Hours per employee per week · Cells highlighted in blue exceed 40h
+            Hours per employee per week · Darker cells mean more hours · Click an employee to drill down by project
           </p>
         </CardHeader>
         <CardContent>
@@ -1034,7 +1087,7 @@ export default function Reports() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="table-header sticky left-0 bg-background z-10 min-w-[160px] shadow-[1px_0_0_0_hsl(var(--border))]">
+                    <TableHead className="table-header sticky left-0 bg-background z-10 min-w-[200px] shadow-[1px_0_0_0_hsl(var(--border))]">
                       Employee
                     </TableHead>
                     {weeklyMatrixData.weeks.map(w => (
@@ -1045,25 +1098,56 @@ export default function Reports() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {weeklyMatrixData.rows.map(row => (
-                    <TableRow key={row.employeeId}>
-                      <TableCell className="font-medium text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
-                        {row.name}
-                      </TableCell>
-                      {row.weekHours.map((hours, i) => (
-                        <TableCell
-                          key={i}
-                          className={`text-center text-sm font-medium tabular-nums transition-colors ${
-                            hours > 40
-                              ? 'bg-primary text-primary-foreground'
-                              : ''
-                          }`}
+                  {weeklyMatrixData.rows.map(row => {
+                    const isExpanded = expandedMatrixRows.has(row.employeeId);
+                    const hasProjects = row.projects.length > 0;
+                    return (
+                      <Fragment key={row.employeeId}>
+                        <TableRow
+                          className={hasProjects ? 'cursor-pointer hover:bg-muted/40' : undefined}
+                          onClick={() => hasProjects && toggleMatrixRow(row.employeeId)}
                         >
-                          {hours > 0 ? `${hours.toFixed(1)}h` : ''}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
+                          <TableCell className="font-medium text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
+                            <div className="flex items-center gap-1.5">
+                              {hasProjects ? (
+                                isExpanded
+                                  ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                  : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              ) : (
+                                <span className="w-3.5 shrink-0" />
+                              )}
+                              {row.name}
+                            </div>
+                          </TableCell>
+                          {row.weekHours.map((hours, i) => (
+                            <TableCell
+                              key={i}
+                              className="text-center text-sm font-medium tabular-nums transition-colors"
+                              style={heatCellStyle(hours, weeklyMatrixData.maxCellHours)}
+                            >
+                              {hours > 0 ? `${hours.toFixed(1)}h` : ''}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                        {isExpanded && row.projects.map(proj => (
+                          <TableRow key={`${row.employeeId}-${proj.projectId}`} className="bg-muted/20">
+                            <TableCell className="text-xs text-muted-foreground sticky left-0 bg-muted/20 z-10 shadow-[1px_0_0_0_hsl(var(--border))] pl-9">
+                              {proj.name}
+                            </TableCell>
+                            {proj.weekHours.map((hours, i) => (
+                              <TableCell
+                                key={i}
+                                className="text-center text-xs tabular-nums transition-colors"
+                                style={heatCellStyle(hours, weeklyMatrixData.maxCellHours)}
+                              >
+                                {hours > 0 ? `${hours.toFixed(1)}h` : ''}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))}
+                      </Fragment>
+                    );
+                  })}
                   {/* Totals row */}
                   <TableRow className="border-t-2 border-border">
                     <TableCell className="font-bold text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
