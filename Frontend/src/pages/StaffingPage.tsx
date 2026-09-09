@@ -91,6 +91,7 @@ export default function StaffingPage() {
   // from server data again, so a refetch after another edit can't clobber
   // an in-progress edit on a different row.
   const [hoursDrafts, setHoursDrafts] = useState<Record<string, string>>({});
+  const [percentDrafts, setPercentDrafts] = useState<Record<string, string>>({});
   const [dateDrafts, setDateDrafts] = useState<Record<string, { start: string; end: string }>>({});
 
   function maxHoursFor(row: StaffingAssignment): number {
@@ -102,6 +103,13 @@ export default function StaffingPage() {
     const maxHours = maxHoursFor(row);
     return row.allocation_percentage != null
       ? ((row.allocation_percentage / 100) * maxHours).toFixed(1).replace(/\.0$/, '')
+      : '';
+  }
+
+  function percentValueFor(row: StaffingAssignment): string {
+    if (percentDrafts[row.id] !== undefined) return percentDrafts[row.id];
+    return row.allocation_percentage != null
+      ? String(row.allocation_percentage).replace(/\.0$/, '')
       : '';
   }
 
@@ -120,6 +128,21 @@ export default function StaffingPage() {
     }
   }
 
+  // Hours and Percentage are two views of the same underlying
+  // allocation_percentage — committing either one just writes that field
+  // with a different starting computation, and the other column picks up
+  // the new value automatically on the next render (both read straight
+  // from row.allocation_percentage once their own draft is cleared).
+  async function commitAllocation(row: StaffingAssignment, allocationNum: number | null, label: string) {
+    if (allocationNum === (row.allocation_percentage ?? null)) return;
+    try {
+      await updateAssignment.mutateAsync({ id: row.id, allocation_percentage: allocationNum });
+      toast.success(`${label} updated.`);
+    } catch {
+      toast.error(`Failed to update ${label.toLowerCase()}.`);
+    }
+  }
+
   async function commitHours(row: StaffingAssignment) {
     if (hoursDrafts[row.id] === undefined) return;
     const raw = hoursDrafts[row.id];
@@ -131,18 +154,22 @@ export default function StaffingPage() {
       return;
     }
     const allocationNum = hoursNum != null ? Math.round((hoursNum / maxHours) * 1000) / 10 : null;
-    if (allocationNum === (row.allocation_percentage ?? null)) {
-      setHoursDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
+    await commitAllocation(row, allocationNum, 'Hours');
+    setHoursDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
+  }
+
+  async function commitPercentage(row: StaffingAssignment) {
+    if (percentDrafts[row.id] === undefined) return;
+    const raw = percentDrafts[row.id];
+    const pctNum = raw === '' ? null : parseFloat(raw);
+    if (pctNum != null && (isNaN(pctNum) || pctNum < 0 || pctNum > 100)) {
+      toast.error('Percentage must be between 0 and 100.');
+      setPercentDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
       return;
     }
-    try {
-      await updateAssignment.mutateAsync({ id: row.id, allocation_percentage: allocationNum });
-      toast.success('Hours updated.');
-    } catch {
-      toast.error('Failed to update hours.');
-    } finally {
-      setHoursDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
-    }
+    const allocationNum = pctNum != null ? Math.round(pctNum * 10) / 10 : null;
+    await commitAllocation(row, allocationNum, 'Percentage');
+    setPercentDrafts(d => { const n = { ...d }; delete n[row.id]; return n; });
   }
 
   async function commitWindow(row: StaffingAssignment) {
@@ -360,11 +387,12 @@ export default function StaffingPage() {
                   <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[22%]">Project</TableHead>
-                        <TableHead className="w-[22%]">Client</TableHead>
-                        <TableHead className="w-[16%]">Role</TableHead>
-                        <TableHead className="w-[12%] text-right">Hours/wk</TableHead>
-                        <TableHead className="w-[20%]">Window</TableHead>
+                        <TableHead className="w-[19%]">Project</TableHead>
+                        <TableHead className="w-[17%]">Client</TableHead>
+                        <TableHead className="w-[14%]">Role</TableHead>
+                        <TableHead className="w-[9%] text-right">Hours/wk</TableHead>
+                        <TableHead className="w-[8%] text-right">%</TableHead>
+                        <TableHead className="w-[17%]">Window</TableHead>
                         <TableHead className="w-24 text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -400,7 +428,9 @@ export default function StaffingPage() {
                             )}
                           </TableCell>
 
-                          {/* Hours/wk — inline Input for Admin/Manager, plain text otherwise */}
+                          {/* Hours/wk — inline Input for Admin/Manager, plain text otherwise.
+                              Percentage (next cell) is the same underlying allocation_percentage
+                              — editing either one recomputes and saves the other. */}
                           <TableCell className="text-right">
                             {canManage ? (
                               <Input
@@ -412,10 +442,28 @@ export default function StaffingPage() {
                                 onBlur={() => commitHours(row)}
                               />
                             ) : row.allocation_percentage != null ? (
-                              <span>
-                                {((row.allocation_percentage / 100) * maxHoursFor(row)).toFixed(1)}h
-                                <span className="text-muted-foreground text-xs ml-1">({row.allocation_percentage}%)</span>
-                              </span>
+                              <span>{((row.allocation_percentage / 100) * maxHoursFor(row)).toFixed(1)}h</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+
+                          {/* Percentage — inline Input for Admin/Manager, plain text otherwise */}
+                          <TableCell className="text-right">
+                            {canManage ? (
+                              <div className="flex items-center justify-end gap-0.5">
+                                <Input
+                                  type="number" min="0" max="100" step="1"
+                                  className="h-8 text-sm text-right"
+                                  value={percentValueFor(row)}
+                                  onFocus={e => e.target.select()}
+                                  onChange={e => setPercentDrafts(d => ({ ...d, [row.id]: e.target.value }))}
+                                  onBlur={() => commitPercentage(row)}
+                                />
+                                <span className="text-muted-foreground text-xs">%</span>
+                              </div>
+                            ) : row.allocation_percentage != null ? (
+                              <span className="text-muted-foreground text-xs">{row.allocation_percentage}%</span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
@@ -510,19 +558,37 @@ export default function StaffingPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Hours per week on this project</Label>
-              <Input
-                type="number" min="0" max={selectedMaxWeeklyHours} step="1"
-                value={form.hoursPerWeek}
-                onChange={e => setForm(f => ({ ...f, hoursPerWeek: e.target.value }))}
-                placeholder="e.g. 20"
-              />
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <Input
+                  type="number" min="0" max={selectedMaxWeeklyHours} step="1"
+                  value={form.hoursPerWeek}
+                  onFocus={e => e.target.select()}
+                  onChange={e => setForm(f => ({ ...f, hoursPerWeek: e.target.value }))}
+                  placeholder="e.g. 20"
+                />
+                <span className="text-xs text-muted-foreground">or</span>
+                <div className="relative">
+                  <Input
+                    type="number" min="0" max="100" step="1"
+                    value={hoursPreviewPct != null ? String(Math.round(hoursPreviewPct * 10) / 10) : ''}
+                    onFocus={e => e.target.select()}
+                    onChange={e => {
+                      const pct = e.target.value === '' ? null : parseFloat(e.target.value);
+                      setForm(f => ({
+                        ...f,
+                        hoursPerWeek: pct == null || isNaN(pct) ? '' : String(Math.round((pct / 100) * selectedMaxWeeklyHours * 10) / 10),
+                      }));
+                    }}
+                    placeholder="e.g. 50"
+                    className="pr-6"
+                  />
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground">
                 {form.employeeId
-                  ? `Based on their ${selectedMaxWeeklyHours}h/week capacity (set on their profile).`
+                  ? `Based on their ${selectedMaxWeeklyHours}h/week capacity (set on their profile) — either field updates the other.`
                   : `Based on a ${selectedMaxWeeklyHours}h/week default — select a person to use their own capacity.`}
-                {hoursPreviewPct != null && (
-                  <span className="ml-1 font-medium text-foreground">≈ {hoursPreviewPct.toFixed(1)}% allocated.</span>
-                )}
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
