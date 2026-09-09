@@ -148,8 +148,19 @@ export default function StaffingPage() {
       : '';
   }
 
+  // Falls back to the project's own dates when the assignment has no window
+  // of its own — shown directly in the pickers so there's always something
+  // to see and adjust, instead of blank fields with a separate caption.
+  // Safe against an accidental write: commitWindow only fires when a draft
+  // actually exists, and a draft is only created by onChange (the user
+  // editing a value) — just rendering this default never creates one, so
+  // tabbing through an untouched row saves nothing.
   function dateValuesFor(row: StaffingAssignment): { start: string; end: string } {
-    return dateDrafts[row.id] ?? { start: row.start_date || '', end: row.end_date || '' };
+    if (dateDrafts[row.id]) return dateDrafts[row.id];
+    return {
+      start: row.start_date || row.project_start_date || '',
+      end: row.end_date || row.project_end_date || '',
+    };
   }
 
   async function commitRole(row: StaffingAssignment, roleId: string) {
@@ -516,35 +527,26 @@ export default function StaffingPage() {
                           </TableCell>
 
                           {/* Window — inline date pair for Admin/Manager, plain text otherwise.
-                              When this assignment has no window of its own, the project's own
-                              full range is shown as context (not as an editable value — leaving
-                              the inputs blank keeps "follows the project" the real behavior;
-                              typing an explicit date is what actually time-boxes the assignment). */}
+                              Defaults to the project's own dates (see dateValuesFor) so there's
+                              always something concrete to see and, if needed, narrow down. */}
                           <TableCell className="text-sm text-muted-foreground">
                             {canManage ? (
-                              <div className="space-y-0.5">
-                                <div className="flex items-center gap-1">
-                                  <Input
-                                    type="date"
-                                    className="h-8 text-xs px-1.5"
-                                    value={dateValuesFor(row).start}
-                                    onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), start: e.target.value } }))}
-                                    onBlur={() => commitWindow(row)}
-                                  />
-                                  <span>→</span>
-                                  <Input
-                                    type="date"
-                                    className="h-8 text-xs px-1.5"
-                                    value={dateValuesFor(row).end}
-                                    onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), end: e.target.value } }))}
-                                    onBlur={() => commitWindow(row)}
-                                  />
-                                </div>
-                                {!row.start_date && !row.end_date && (row.project_start_date || row.project_end_date) && (
-                                  <p className="text-[11px] text-muted-foreground/70 truncate">
-                                    Full project: {row.project_start_date || '—'} → {row.project_end_date || '—'}
-                                  </p>
-                                )}
+                              <div className="flex items-center gap-1">
+                                <Input
+                                  type="date"
+                                  className="h-8 text-xs px-1.5"
+                                  value={dateValuesFor(row).start}
+                                  onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), start: e.target.value } }))}
+                                  onBlur={() => commitWindow(row)}
+                                />
+                                <span>→</span>
+                                <Input
+                                  type="date"
+                                  className="h-8 text-xs px-1.5"
+                                  value={dateValuesFor(row).end}
+                                  onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), end: e.target.value } }))}
+                                  onBlur={() => commitWindow(row)}
+                                />
                               </div>
                             ) : row.start_date || row.end_date ? (
                               <span className="inline-flex items-center gap-1">
