@@ -469,30 +469,46 @@ export default function StaffingPage() {
                             )}
                           </TableCell>
 
-                          {/* Window — inline date pair for Admin/Manager, plain text otherwise */}
+                          {/* Window — inline date pair for Admin/Manager, plain text otherwise.
+                              When this assignment has no window of its own, the project's own
+                              full range is shown as context (not as an editable value — leaving
+                              the inputs blank keeps "follows the project" the real behavior;
+                              typing an explicit date is what actually time-boxes the assignment). */}
                           <TableCell className="text-sm text-muted-foreground">
                             {canManage ? (
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  type="date"
-                                  className="h-8 text-xs px-1.5"
-                                  value={dateValuesFor(row).start}
-                                  onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), start: e.target.value } }))}
-                                  onBlur={() => commitWindow(row)}
-                                />
-                                <span>→</span>
-                                <Input
-                                  type="date"
-                                  className="h-8 text-xs px-1.5"
-                                  value={dateValuesFor(row).end}
-                                  onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), end: e.target.value } }))}
-                                  onBlur={() => commitWindow(row)}
-                                />
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    type="date"
+                                    className="h-8 text-xs px-1.5"
+                                    value={dateValuesFor(row).start}
+                                    onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), start: e.target.value } }))}
+                                    onBlur={() => commitWindow(row)}
+                                  />
+                                  <span>→</span>
+                                  <Input
+                                    type="date"
+                                    className="h-8 text-xs px-1.5"
+                                    value={dateValuesFor(row).end}
+                                    onChange={e => setDateDrafts(d => ({ ...d, [row.id]: { ...dateValuesFor(row), end: e.target.value } }))}
+                                    onBlur={() => commitWindow(row)}
+                                  />
+                                </div>
+                                {!row.start_date && !row.end_date && (row.project_start_date || row.project_end_date) && (
+                                  <p className="text-[11px] text-muted-foreground/70 truncate">
+                                    Full project: {row.project_start_date || '—'} → {row.project_end_date || '—'}
+                                  </p>
+                                )}
                               </div>
                             ) : row.start_date || row.end_date ? (
                               <span className="inline-flex items-center gap-1">
                                 <CalendarRange className="h-3.5 w-3.5 shrink-0" />
                                 {row.start_date || '—'} → {row.end_date || '—'}
+                              </span>
+                            ) : row.project_start_date || row.project_end_date ? (
+                              <span className="inline-flex items-center gap-1 text-muted-foreground/70">
+                                <CalendarRange className="h-3.5 w-3.5 shrink-0" />
+                                {row.project_start_date || '—'} → {row.project_end_date || '—'}
                               </span>
                             ) : (
                               <span className="text-muted-foreground/70">Full project</span>
