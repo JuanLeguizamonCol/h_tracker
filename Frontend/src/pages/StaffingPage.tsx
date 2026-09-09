@@ -4,7 +4,7 @@ import { CalendarRange, Loader2, Plus, Pencil, Trash2, Search, Users2, AlertTria
 import { useAuth } from '@/contexts/AuthContext';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useActiveProjects } from '@/hooks/useProjects';
-import { useProjectRoles, useAllProjectRoles } from '@/hooks/useProjectRoles';
+import { useProjectRoles, useAllProjectRoles, useCreateProjectRole } from '@/hooks/useProjectRoles';
 import { useStaffing, useCreateAssignment, useUpdateAssignment, useDeleteAssignment } from '@/hooks/useAssignedProjects';
 import { StaffingAssignment } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -61,12 +61,47 @@ export default function StaffingPage() {
   const createAssignment = useCreateAssignment();
   const updateAssignment = useUpdateAssignment();
   const deleteAssignment = useDeleteAssignment();
+  const createProjectRole = useCreateProjectRole();
 
   const [search, setSearch] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AssignForm>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Create-role-on-the-fly — triggered from either the inline Role select in
+  // the table (targetRow set) or the New/Edit Assignment dialog's Role
+  // select (targetRow null, just fills form.roleId). Admin-only, matching
+  // POST /project-roles.
+  const [createRoleFor, setCreateRoleFor] = useState<{ projectId: string; projectName: string; targetRow?: StaffingAssignment } | null>(null);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRoleRate, setNewRoleRate] = useState('');
+  const [isCreatingRole, setIsCreatingRole] = useState(false);
+
+  async function handleCreateRole() {
+    if (!createRoleFor || !newRoleName.trim()) { toast.error('Enter a role name.'); return; }
+    setIsCreatingRole(true);
+    try {
+      const role = await createProjectRole.mutateAsync({
+        project_id: createRoleFor.projectId,
+        name: newRoleName.trim(),
+        hourly_rate_usd: newRoleRate ? parseFloat(newRoleRate) : 0,
+      });
+      if (createRoleFor.targetRow) {
+        await commitRole(createRoleFor.targetRow, role.id);
+      } else {
+        setForm(f => ({ ...f, roleId: role.id }));
+      }
+      toast.success(`Role "${role.name}" created${newRoleRate ? '' : ' — remember to set its rate'}.`);
+      setCreateRoleFor(null);
+      setNewRoleName('');
+      setNewRoleRate('');
+    } catch {
+      toast.error('Failed to create role.');
+    } finally {
+      setIsCreatingRole(false);
+    }
+  }
 
   const { data: projectRoles = [] } = useProjectRoles(form.projectId || undefined);
 
@@ -411,7 +446,13 @@ export default function StaffingPage() {
                             {canManage ? (
                               <Select
                                 value={row.role_id || '_none'}
-                                onValueChange={v => commitRole(row, v)}
+                                onValueChange={v => {
+                                  if (v === '_create_new') {
+                                    setCreateRoleFor({ projectId: row.project_id, projectName: row.project_name, targetRow: row });
+                                  } else {
+                                    commitRole(row, v);
+                                  }
+                                }}
                               >
                                 <SelectTrigger className="h-8 text-sm">
                                   <SelectValue placeholder="No role" />
@@ -421,6 +462,11 @@ export default function StaffingPage() {
                                   {(rolesByProject.get(row.project_id) ?? []).map(r => (
                                     <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                                   ))}
+                                  {isAdmin && (
+                                    <SelectItem value="_create_new" className="text-primary">
+                                      <span className="flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" /> Create new role…</span>
+                                    </SelectItem>
+                                  )}
                                 </SelectContent>
                               </Select>
                             ) : (
@@ -564,11 +610,24 @@ export default function StaffingPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Role</Label>
-              <Select value={form.roleId || '_none'} onValueChange={v => setForm(f => ({ ...f, roleId: v === '_none' ? '' : v }))} disabled={!form.projectId}>
+              <Select
+                value={form.roleId || '_none'}
+                onValueChange={v => {
+                  if (v === '_create_new') {
+                    setCreateRoleFor({ projectId: form.projectId, projectName: selectedProject?.name || '' });
+                  } else {
+                    setForm(f => ({ ...f, roleId: v === '_none' ? '' : v }));
+                  }
+                }}
+                disabled={!form.projectId}
+              >
                 <SelectTrigger><SelectValue placeholder="No role" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_none">No role</SelectItem>
                   {projectRoles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                  <SelectItem value="_create_new" className="text-primary">
+                    <span className="flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" /> Create new role…</span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -657,6 +716,49 @@ export default function StaffingPage() {
             <Button onClick={handleSave} disabled={isSaving}>
               {isSaving && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
               {editingId ? 'Save' : 'Assign'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Role — triggered from either Role select above, without
+          leaving Staffing to go create it on the project's own page. */}
+      <Dialog open={!!createRoleFor} onOpenChange={o => { if (!o) { setCreateRoleFor(null); setNewRoleName(''); setNewRoleRate(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New Role — {createRoleFor?.projectName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Role Name *</Label>
+              <Input
+                autoFocus
+                value={newRoleName}
+                onChange={e => setNewRoleName(e.target.value)}
+                placeholder="e.g. Associate"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Hourly Rate (optional)</Label>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground">$</span>
+                <Input
+                  type="number" min="0" step="0.01"
+                  value={newRoleRate}
+                  onChange={e => setNewRoleRate(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave blank to set it later — invoicing will flag $0 lines for this role until it's set.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateRoleFor(null)}>Cancel</Button>
+            <Button onClick={handleCreateRole} disabled={isCreatingRole}>
+              {isCreatingRole && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Create &amp; Assign
             </Button>
           </DialogFooter>
         </DialogContent>
