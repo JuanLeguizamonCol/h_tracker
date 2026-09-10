@@ -158,6 +158,16 @@ def create_new_invoice(
         )
         db.commit()
         db.refresh(invoice)
+    if project and project.owner_id:
+        from services.invoice_owner_notifications import notify_invoice_owner
+        owner_email = db.query(Employee.email).filter(Employee.id == project.owner_id).scalar()
+        notify_invoice_owner(
+            owner_email,
+            project_name=project.name,
+            invoice_id=invoice.id,
+            invoice_number=invoice.invoice_number or invoice.id[:8],
+            total=float(invoice.total or 0),
+        )
     return invoice
 
 

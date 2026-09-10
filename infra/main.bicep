@@ -76,6 +76,7 @@ var containerAppsEnvName = '${prefix}-env'
 var backendAppName = '${prefix}-backend'
 var frontendAppName = '${prefix}-frontend'
 var invoiceJobName = '${prefix}-invoice-job'
+var timesheetReminderJobName = '${prefix}-timesheet-reminder-job'
 // Storage account: 3-24 chars, lowercase alphanumeric, globally unique.
 // Single container for every app-managed upload — invoice fee attachments,
 // announcement attachments, and admin-uploaded signature images (see
@@ -635,6 +636,82 @@ resource invoiceJob 'Microsoft.App/jobs@2024-03-01' = {
 }
 
 // ---------------------------------------------------------------------------
+// 8. Scheduled Timesheet Reminders — Container Apps Job
+// ---------------------------------------------------------------------------
+// Runs `python -m jobs.send_timesheet_reminders` once a week, emailing every
+// active employee who hasn't logged hours in the trailing 7 days. Same
+// single-replica pattern as invoiceJob above; no DB-level idempotency guard
+// is needed here since it only sends email, never writes rows.
+//
+// cronExpression is UTC. '0 13 * * 1' = 13:00 UTC Monday = 08:00 America/Bogota.
+//
+// NOTE: like the backend app, this job only gets outbound email if SMTP_HOST /
+// SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_EMAIL (see utils/email.py) are
+// configured on it the same way they're configured on backendApp — those
+// aren't declared here because they aren't declared as bicep params for
+// backendApp either (set out-of-band). Without them this job just logs and
+// exits 0 (utils/email.py::send_email is a safe no-op when SMTP isn't set).
+
+resource timesheetReminderJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: timesheetReminderJobName
+  location: location
+  tags: tags
+  properties: {
+    environmentId: containerAppsEnv.id
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 900           // 15 min hard cap per run
+      replicaRetryLimit: 1
+      scheduleTriggerConfig: {
+        cronExpression: '0 13 * * 1'
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: databaseUrl
+        }
+        {
+          name: 'acr-password'
+          value: acrAdminPassword0
+        }
+      ]
+      registries: [
+        {
+          server: acrLoginServer
+          username: acrAdminUsername
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'timesheet-reminder-job'
+          image: '${acrLoginServer}/backend:latest'
+          command: [
+            'python'
+            '-m'
+            'jobs.send_timesheet_reminders'
+          ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'DATABASE_URL'
+              secretRef: 'database-url'
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Outputs
 // ---------------------------------------------------------------------------
 
@@ -667,3 +744,6 @@ output logAnalyticsWorkspaceId string = logAnalytics.id
 
 @description('Name of the scheduled invoice-generation Container Apps Job.')
 output invoiceJobName string = invoiceJob.name
+
+@description('Name of the scheduled timesheet-reminder Container Apps Job.')
+output timesheetReminderJobName string = timesheetReminderJob.name

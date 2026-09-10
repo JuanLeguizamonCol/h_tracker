@@ -35,6 +35,7 @@ env:
   BACKEND_APP: impactpoint-hours-backend
   FRONTEND_APP: impactpoint-hours-frontend
   INVOICE_JOB: impactpoint-hours-invoice-job
+  TIMESHEET_REMINDER_JOB: impactpoint-hours-timesheet-reminder-job
 
 # =============================================================================
 # Job 1 — Build Docker images and push to ACR
@@ -235,6 +236,25 @@ jobs:
           }
           retry az containerapp job update \
             --name ${{ env.INVOICE_JOB }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR_LOGIN_SERVER }}/backend:${{ needs.build-and-push.outputs.image-tag }}
+
+      # -----------------------------------------------------------------------
+      # Update the scheduled timesheet-reminder Job to the SHA-tagged image,
+      # same reasoning as the invoice Job update above.
+      # -----------------------------------------------------------------------
+      - name: Update timesheet reminder Job image
+        run: |
+          retry() {
+            local n=1 max=4 delay=15
+            until "$@"; do
+              if [ "$n" -ge "$max" ]; then echo "FAILED after $n attempts: $*"; return 1; fi
+              echo "Attempt $n failed; retrying in ${delay}s..."; sleep "$delay"
+              n=$((n+1)); delay=$((delay*2))
+            done
+          }
+          retry az containerapp job update \
+            --name ${{ env.TIMESHEET_REMINDER_JOB }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.ACR_LOGIN_SERVER }}/backend:${{ needs.build-and-push.outputs.image-tag }}
 

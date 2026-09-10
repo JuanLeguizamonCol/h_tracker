@@ -330,6 +330,18 @@ def generate_invoice_for_project_period(
                 total=float(invoice.total),
             )
 
+        if project.owner_id:
+            from models.employees import Employee
+            from services.invoice_owner_notifications import notify_invoice_owner
+            owner_email = db.query(Employee.email).filter(Employee.id == project.owner_id).scalar()
+            notify_invoice_owner(
+                owner_email,
+                project_name=project.name,
+                invoice_id=invoice.id,
+                invoice_number=invoice.invoice_number,
+                total=float(invoice.total),
+            )
+
         db.commit()
         logger.info(
             f"Auto-generated invoice {invoice.invoice_number} for project {project.id} "

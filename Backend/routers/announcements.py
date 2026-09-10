@@ -11,6 +11,7 @@ from utils import blob_storage
 from services.announcements import (
     create_announcement, list_announcements, update_announcement, delete_announcement,
 )
+from services.announcement_notifications import notify_announcement_published
 from schemas.announcements import (
     AnnouncementCreate, AnnouncementUpdate, AnnouncementOut, AnnouncementAttachmentOut,
 )
@@ -56,7 +57,9 @@ def create(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one location")
     if data.visibility == "roles" and not data.roles:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one role")
-    return _to_out(create_announcement(db, current_employee.id, data))
+    result = create_announcement(db, current_employee.id, data)
+    notify_announcement_published(db, result)
+    return _to_out(result)
 
 
 @announcements_router.patch(

@@ -17,6 +17,8 @@ Sistema de seguimiento de horas y facturación para empresas de servicios profes
 | Notificaciones | Sonner |
 | Auth | Usuario/contraseña → JWT (HS256, python-jose + passlib/bcrypt) |
 | Facturación programada | Azure Container Apps Job (cron diario) — `python -m jobs.generate_invoices` |
+| Recordatorios de timesheet | Azure Container Apps Job (cron semanal) — `python -m jobs.send_timesheet_reminders` |
+| Email saliente | SMTP (`utils/email.py`) — notificaciones internas (PTO, facturas, anuncios, timesheet) |
 | Exportación | ReportLab / xhtml2pdf (PDF), OpenPyXL (Excel) |
 | Almacenamiento | Azure Blob Storage para adjuntos (fallback a filesystem local) |
 | Contenerización | Docker Compose + Nginx (local) · Azure Container Apps + Bicep (prod) |
@@ -309,13 +311,27 @@ Self-service time-off requests (Dashboard) — vacation / sick / holiday / other
 Creating is always for the caller (`user_id` = current employee); listing is
 scoped to "my own" for regular employees, Admin/Manager can see everyone's
 (e.g. an approvals queue via `?status_filter=pending`). Reviewing is
-Admin/Manager only; cancelling is the owner (only while `pending`) or
-Admin/Manager (any status, cleanup).
+Admin/Manager only (any of them, not just the designated approver); cancelling
+is the owner (only while `pending`) or Admin/Manager (any status, cleanup).
+
+`approver_id` flags who is expected to review the request — it's informational
+routing, not an access-control gate. If omitted on create, it defaults to the
+requester's `Employee.supervisor_id` (see `models/employees.py`); the frontend
+lets the requester override it from the Admin/Manager list. Supporting
+documents (e.g. a medical certificate) can be attached via
+`pto-request-attachments`, stored the same way as `invoice-fee-attachments`
+(Azure Blob when configured, else local `/uploads`) — visible/uploadable by
+the request's owner or any Admin/Manager, deletable by the owner only while
+`pending` or by Admin/Manager any time.
 ```
-POST /pto-requests/                     → PtoRequestOut body:{category, start_date, end_date, hours, notes?}
+POST /pto-requests/                     → PtoRequestOut body:{category, start_date, end_date, hours, notes?, approver_id?}
 GET  /pto-requests/                     → List[PtoRequestOut] ?user_id ?status_filter
 PATCH /pto-requests/{id}/review         → PtoRequestOut body:{status: approved|rejected, review_notes?} (Admin/Manager)
 DEL  /pto-requests/{id}                 → 204 (owner while pending, or Admin/Manager)
+
+POST /pto-request-attachments/upload    → PtoRequestAttachmentOut (multipart: pto_request_id + file)
+GET  /pto-request-attachments/          → List[PtoRequestAttachmentOut] ?pto_request_id
+DEL  /pto-request-attachments/{id}      → 204
 ```
 
 ### Health
@@ -391,6 +407,36 @@ Entrypoint de una sola ejecución (`python -m jobs.generate_invoices`), corre co
   (`services/billing_periods.py`), genera la factura del período vigente.
 - Registra en `scheduler_log` y sale con código 0/1.
 - Doble garantía anti-duplicados: el Job corre una sola vez + el índice único parcial.
+
+### jobs/send_timesheet_reminders.py
+Entrypoint de una sola ejecución (`python -m jobs.send_timesheet_reminders`), corre
+como **Azure Container Apps Job** aparte (cron semanal — lunes 08:00 America/Bogota,
+`infra/main.bicep::timesheetReminderJob`). Llama a
+`services/timesheet_reminders.py::send_timesheet_reminders`, que le envía un correo
+a todo empleado activo sin ninguna hora registrada en los últimos 7 días (excluye a
+quien lleve menos de 7 días en la empresa, para no marcar falsos positivos).
+
+### Notificaciones por correo (utils/email.py)
+El mismo sistema SMTP que originalmente se usó para los correos de restablecimiento
+de contraseña (auth por contraseña, eliminada — ver `023_password_auth.py`) hoy se
+reutiliza para notificaciones internas. `email_enabled()` es `False` sin `SMTP_HOST`
+configurado — `send_email()` entonces solo loguea y no falla nada (no bloquea la
+acción que la disparó). Todo el copy de estos correos está en **inglés**. Disparadores
+actuales, todos "best-effort" (nunca lanzan si el correo falla):
+
+| Evento | Servicio | Destinatario(s) |
+|--------|----------|------------------|
+| Nuevo cliente creado | `services/client_notifications.py` | `NEW_CLIENT_NOTIFY_EMAIL` (fijo por env) |
+| Solicitud de PTO creada | `services/pto_notifications.py::notify_pto_request_created` | El aprobador designado (`PtoRequest.approver_id`) |
+| Solicitud de PTO aprobada/rechazada | `services/pto_notifications.py::notify_pto_request_reviewed` | El empleado que la solicitó |
+| Factura generada (manual o por el job) | `services/invoice_owner_notifications.py::notify_invoice_owner` | El *owner* del proyecto (`Project.owner_id`) — distinto del manager, que sigue recibiendo la notificación in-app existente (`services/notifications.py`) |
+| Anuncio publicado | `services/announcement_notifications.py::notify_announcement_published` | Toda la audiencia visible del anuncio (mismas reglas que `list_announcements`: all/locations/roles/pegasus_contractors), excluyendo a quien lo publicó |
+| Timesheet sin registrar hace 7 días | `services/timesheet_reminders.py` | El empleado activo mismo (ver `jobs/send_timesheet_reminders.py` arriba) |
+
+`utils/email_html.py` trae el wrapper HTML compartido (`wrap_email`) y un botón de
+acción (`action_button`) que arma un link absoluto a `FRONTEND_URL` (seteado en el
+backend por el pipeline de deploy, ver `.github/workflows/deploy.yml`) — sin esa env
+var el botón simplemente no se renderiza.
 
 ### services/billing_periods.py
 Cálculo de períodos por proyecto (`next_invoice_date`, `period_bounds_for_project`)
@@ -529,6 +575,9 @@ docker exec h_tracker-backend-1 alembic upgrade head
 
 # Ejecutar el job de facturas manualmente (mismo entrypoint que el Container Apps Job)
 docker exec h_tracker-backend-1 python -m jobs.generate_invoices
+
+# Ejecutar el job de recordatorios de timesheet manualmente
+docker exec h_tracker-backend-1 python -m jobs.send_timesheet_reminders
 
 # Crear/asegurar admin manualmente (debe coincidir con su cuenta de Entra ID)
 docker exec -e ADMIN_EMAIL=... h_tracker-backend-1 python -m jobs.bootstrap_admin
