@@ -10,6 +10,7 @@ from services.pto_requests import (
     create_pto_request, get_pto_requests, get_pto_request,
     review_pto_request, delete_pto_request,
 )
+from services.pto_notifications import notify_pto_request_created, notify_pto_request_reviewed
 from utils.auth_jwt import get_current_employee
 from utils.roles import get_role
 
@@ -32,7 +33,14 @@ def create_new_pto_request(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End date must be on or after the start date.")
     if data.hours <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Hours must be greater than 0.")
-    return create_pto_request(db, current_employee.id, data)
+    if data.approver_id and not db.query(Employee.id).filter(Employee.id == data.approver_id).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approver not found.")
+    result = create_pto_request(db, current_employee.id, data)
+    approver_email = None
+    if result["approver_id"]:
+        approver_email = db.query(Employee.email).filter(Employee.id == result["approver_id"]).scalar()
+    notify_pto_request_created(result, approver_email)
+    return result
 
 
 @pto_requests_router.get("/", response_model=List[PtoRequestOut])
@@ -64,6 +72,8 @@ def review_request(
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PTO request not found")
     result = review_pto_request(db, request_id, current_employee.id, body.status, body.review_notes)
+    requester_email = db.query(Employee.email).filter(Employee.id == result["user_id"]).scalar()
+    notify_pto_request_reviewed(result, requester_email)
     return result
 
 

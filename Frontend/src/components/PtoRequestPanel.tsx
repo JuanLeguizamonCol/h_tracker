@@ -1,9 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { CalendarHeart, Palmtree, Thermometer, PartyPopper, MoreHorizontal, Plus, Check, X, Loader2, Trash2 } from 'lucide-react';
+import { CalendarHeart, Palmtree, Thermometer, PartyPopper, MoreHorizontal, Plus, Check, X, Loader2, Trash2, Paperclip, Upload, FileText } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { usePtoRequests, useCreatePtoRequest, useReviewPtoRequest, useCancelPtoRequest } from '@/hooks/usePtoRequests';
+import {
+  usePtoRequests, useCreatePtoRequest, useReviewPtoRequest, useCancelPtoRequest,
+  usePtoRequestAttachments, useUploadPtoRequestAttachment, useDeletePtoRequestAttachment,
+} from '@/hooks/usePtoRequests';
+import { useAdminEmployees, useManagerEmployees } from '@/hooks/useProjects';
+import { useEmployee } from '@/hooks/useEmployees';
 import { PtoCategory, PtoStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -34,9 +39,17 @@ type PtoForm = {
   endDate: string;
   hours: string;
   notes: string;
+  approverId: string;
 };
 
-const EMPTY_FORM: PtoForm = { category: 'vacation', startDate: '', endDate: '', hours: '', notes: '' };
+const EMPTY_FORM: PtoForm = { category: 'vacation', startDate: '', endDate: '', hours: '', notes: '', approverId: '' };
+
+function formatFileSize(bytes: number | null): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function formatDate(iso: string): string {
   return format(new Date(`${iso}T00:00:00`), 'MMM d, yyyy');
@@ -51,6 +64,17 @@ export function PtoRequestPanel() {
   const reviewRequest = useReviewPtoRequest();
   const cancelRequest = useCancelPtoRequest();
 
+  const { data: admins = [] } = useAdminEmployees();
+  const { data: managers = [] } = useManagerEmployees();
+  const { data: mySupervisor } = useEmployee(employee?.supervisor_id ?? undefined);
+
+  const approverOptions = useMemo(() => {
+    const byId = new Map<string, { id: string; name: string }>();
+    [...admins, ...managers].forEach(e => byId.set(e.id, { id: e.id, name: e.name }));
+    if (mySupervisor) byId.set(mySupervisor.id, { id: mySupervisor.id, name: mySupervisor.name });
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [admins, managers, mySupervisor]);
+
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [form, setForm] = useState<PtoForm>(EMPTY_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,6 +82,43 @@ export function PtoRequestPanel() {
   const [reviewing, setReviewing] = useState<{ id: string; status: 'approved' | 'rejected' } | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [isReviewing, setIsReviewing] = useState(false);
+
+  const [docsFor, setDocsFor] = useState<{ id: string; label: string } | null>(null);
+  const { data: docAttachments = [], isLoading: docsLoading } = usePtoRequestAttachments(docsFor?.id);
+  const uploadAttachment = useUploadPtoRequestAttachment();
+  const deleteAttachment = useDeletePtoRequestAttachment();
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function openForm() {
+    setForm({ ...EMPTY_FORM, approverId: employee?.supervisor_id || '' });
+    setIsFormOpen(true);
+  }
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !docsFor) return;
+    setIsUploading(true);
+    try {
+      await uploadAttachment.mutateAsync({ ptoRequestId: docsFor.id, file });
+      toast.success('Document uploaded.');
+    } catch {
+      toast.error('Failed to upload document.');
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function handleDeleteAttachment(id: string) {
+    if (!docsFor) return;
+    try {
+      await deleteAttachment.mutateAsync({ id, ptoRequestId: docsFor.id });
+      toast.success('Document removed.');
+    } catch {
+      toast.error('Failed to remove document.');
+    }
+  }
 
   const daySpan = useMemo(() => {
     if (!form.startDate || !form.endDate) return null;
@@ -80,6 +141,7 @@ export function PtoRequestPanel() {
         end_date: form.endDate,
         hours: hoursNum,
         notes: form.notes || null,
+        approver_id: form.approverId || null,
       });
       toast.success('Time off requested — awaiting approval.');
       setIsFormOpen(false);
@@ -124,7 +186,7 @@ export function PtoRequestPanel() {
           <CardTitle className="text-base flex items-center gap-2">
             <CalendarHeart className="h-4 w-4 text-primary" /> My Time Off
           </CardTitle>
-          <Button size="sm" className="gap-1.5" onClick={() => setIsFormOpen(true)}>
+          <Button size="sm" className="gap-1.5" onClick={openForm}>
             <Plus className="h-3.5 w-3.5" /> Request Time Off
           </Button>
         </CardHeader>
@@ -153,6 +215,11 @@ export function PtoRequestPanel() {
                           {formatDate(r.start_date)} → {formatDate(r.end_date)}
                           {r.notes ? ` · ${r.notes}` : ''}
                         </p>
+                        {r.status === 'pending' && r.approver_name && (
+                          <p className="text-xs text-muted-foreground/70 truncate">
+                            Awaiting approval from {r.approver_name}
+                          </p>
+                        )}
                         {r.status !== 'pending' && r.reviewer_name && (
                           <p className="text-xs text-muted-foreground/70 truncate">
                             {STATUS_BADGE[r.status].label} by {r.reviewer_name}
@@ -163,6 +230,13 @@ export function PtoRequestPanel() {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <Badge variant={badge.variant} className="text-xs font-normal">{badge.label}</Badge>
+                      <Button
+                        variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground"
+                        onClick={() => setDocsFor({ id: r.id, label: `${meta.label} · ${formatDate(r.start_date)} → ${formatDate(r.end_date)}` })}
+                        title="Documents"
+                      >
+                        <Paperclip className="h-3.5 w-3.5" />
+                      </Button>
                       {r.status === 'pending' && (
                         <Button
                           variant="ghost" size="icon" className="h-7 w-7 text-destructive"
@@ -211,9 +285,19 @@ export function PtoRequestPanel() {
                           <p className="text-xs text-muted-foreground truncate">
                             {meta.label} · {r.hours}h · {formatDate(r.start_date)} → {formatDate(r.end_date)}
                           </p>
+                          {r.approver_name && (
+                            <p className="text-xs text-muted-foreground/70 truncate">Approver: {r.approver_name}</p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground"
+                          onClick={() => setDocsFor({ id: r.id, label: `${r.employee_name} · ${meta.label}` })}
+                          title="Documents"
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                        </Button>
                         <Button
                           variant="ghost" size="icon" className="h-7 w-7 text-emerald-600 hover:text-emerald-700"
                           onClick={() => setReviewing({ id: r.id, status: 'approved' })}
@@ -288,6 +372,26 @@ export function PtoRequestPanel() {
                 placeholder="Anything your manager should know…"
               />
             </div>
+            <div className="space-y-1.5">
+              <Label>Needs approval from</Label>
+              <Select
+                value={form.approverId || '__none__'}
+                onValueChange={v => setForm(f => ({ ...f, approverId: v === '__none__' ? '' : v }))}
+              >
+                <SelectTrigger><SelectValue placeholder="Select an approver" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No specific approver</SelectItem>
+                  {approverOptions.map(a => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}{a.id === employee?.supervisor_id ? ' (your supervisor)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Any Admin or Manager can still review the request — this just flags who should.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsFormOpen(false)}>Cancel</Button>
@@ -320,6 +424,59 @@ export function PtoRequestPanel() {
               {isReviewing && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
               {reviewing?.status === 'approved' ? 'Approve' : 'Reject'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Documents dialog */}
+      <Dialog open={!!docsFor} onOpenChange={o => { if (!o) setDocsFor(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Documents</DialogTitle>
+            {docsFor && <p className="text-xs text-muted-foreground">{docsFor.label}</p>}
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            {docsLoading ? (
+              <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            ) : docAttachments.length === 0 ? (
+              <p className="text-center text-muted-foreground text-sm py-4">No documents attached yet.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {docAttachments.map(att => (
+                  <div key={att.id} className="flex items-center justify-between gap-2 p-2 bg-muted/30 rounded-lg">
+                    <a
+                      href={att.file_url} target="_blank" rel="noreferrer"
+                      className="flex items-center gap-2 min-w-0 text-sm text-foreground hover:text-primary"
+                    >
+                      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{att.file_name}</span>
+                      {att.file_size != null && (
+                        <span className="text-xs text-muted-foreground shrink-0">{formatFileSize(att.file_size)}</span>
+                      )}
+                    </a>
+                    <Button
+                      variant="ghost" size="icon" className="h-6 w-6 text-destructive shrink-0"
+                      onClick={() => handleDeleteAttachment(att.id)}
+                      title="Remove document"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelected} />
+            <Button
+              variant="outline" size="sm" className="w-full gap-1.5"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+            >
+              {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              Upload document
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDocsFor(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

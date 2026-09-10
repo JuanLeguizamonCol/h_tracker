@@ -34,6 +34,7 @@ from routers.reports import reports_router
 from routers.announcements import announcements_router
 from routers.announcement_attachments import announcement_attachments_router
 from routers.pto_requests import pto_requests_router
+from routers.pto_request_attachments import pto_request_attachments_router
 
 # Import all models so Base.metadata sees them
 import models  # noqa - imports all models via __init__.py
@@ -100,6 +101,7 @@ app.include_router(reports_router, dependencies=auth_deps)
 app.include_router(announcements_router, dependencies=auth_deps)
 app.include_router(announcement_attachments_router, dependencies=auth_deps)
 app.include_router(pto_requests_router, dependencies=auth_deps)
+app.include_router(pto_request_attachments_router, dependencies=auth_deps)
 
 
 # ---------- Health check ----------

@@ -27,3 +27,4 @@ from models.client_invoice_sequence import ClientInvoiceSequence
 from models.announcements import Announcement
 from models.announcement_attachments import AnnouncementAttachment
 from models.pto_requests import PtoRequest
+from models.pto_request_attachments import PtoRequestAttachment

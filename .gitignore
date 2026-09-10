@@ -190,3 +190,8 @@ infra-template/
 
 #Graphify
 graphify-out/
+
+# Local-only upload fallback (UPLOAD_DIR default) — real uploads go to Azure
+# Blob Storage in prod; this only fills up with test files from local dev.
+# The attachment routers os.makedirs() it at runtime as needed.
+Backend/uploads/

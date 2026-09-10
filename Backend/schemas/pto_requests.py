@@ -12,6 +12,10 @@ class PtoRequestCreate(BaseModel):
     end_date: date
     hours: float
     notes: Optional[str] = None
+    # Who should approve this — defaults to the requester's supervisor when omitted
+    # (see services/pto_requests.py::create_pto_request). Any Admin/Manager can
+    # still review the request regardless of who is set here.
+    approver_id: Optional[str] = None
 
 
 class PtoRequestReview(BaseModel):
@@ -31,6 +35,8 @@ class PtoRequestOut(BaseModel):
     hours: float
     notes: Optional[str] = None
     status: str
+    approver_id: Optional[str] = None
+    approver_name: Optional[str] = None
     reviewed_by: Optional[str] = None
     reviewer_name: Optional[str] = None
     reviewed_at: Optional[datetime] = None

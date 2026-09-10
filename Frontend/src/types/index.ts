@@ -548,10 +548,23 @@ export interface PtoRequest {
   hours: number;
   notes: string | null;
   status: PtoStatus;
+  approver_id: string | null;
+  approver_name: string | null;
   reviewed_by: string | null;
   reviewer_name: string | null;
   reviewed_at: string | null;
   review_notes: string | null;
+  created_at: string;
+}
+
+export interface PtoRequestAttachment {
+  id: string;
+  pto_request_id: string;
+  file_name: string;
+  file_url: string;
+  file_size: number | null;
+  uploaded_by: string | null;
+  uploaded_by_name: string | null;
   created_at: string;
 }
 
