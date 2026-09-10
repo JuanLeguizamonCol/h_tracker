@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -59,6 +60,10 @@ export default function StaffingPage() {
   // an allocation %) is how internal/non-billable workload counts toward
   // their utilization in Reports. It's opt-in per assignment, not automatic.
   const projects = allActiveProjects;
+  const projectOptions = useMemo(
+    () => projects.map(p => ({ id: p.id, label: `${p.name}${p.is_internal ? ' (Internal)' : ''}` })),
+    [projects]
+  );
 
   const createAssignment = useCreateAssignment();
   const updateAssignment = useUpdateAssignment();
@@ -664,19 +669,15 @@ export default function StaffingPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Project</Label>
-              <Select
-                value={form.projectId}
-                onValueChange={v => { if (v === '_create_new') { setIsCreateProjectOpen(true); } else { handleProjectChange(v); } }}
+              <SearchableCombobox
+                options={projectOptions}
+                value={form.projectId || null}
+                onChange={v => { if (v) handleProjectChange(v); }}
+                onCreateNew={() => setIsCreateProjectOpen(true)}
+                createNewLabel="Create new project…"
+                placeholder="Select a project"
                 disabled={!!editingId}
-              >
-                <SelectTrigger><SelectValue placeholder="Select a project" /></SelectTrigger>
-                <SelectContent>
-                  {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}{p.is_internal ? ' (Internal)' : ''}</SelectItem>)}
-                  <SelectItem value="_create_new" className="text-primary">
-                    <span className="flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" /> Create new project…</span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Role</Label>

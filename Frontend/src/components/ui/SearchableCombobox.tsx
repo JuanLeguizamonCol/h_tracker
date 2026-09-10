@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, Search } from 'lucide-react';
+import { ChevronDown, Check, Search, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface ComboboxOption {
@@ -17,6 +17,11 @@ interface SearchableComboboxProps {
   clearable?: boolean;
   className?: string;
   disabled?: boolean;
+  // Pinned action row, always shown right under the search input — never
+  // hidden by the search filter, so it's reachable however narrow the
+  // results get instead of only appearing at the bottom of a long list.
+  onCreateNew?: () => void;
+  createNewLabel?: string;
 }
 
 export function SearchableCombobox({
@@ -28,6 +33,8 @@ export function SearchableCombobox({
   clearable = false,
   className,
   disabled = false,
+  onCreateNew,
+  createNewLabel = 'Create new…',
 }: SearchableComboboxProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -106,6 +113,17 @@ export function SearchableCombobox({
               placeholder="Search..."
             />
           </div>
+
+          {/* Pinned create-new action — always visible, unaffected by search */}
+          {onCreateNew && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-1.5 px-3 py-2 text-sm text-primary hover:bg-accent border-b"
+              onClick={() => { onCreateNew(); setOpen(false); setSearch(''); }}
+            >
+              <Plus className="h-3.5 w-3.5" /> {createNewLabel}
+            </button>
+          )}
 
           {/* Options list */}
           <div className="max-h-56 overflow-y-auto py-1">
