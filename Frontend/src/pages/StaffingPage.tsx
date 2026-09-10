@@ -55,6 +55,10 @@ export default function StaffingPage() {
   const { data: staffing = [], isLoading: staffingLoading } = useStaffing();
   const { data: allProjectRoles = [] } = useAllProjectRoles();
   const { data: activeClients = [] } = useActiveClients();
+  const clientOptions = useMemo(
+    () => activeClients.map(c => ({ id: c.id, label: c.name })),
+    [activeClients]
+  );
 
   // Internal projects ARE selectable — staffing someone on one directly (with
   // an allocation %) is how internal/non-billable workload counts toward
@@ -856,18 +860,14 @@ export default function StaffingPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Client *</Label>
-              <Select
-                value={newProjectClientId}
-                onValueChange={v => { if (v === '_create_new') { setIsCreateClientOpen(true); } else { setNewProjectClientId(v); } }}
-              >
-                <SelectTrigger><SelectValue placeholder="Select a client" /></SelectTrigger>
-                <SelectContent>
-                  {activeClients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  <SelectItem value="_create_new" className="text-primary">
-                    <span className="flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" /> Create new client…</span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <SearchableCombobox
+                options={clientOptions}
+                value={newProjectClientId || null}
+                onChange={v => setNewProjectClientId(v || '')}
+                onCreateNew={() => setIsCreateClientOpen(true)}
+                createNewLabel="Create new client…"
+                placeholder="Select a client"
+              />
             </div>
             <p className="text-xs text-muted-foreground">
               Creates the project with defaults (Active, monthly billing, IPC) so you can staff
