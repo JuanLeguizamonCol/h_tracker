@@ -797,6 +797,25 @@ export default function Reports() {
     return { overloaded, underloaded, balanced, avgUtilizationPct, total: utilizationData.length };
   }, [utilizationData]);
 
+  // ── Staffing rows scoped to the Filters card ────────────────────────────────
+  // The two Staffing-based sections below (projected occupancy, projected vs
+  // actual) used to read `staffing` directly — the org-wide plan, completely
+  // unfiltered — so picking a Project/Employee/Client/Owner/Manager/Location in
+  // the Filters card never changed what showed up there, even though every
+  // other section on this page (KPIs, charts, both matrices) reacted correctly.
+  // Applying the same identity filters here (not status/billing/search, which
+  // are about logged time entries and don't describe a staffing plan row) makes
+  // the two tabs consistent with each other.
+  const filteredStaffing = useMemo(() => staffing.filter(a => {
+    if (f.employeeId.length > 0 && !f.employeeId.includes(a.user_id)) return false;
+    if (f.projectId.length > 0 && !f.projectId.includes(a.project_id)) return false;
+    if (f.clientId.length > 0 && !f.clientId.includes(a.client_id)) return false;
+    if (f.location.length > 0 && !f.location.includes(locationKeyOf(a.user_id))) return false;
+    if (f.ownerId.length > 0 && !f.ownerId.includes(projectMap.get(a.project_id)?.owner_id ?? '')) return false;
+    if (f.managerId.length > 0 && !f.managerId.includes(projectMap.get(a.project_id)?.manager_id ?? '')) return false;
+    return true;
+  }), [staffing, f.employeeId, f.projectId, f.clientId, f.location, f.ownerId, f.managerId, projectMap, locationKeyOf]);
+
   // ── Utilization report: forward projection from Staffing ───────────────────────
   // Turns each assignment's allocation % (set in the Staffing panel) into implied
   // occupancy for the weeks ahead where the assignment is still active (within
@@ -817,11 +836,11 @@ export default function Reports() {
   }, []);
 
   const projectedMatrixData = useMemo(() => {
-    if (!canManage || staffing.length === 0) return { weeks: projectedWeeks, rows: [] as { employeeId: string; name: string; weekPct: number[] }[] };
+    if (!canManage || filteredStaffing.length === 0) return { weeks: projectedWeeks, rows: [] as { employeeId: string; name: string; weekPct: number[] }[] };
     const byPerson = new Map<string, { userId: string; name: string; weekHours: number[] }>();
 
     projectedWeeks.forEach((week, weekIdx) => {
-      staffing.forEach(a => {
+      filteredStaffing.forEach(a => {
         if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
         // The assignment's own window takes precedence when set (e.g. "staffed
         // on this project for Q1 only"); otherwise fall back to the project's
@@ -849,7 +868,7 @@ export default function Reports() {
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return { weeks: projectedWeeks, rows };
-  }, [staffing, projectedWeeks, canManage]);
+  }, [filteredStaffing, projectedWeeks, canManage]);
 
   // ── Utilization report: projected (Staffing) vs actual (registered), per person ──
   // "Projected" = what Staffing currently plans for that person on that project
@@ -873,7 +892,7 @@ export default function Reports() {
     };
     const byPerson = new Map<string, { userId: string; name: string; rows: Row[] }>();
 
-    staffing.forEach(a => {
+    filteredStaffing.forEach(a => {
       if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
       const key = `${a.user_id}|${a.project_id}`;
       const actualHoursPerWeek = (actualByPersonProject.get(key) ?? 0) / weeksInSelectedRange;
@@ -906,7 +925,7 @@ export default function Reports() {
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [staffing, filteredEntries, weeksInSelectedRange, canManage]);
+  }, [filteredStaffing, filteredEntries, weeksInSelectedRange, canManage]);
 
   // ── Filter chips ──────────────────────────────────────────────────────────────
   const chips = useMemo(() => {
