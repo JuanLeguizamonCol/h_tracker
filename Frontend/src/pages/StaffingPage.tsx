@@ -3,7 +3,8 @@ import { toast } from 'sonner';
 import { CalendarRange, Loader2, Plus, Pencil, Trash2, Search, Users2, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEmployees } from '@/hooks/useEmployees';
-import { useActiveProjects } from '@/hooks/useProjects';
+import { useActiveProjects, useCreateProject } from '@/hooks/useProjects';
+import { useActiveClients, useCreateClient } from '@/hooks/useClients';
 import { useProjectRoles, useAllProjectRoles, useCreateProjectRole } from '@/hooks/useProjectRoles';
 import { useStaffing, useCreateAssignment, useUpdateAssignment, useDeleteAssignment } from '@/hooks/useAssignedProjects';
 import { StaffingAssignment } from '@/types';
@@ -52,6 +53,7 @@ export default function StaffingPage() {
   const { data: allActiveProjects = [], isLoading: projectsLoading } = useActiveProjects();
   const { data: staffing = [], isLoading: staffingLoading } = useStaffing();
   const { data: allProjectRoles = [] } = useAllProjectRoles();
+  const { data: activeClients = [] } = useActiveClients();
 
   // Internal projects ARE selectable — staffing someone on one directly (with
   // an allocation %) is how internal/non-billable workload counts toward
@@ -62,6 +64,8 @@ export default function StaffingPage() {
   const updateAssignment = useUpdateAssignment();
   const deleteAssignment = useDeleteAssignment();
   const createProjectRole = useCreateProjectRole();
+  const createProject = useCreateProject();
+  const createClient = useCreateClient();
 
   const [search, setSearch] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -100,6 +104,63 @@ export default function StaffingPage() {
       toast.error('Failed to create role.');
     } finally {
       setIsCreatingRole(false);
+    }
+  }
+
+  // Create-project-on-the-fly — triggered from the assignment dialog's
+  // Project select. Only Name + Client are asked here (Client is the one
+  // other field the DB requires, client_id is NOT NULL) — everything else
+  // (dates, billing period, manager, etc.) defaults and gets filled in
+  // properly later from the project's own edit page. Admin-only, matching
+  // POST /projects.
+  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectClientId, setNewProjectClientId] = useState('');
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+
+  async function handleCreateProject() {
+    if (!newProjectName.trim()) { toast.error('Enter a project name.'); return; }
+    if (!newProjectClientId) { toast.error('Select a client.'); return; }
+    setIsCreatingProject(true);
+    try {
+      const project = await createProject.mutateAsync({
+        name: newProjectName.trim(),
+        client_id: newProjectClientId,
+      });
+      handleProjectChange(project.id);
+      toast.success(`Project "${project.name}" created — finish setting it up from Projects when you have a moment.`);
+      setIsCreateProjectOpen(false);
+      setNewProjectName('');
+      setNewProjectClientId('');
+    } catch {
+      toast.error('Failed to create project.');
+    } finally {
+      setIsCreatingProject(false);
+    }
+  }
+
+  // Create-client-on-the-fly — triggered from the Create Project dialog's
+  // Client select, for the same reason: name is the only field the DB
+  // requires (Client.name is NOT NULL, everything else optional). Everything
+  // else (contact info, billing address, client number…) is left for later
+  // from the Clients page.
+  const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
+
+  async function handleCreateClient() {
+    if (!newClientName.trim()) { toast.error('Enter a client name.'); return; }
+    setIsCreatingClient(true);
+    try {
+      const client = await createClient.mutateAsync({ name: newClientName.trim() });
+      setNewProjectClientId(client.id);
+      toast.success(`Client "${client.name}" created — add contact/billing details later from Clients.`);
+      setIsCreateClientOpen(false);
+      setNewClientName('');
+    } catch {
+      toast.error('Failed to create client.');
+    } finally {
+      setIsCreatingClient(false);
     }
   }
 
@@ -603,10 +664,17 @@ export default function StaffingPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Project</Label>
-              <Select value={form.projectId} onValueChange={handleProjectChange} disabled={!!editingId}>
+              <Select
+                value={form.projectId}
+                onValueChange={v => { if (v === '_create_new') { setIsCreateProjectOpen(true); } else { handleProjectChange(v); } }}
+                disabled={!!editingId}
+              >
                 <SelectTrigger><SelectValue placeholder="Select a project" /></SelectTrigger>
                 <SelectContent>
                   {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}{p.is_internal ? ' (Internal)' : ''}</SelectItem>)}
+                  <SelectItem value="_create_new" className="text-primary">
+                    <span className="flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" /> Create new project…</span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -761,6 +829,88 @@ export default function StaffingPage() {
             <Button onClick={handleCreateRole} disabled={isCreatingRole}>
               {isCreatingRole && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
               Create &amp; Assign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Project — triggered from the Project select above. Only asks
+          for Name + Client (the one other required field) so someone can be
+          staffed on it right away; everything else (dates, billing, manager,
+          owner…) is left to fill in later from the project's own page. */}
+      <Dialog open={isCreateProjectOpen} onOpenChange={o => { setIsCreateProjectOpen(o); if (!o) { setNewProjectName(''); setNewProjectClientId(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New Project</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Project Name *</Label>
+              <Input
+                autoFocus
+                value={newProjectName}
+                onChange={e => setNewProjectName(e.target.value)}
+                placeholder="e.g. Q4 Data Migration"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Client *</Label>
+              <Select
+                value={newProjectClientId}
+                onValueChange={v => { if (v === '_create_new') { setIsCreateClientOpen(true); } else { setNewProjectClientId(v); } }}
+              >
+                <SelectTrigger><SelectValue placeholder="Select a client" /></SelectTrigger>
+                <SelectContent>
+                  {activeClients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  <SelectItem value="_create_new" className="text-primary">
+                    <span className="flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" /> Create new client…</span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Creates the project with defaults (Active, monthly billing, IPC) so you can staff
+              people right away — everything else (dates, manager, owner, billing setup) is best
+              finished from the Projects page when you have a moment.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateProjectOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreateProject} disabled={isCreatingProject}>
+              {isCreatingProject && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Create &amp; Use
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Client — triggered from the Create Project dialog's Client
+          select. Name-only (the only field the DB requires); everything
+          else is left to fill in later from the Clients page. */}
+      <Dialog open={isCreateClientOpen} onOpenChange={o => { setIsCreateClientOpen(o); if (!o) setNewClientName(''); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New Client</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Client Name *</Label>
+              <Input
+                autoFocus
+                value={newClientName}
+                onChange={e => setNewClientName(e.target.value)}
+                placeholder="e.g. Acme Corp"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Add contact info, address, and billing details later from the Clients page.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateClientOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreateClient} disabled={isCreatingClient}>
+              {isCreatingClient && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Create &amp; Use
             </Button>
           </DialogFooter>
         </DialogContent>
