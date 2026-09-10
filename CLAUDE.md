@@ -304,6 +304,20 @@ PUT  /user-roles/{user_id}        → UserRoleOut body:{role}
 DEL  /user-roles/{user_id}        → 204
 ```
 
+### PTO Requests
+Self-service time-off requests (Dashboard) — vacation / sick / holiday / other.
+Creating is always for the caller (`user_id` = current employee); listing is
+scoped to "my own" for regular employees, Admin/Manager can see everyone's
+(e.g. an approvals queue via `?status_filter=pending`). Reviewing is
+Admin/Manager only; cancelling is the owner (only while `pending`) or
+Admin/Manager (any status, cleanup).
+```
+POST /pto-requests/                     → PtoRequestOut body:{category, start_date, end_date, hours, notes?}
+GET  /pto-requests/                     → List[PtoRequestOut] ?user_id ?status_filter
+PATCH /pto-requests/{id}/review         → PtoRequestOut body:{status: approved|rejected, review_notes?} (Admin/Manager)
+DEL  /pto-requests/{id}                 → 204 (owner while pending, or Admin/Manager)
+```
+
 ### Health
 ```
 GET  /health                      → {status: "ok"}

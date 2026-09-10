@@ -535,6 +535,26 @@ export interface InvoiceLine {
   created_at: string;
 }
 
+export type PtoCategory = 'vacation' | 'sick' | 'holiday' | 'other';
+export type PtoStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface PtoRequest {
+  id: string;
+  user_id: string;
+  employee_name: string;
+  category: PtoCategory;
+  start_date: string;
+  end_date: string;
+  hours: number;
+  notes: string | null;
+  status: PtoStatus;
+  reviewed_by: string | null;
+  reviewer_name: string | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
+  created_at: string;
+}
+
 export interface Notification {
   id: string;
   user_id: string;
