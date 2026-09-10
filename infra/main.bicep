@@ -76,7 +76,9 @@ var containerAppsEnvName = '${prefix}-env'
 var backendAppName = '${prefix}-backend'
 var frontendAppName = '${prefix}-frontend'
 var invoiceJobName = '${prefix}-invoice-job'
-var timesheetReminderJobName = '${prefix}-timesheet-reminder-job'
+// Container Apps Job names cap at 32 chars — 'timesheet-reminder-job' pushed
+// the full '${prefix}-...' name to 40, so this is shortened to 'reminder-job'.
+var timesheetReminderJobName = '${prefix}-reminder-job'
 // Storage account: 3-24 chars, lowercase alphanumeric, globally unique.
 // Single container for every app-managed upload — invoice fee attachments,
 // announcement attachments, and admin-uploaded signature images (see

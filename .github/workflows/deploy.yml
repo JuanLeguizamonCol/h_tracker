@@ -35,7 +35,7 @@ env:
   BACKEND_APP: impactpoint-hours-backend
   FRONTEND_APP: impactpoint-hours-frontend
   INVOICE_JOB: impactpoint-hours-invoice-job
-  TIMESHEET_REMINDER_JOB: impactpoint-hours-timesheet-reminder-job
+  TIMESHEET_REMINDER_JOB: impactpoint-hours-reminder-job
 
 # =============================================================================
 # Job 1 — Build Docker images and push to ACR
