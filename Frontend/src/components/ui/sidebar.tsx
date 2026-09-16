@@ -274,7 +274,15 @@ const SidebarInset = React.forwardRef<HTMLDivElement, React.ComponentProps<"main
     <main
       ref={ref}
       className={cn(
-        "relative flex min-h-svh flex-1 flex-col bg-background",
+        // min-w-0: without it, a flex item defaults to min-width:auto — it
+        // refuses to shrink below its content's intrinsic width. A wide table
+        // deep inside (e.g. Reports' Weekly Hours Matrix with many months of
+        // columns) would then force THIS element wider than the viewport
+        // instead of being clipped by its own inner overflow-x-auto, pushing
+        // the whole page (sidebar included) into a page-level horizontal
+        // scroll — min-w-0 lets it actually shrink to the space the flex row
+        // gives it, so only the table itself scrolls.
+        "relative flex min-h-svh min-w-0 flex-1 flex-col bg-background",
         "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
         className,
       )}
