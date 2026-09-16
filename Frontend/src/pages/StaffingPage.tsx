@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { format, subDays } from 'date-fns';
 import { toast } from 'sonner';
 import { CalendarRange, Loader2, Plus, Pencil, Trash2, Search, Users2, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,6 +22,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 
 const DEFAULT_MAX_WEEKLY_HOURS = 40;
 
+// Parse a 'yyyy-MM-dd' string as a LOCAL date — `new Date("2026-08-01")` parses
+// as UTC midnight, which in negative-offset timezones renders as the previous
+// day, throwing off the "day before" calculation used when splitting an
+// assignment (see handleScheduledChange below).
+function parseLocalDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 type AssignForm = {
   employeeId: string;
   projectId: string;
@@ -36,12 +46,20 @@ type AssignForm = {
   editProjectDates: boolean;
   projectStartDate: string;
   projectEndDate: string;
+  // Instead of overwriting this assignment's role/hours in place (which would
+  // retroactively change past utilization/projection numbers), close it out
+  // the day before `effectiveDate` and open a new assignment from that date
+  // with the values in this form — history before the change stays intact.
+  // Edit-only (nothing to preserve on a brand-new assignment).
+  scheduleChange: boolean;
+  effectiveDate: string;
 };
 
 const EMPTY_FORM: AssignForm = {
   employeeId: '', projectId: '', roleId: '', hoursPerWeek: '',
   startDate: '', endDate: '',
   editProjectDates: false, projectStartDate: '', projectEndDate: '',
+  scheduleChange: false, effectiveDate: '',
 };
 
 export default function StaffingPage() {
@@ -364,6 +382,8 @@ export default function StaffingPage() {
       editProjectDates: false,
       projectStartDate: row.project_start_date || '',
       projectEndDate: row.project_end_date || '',
+      scheduleChange: false,
+      effectiveDate: '',
     });
     setIsDialogOpen(true);
   }
@@ -395,6 +415,12 @@ export default function StaffingPage() {
     const allocationNum = hoursNum != null
       ? Math.round((hoursNum / selectedMaxWeeklyHours) * 1000) / 10
       : null;
+
+    if (editingId && form.scheduleChange) {
+      await handleScheduledChange(allocationNum);
+      return;
+    }
+
     setIsSaving(true);
     try {
       const payload = {
@@ -424,6 +450,63 @@ export default function StaffingPage() {
       toast.error(msg.includes('409') || msg.toLowerCase().includes('already')
         ? 'This person is already assigned to that project.'
         : 'Something went wrong.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // Splits the assignment at `effectiveDate` instead of editing it in place:
+  // a brand-new row carries the updated role/hours from that date forward,
+  // and the existing row is trimmed to end the day before — so any report
+  // that reads this assignment's allocation for a past date keeps seeing
+  // what was actually true back then, not the new value applied backwards.
+  // New row first, then trim the old one: if trimming fails after the new
+  // row is created, the person is briefly double-counted for the overlap
+  // (visible and easy to fix) rather than silently unstaffed if the order
+  // were reversed and the trim succeeded but the new row failed.
+  async function handleScheduledChange(allocationNum: number | null) {
+    if (!editingId) return;
+    if (!form.effectiveDate) { toast.error('Pick the date this change takes effect.'); return; }
+    if (form.endDate && form.endDate < form.effectiveDate) {
+      toast.error('The end date must be on or after the effective date.');
+      return;
+    }
+    const original = staffing.find(r => r.id === editingId);
+    if (original?.start_date && form.effectiveDate <= original.start_date) {
+      toast.error("The effective date must be after this assignment's current start date.");
+      return;
+    }
+    if (original?.end_date && form.effectiveDate > original.end_date) {
+      toast.error('This assignment already ends before that date — nothing to split.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await createAssignment.mutateAsync({
+        user_id: form.employeeId,
+        project_id: form.projectId,
+        role_id: form.roleId || null,
+        allocation_percentage: allocationNum,
+        start_date: form.effectiveDate,
+        end_date: form.endDate || null,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      toast.error(msg.includes('409') || msg.toLowerCase().includes('already')
+        ? 'This person already has an overlapping assignment on that project.'
+        : 'Something went wrong creating the new assignment.');
+      setIsSaving(false);
+      return;
+    }
+    try {
+      const dayBefore = format(subDays(parseLocalDate(form.effectiveDate), 1), 'yyyy-MM-dd');
+      await updateAssignment.mutateAsync({ id: editingId, end_date: dayBefore });
+      toast.success('Change scheduled — everything before the effective date is unchanged.');
+      setIsDialogOpen(false);
+    } catch {
+      toast.error("New assignment created, but the previous one couldn't be shortened — adjust its end date manually.");
+      setIsDialogOpen(false);
     } finally {
       setIsSaving(false);
     }
@@ -741,13 +824,41 @@ export default function StaffingPage() {
                   : `Based on a ${selectedMaxWeeklyHours}h/week default — select a person to use their own capacity.`}
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Staffed from</Label>
-                <Input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} />
+
+            {editingId && (
+              <div className="rounded-md border p-3 space-y-3">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={form.scheduleChange}
+                    onCheckedChange={v => setForm(f => ({ ...f, scheduleChange: !!v }))}
+                  />
+                  Schedule this change from a date instead
+                </label>
+                {form.scheduleChange && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">Effective from *</Label>
+                      <Input type="date" value={form.effectiveDate} onChange={e => setForm(f => ({ ...f, effectiveDate: e.target.value }))} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Keeps everything before this date exactly as it is now: ends the current assignment the day
+                      before, and starts a new one from this date with the role/hours above — so a load increase or
+                      decrease from here forward doesn't change past utilization or projection numbers.
+                    </p>
+                  </>
+                )}
               </div>
+            )}
+
+            <div className={`grid gap-3 ${form.scheduleChange ? 'grid-cols-1' : 'grid-cols-2'}`}>
+              {!form.scheduleChange && (
+                <div className="space-y-1.5">
+                  <Label>Staffed from</Label>
+                  <Input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} />
+                </div>
+              )}
               <div className="space-y-1.5">
-                <Label>Staffed until</Label>
+                <Label>{form.scheduleChange ? 'New assignment ends' : 'Staffed until'}</Label>
                 <Input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} />
               </div>
             </div>
@@ -758,39 +869,41 @@ export default function StaffingPage() {
                 : ''}
             </p>
 
-            <div className="rounded-md border p-3 space-y-3">
-              <label className={`flex items-center gap-2 text-sm ${form.projectId ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
-                <Checkbox
-                  checked={form.editProjectDates}
-                  onCheckedChange={v => setForm(f => ({ ...f, editProjectDates: !!v }))}
-                  disabled={!form.projectId}
-                />
-                Also change the project's own date range
-              </label>
-              {form.editProjectDates && (
-                <>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">Project start</Label>
-                      <Input type="date" value={form.projectStartDate} onChange={e => setForm(f => ({ ...f, projectStartDate: e.target.value }))} />
+            {!form.scheduleChange && (
+              <div className="rounded-md border p-3 space-y-3">
+                <label className={`flex items-center gap-2 text-sm ${form.projectId ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                  <Checkbox
+                    checked={form.editProjectDates}
+                    onCheckedChange={v => setForm(f => ({ ...f, editProjectDates: !!v }))}
+                    disabled={!form.projectId}
+                  />
+                  Also change the project's own date range
+                </label>
+                {form.editProjectDates && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Project start</Label>
+                        <Input type="date" value={form.projectStartDate} onChange={e => setForm(f => ({ ...f, projectStartDate: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Project end</Label>
+                        <Input type="date" value={form.projectEndDate} onChange={e => setForm(f => ({ ...f, projectEndDate: e.target.value }))} />
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">Project end</Label>
-                      <Input type="date" value={form.projectEndDate} onChange={e => setForm(f => ({ ...f, projectEndDate: e.target.value }))} />
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Updates the project itself — invoicing, reports, everything stays in sync.
-                  </p>
-                </>
-              )}
-            </div>
+                    <p className="text-xs text-muted-foreground">
+                      Updates the project itself — invoicing, reports, everything stays in sync.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={isSaving}>
               {isSaving && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-              {editingId ? 'Save' : 'Assign'}
+              {form.scheduleChange ? 'Schedule Change' : editingId ? 'Save' : 'Assign'}
             </Button>
           </DialogFooter>
         </DialogContent>
