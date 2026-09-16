@@ -1,10 +1,10 @@
-import { useState, useMemo, useEffect, Fragment } from 'react';
-import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks, addDays, differenceInCalendarDays } from 'date-fns';
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
+import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks, addMonths, addDays, differenceInCalendarDays } from 'date-fns';
 import {
   CalendarIcon, Search, Loader2, Filter, X,
   Clock, TrendingUp, Activity, BarChart2, Table as TableIcon,
   LayoutDashboard, Download, Gauge, AlertTriangle, TrendingDown, CheckCircle2,
-  ChevronRight, ChevronDown,
+  ChevronRight, ChevronDown, ChevronLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -323,6 +323,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 
 type ViewMode = 'charts' | 'tables' | 'both';
 type TimeGroup = 'daily' | 'weekly';
+type MatrixGranularity = 'month' | 'week' | 'day';
 
 export default function Reports() {
   const { employee, canManage } = useAuth();
@@ -332,6 +333,7 @@ export default function Reports() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('both');
   const [timeGroup, setTimeGroup] = useState<TimeGroup>('daily');
+  const [matrixGranularity, setMatrixGranularity] = useState<MatrixGranularity>('week');
   const [isExporting, setIsExporting] = useState(false);
 
   const { data: projects = [] } = useProjects();
@@ -610,30 +612,40 @@ export default function Reports() {
   // buckets) so the row can be expanded into a drill-down of which projects
   // made up those hours, without a second data pass on expand.
   const weeklyMatrixData = useMemo(() => {
-    // Generate all week start dates (Monday-aligned) covering the selected range
+    // Generate all week start dates (Monday-aligned) covering the selected range.
+    // Labeling/month-grouping is keyed off each week's THURSDAY, not its Monday:
+    // a week that spans a month boundary (e.g. Mon Aug 31 → Sun Sep 6) has most
+    // of its days (6 of 7) in the following month, so filing it under the
+    // Monday's month used to both mislabel it ("Aug-Week5") and fold nearly a
+    // full week of the next month's hours into the wrong month's subtotal,
+    // while that next month's own first week looked short by the same amount.
+    // Thursday is always the week's 4th (median) day, so it's guaranteed to
+    // fall in whichever month actually holds the majority of the week.
     const weeks: { key: string; label: string; start: Date }[] = [];
     let current = startOfWeek(f.startDate, { weekStartsOn: 1 });
     while (current <= f.endDate) {
-      const weekN = Math.ceil(current.getDate() / 7);
+      const anchor = addDays(current, 3);
+      const weekN = Math.ceil(anchor.getDate() / 7);
       weeks.push({
         key: format(current, 'yyyy-MM-dd'),
-        label: `${format(current, 'MMM')}-Week${weekN}`,
+        label: `${format(anchor, 'MMM')}-Week${weekN}`,
         start: current,
       });
       current = addWeeks(current, 1);
     }
     const weekIndex = new Map(weeks.map((w, i) => [w.key, i]));
 
-    // Group weeks into their calendar month — a week that spans a month
-    // boundary is bucketed by its Monday (matches the week's own label,
-    // which is also keyed off that Monday). Each group becomes one "full
-    // month" subtotal column after that month's weekly columns.
+    // Group weeks into their calendar month — by the same Thursday anchor as
+    // the label above, so a boundary week's subtotal lands in the month that
+    // actually holds most of its days. Each group becomes one "full month"
+    // subtotal column after that month's weekly columns.
     const monthGroups: { key: string; label: string; weekIndices: number[] }[] = [];
     weeks.forEach((w, i) => {
-      const monthKey = format(w.start, 'yyyy-MM');
+      const anchor = addDays(w.start, 3);
+      const monthKey = format(anchor, 'yyyy-MM');
       let group = monthGroups.find(g => g.key === monthKey);
       if (!group) {
-        group = { key: monthKey, label: format(w.start, 'MMM yyyy'), weekIndices: [] };
+        group = { key: monthKey, label: format(anchor, 'MMM yyyy'), weekIndices: [] };
         monthGroups.push(group);
       }
       group.weekIndices.push(i);
@@ -702,6 +714,164 @@ export default function Reports() {
 
     return { weeks, weekIndex, monthGroups, rows, totals, monthTotals, grandTotal, maxCellHours };
   }, [filteredEntries, f.startDate, f.endDate, employeeMap, projectMap]);
+
+  // ── Weekly Hours Matrix DISPLAY — Month/Week/Day toggle ─────────────────────────
+  // Deliberately separate from weeklyMatrixData above, which the Utilization
+  // Report depends on and must stay strictly week-granular ("avg weekly hours",
+  // "weeks over 40h" are inherently per-week numbers — they can't shift meaning
+  // just because this table's own view changed). Always built from individual
+  // days first, so week/month totals can never drift from what was actually
+  // logged on a given date regardless of which granularity is selected.
+  const hoursMatrix = useMemo(() => {
+    const dayHoursMap: Record<string, Record<string, number>> = {};
+    const dayProjectHoursMap: Record<string, Record<string, Record<string, number>>> = {};
+    filteredEntries.forEach(e => {
+      if (!dayHoursMap[e.user_id]) dayHoursMap[e.user_id] = {};
+      dayHoursMap[e.user_id][e.date] = (dayHoursMap[e.user_id][e.date] ?? 0) + Number(e.hours);
+      if (!dayProjectHoursMap[e.user_id]) dayProjectHoursMap[e.user_id] = {};
+      if (!dayProjectHoursMap[e.user_id][e.project_id]) dayProjectHoursMap[e.user_id][e.project_id] = {};
+      const perProject = dayProjectHoursMap[e.user_id][e.project_id];
+      perProject[e.date] = (perProject[e.date] ?? 0) + Number(e.hours);
+    });
+
+    // Calendar months spanning the selected range — same regardless of
+    // granularity, so "Month Total" always means the same thing.
+    const monthGroups: { key: string; label: string; weekIndices: number[] }[] = [];
+    {
+      let cursor = startOfMonth(f.startDate);
+      const lastMonth = startOfMonth(f.endDate);
+      while (cursor <= lastMonth) {
+        monthGroups.push({ key: format(cursor, 'yyyy-MM'), label: format(cursor, 'MMM yyyy'), weekIndices: [] });
+        cursor = addMonths(cursor, 1);
+      }
+    }
+    const monthGroupByKey = new Map(monthGroups.map(g => [g.key, g]));
+
+    // Leaf columns: one per week, one per day that actually has hours logged
+    // (skips empty days so a wide range doesn't add ~90 blank columns), or
+    // none at all when grouped by month — each month group then shows only
+    // its total.
+    const columns: { key: string; label: string; start: Date }[] = [];
+    if (matrixGranularity === 'week') {
+      let current = startOfWeek(f.startDate, { weekStartsOn: 1 });
+      while (current <= f.endDate) {
+        const anchor = addDays(current, 3);
+        const weekN = Math.ceil(anchor.getDate() / 7);
+        const idx = columns.length;
+        columns.push({ key: format(current, 'yyyy-MM-dd'), label: `${format(anchor, 'MMM')}-Week${weekN}`, start: current });
+        monthGroupByKey.get(format(anchor, 'yyyy-MM'))?.weekIndices.push(idx);
+        current = addWeeks(current, 1);
+      }
+    } else if (matrixGranularity === 'day') {
+      const datesWithHours = [...new Set(filteredEntries.map(e => e.date))].sort();
+      datesWithHours.forEach(dateStr => {
+        const d = parseLocalDate(dateStr);
+        const idx = columns.length;
+        columns.push({ key: dateStr, label: format(d, 'MMM d'), start: d });
+        monthGroupByKey.get(format(d, 'yyyy-MM'))?.weekIndices.push(idx);
+      });
+    }
+
+    // Sums a row's day-level hours into each leaf column's window — a single
+    // day for day granularity, the Mon-Sun span for week granularity.
+    function columnHoursFor(dayMap: Record<string, number> | undefined): number[] {
+      if (!dayMap) return columns.map(() => 0);
+      if (matrixGranularity === 'day') return columns.map(c => dayMap[c.key] ?? 0);
+      return columns.map(c => {
+        let sum = 0;
+        for (let i = 0; i < 7; i++) sum += dayMap[format(addDays(c.start, i), 'yyyy-MM-dd')] ?? 0;
+        return sum;
+      });
+    }
+
+    // Sums a row's hours into one total per month group. In week/day mode this
+    // MUST sum the same leaf columns shown under that month's header (not an
+    // independent day-exact recomputation) — otherwise a month's "Month Total"
+    // cell could disagree with what its own visible columns add up to (e.g. a
+    // week filed under September per its majority of days would still leak an
+    // August day's hours into August's total, even though that week's column
+    // itself is shown entirely under September). Month view has no leaf
+    // columns to sum, so it falls back to the exact per-day totals directly.
+    function monthTotalsFor(columnHours: number[], dayMap: Record<string, number> | undefined): number[] {
+      if (matrixGranularity === 'month') {
+        if (!dayMap) return monthGroups.map(() => 0);
+        const byMonth: Record<string, number> = {};
+        Object.entries(dayMap).forEach(([dateStr, hours]) => {
+          const mk = dateStr.slice(0, 7);
+          byMonth[mk] = (byMonth[mk] ?? 0) + hours;
+        });
+        return monthGroups.map(g => byMonth[g.key] ?? 0);
+      }
+      return monthGroups.map(g => g.weekIndices.reduce((sum, i) => sum + columnHours[i], 0));
+    }
+
+    const employeeIds = [...new Set(filteredEntries.map(e => e.user_id))];
+    const rows = employeeIds
+      .map(uid => {
+        const dayMap = dayHoursMap[uid];
+        const projects = Object.entries(dayProjectHoursMap[uid] ?? {})
+          .map(([projectId, byDay]) => {
+            const weekHours = columnHoursFor(byDay);
+            return {
+              projectId,
+              name: projectMap.get(projectId)?.name ?? 'Deleted Project',
+              weekHours,
+              monthTotals: monthTotalsFor(weekHours, byDay),
+              total: Object.values(byDay).reduce((s, h) => s + h, 0),
+            };
+          })
+          .sort((a, b) => b.total - a.total);
+        const weekHours = columnHoursFor(dayMap);
+        return {
+          employeeId: uid,
+          name: employeeMap.get(uid)?.name ?? 'Deleted Employee',
+          weekHours,
+          monthTotals: monthTotalsFor(weekHours, dayMap),
+          total: Object.values(dayMap ?? {}).reduce((s, h) => s + h, 0),
+          projects,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const totals = columns.map((_, i) => rows.reduce((sum, r) => sum + r.weekHours[i], 0));
+    const monthTotals = monthGroups.map((_, gi) => rows.reduce((sum, r) => sum + r.monthTotals[gi], 0));
+    const grandTotal = rows.reduce((sum, r) => sum + r.total, 0);
+    const maxCellHours = Math.max(1, ...rows.map(r => Math.max(0, ...r.weekHours)));
+
+    return { columns, monthGroups, rows, totals, monthTotals, grandTotal, maxCellHours };
+  }, [filteredEntries, f.startDate, f.endDate, employeeMap, projectMap, matrixGranularity]);
+
+  // Weekly Hours Matrix can end up with far more week columns than fit on
+  // screen (a wide date range = many months of weekly columns) — the table
+  // itself scrolls (overflow-x-auto below), but that's only discoverable via
+  // a thin native scrollbar or a trackpad gesture. These buttons make that
+  // horizontal navigation explicit, one "page" (80% of the visible width) at
+  // a time, and disable themselves once there's nothing further to scroll to.
+  const matrixScrollRef = useRef<HTMLDivElement>(null);
+  const [matrixCanScroll, setMatrixCanScroll] = useState({ left: false, right: false });
+
+  useEffect(() => {
+    const el = matrixScrollRef.current;
+    if (!el) return;
+    const update = () => setMatrixCanScroll({
+      left: el.scrollLeft > 4,
+      right: el.scrollLeft < el.scrollWidth - el.clientWidth - 4,
+    });
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      el.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [hoursMatrix]);
+
+  function scrollMatrix(direction: 'left' | 'right') {
+    const el = matrixScrollRef.current;
+    if (!el) return;
+    const amount = Math.round(el.clientWidth * 0.8) * (direction === 'left' ? -1 : 1);
+    el.scrollBy({ left: amount, behavior: 'smooth' });
+  }
 
   const [expandedMatrixRows, setExpandedMatrixRows] = useState<Set<string>>(new Set());
   const toggleMatrixRow = (employeeId: string) => {
@@ -1107,24 +1277,53 @@ export default function Reports() {
       {/* ── Weekly Hours Matrix ─────────────────────────────────────────── */}
       <Card className="card-elevated">
         <CardHeader>
-          <CardTitle className="text-base">Weekly Hours Matrix</CardTitle>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="text-base">Weekly Hours Matrix</CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex rounded-md border overflow-hidden text-xs">
+                {(['month', 'week', 'day'] as MatrixGranularity[]).map(g => (
+                  <button
+                    key={g}
+                    onClick={() => setMatrixGranularity(g)}
+                    className={`px-3 py-1.5 capitalize transition-colors ${matrixGranularity === g ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+              {hoursMatrix.rows.length > 0 && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => scrollMatrix('left')} disabled={!matrixCanScroll.left} title="Scroll left">
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => scrollMatrix('right')} disabled={!matrixCanScroll.right} title="Scroll right">
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
           <p className="text-xs text-muted-foreground">
-            Hours per employee per week, with full-month subtotals and a grand total per row ·
+            {matrixGranularity === 'month'
+              ? 'Hours per employee per month, with a grand total per row · '
+              : matrixGranularity === 'day'
+              ? 'Hours per employee per day worked (empty days are skipped), with full-month subtotals and a grand total per row · '
+              : 'Hours per employee per week, with full-month subtotals and a grand total per row · '}
             Darker cells mean more hours · Click an employee to drill down by project, with its own project total
           </p>
         </CardHeader>
         <CardContent>
-          {weeklyMatrixData.rows.length === 0 ? (
+          {hoursMatrix.rows.length === 0 ? (
             <p className="text-center text-muted-foreground py-6 text-sm">No data for the selected filters.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" ref={matrixScrollRef}>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead rowSpan={2} className="table-header sticky left-0 bg-background z-10 min-w-[200px] align-bottom shadow-[1px_0_0_0_hsl(var(--border))]">
                       Employee
                     </TableHead>
-                    {weeklyMatrixData.monthGroups.map(g => (
+                    {hoursMatrix.monthGroups.map(g => (
                       <TableHead
                         key={g.key}
                         colSpan={g.weekIndices.length + 1}
@@ -1138,11 +1337,11 @@ export default function Reports() {
                     </TableHead>
                   </TableRow>
                   <TableRow>
-                    {weeklyMatrixData.monthGroups.map(g => (
+                    {hoursMatrix.monthGroups.map(g => (
                       <Fragment key={g.key}>
                         {g.weekIndices.map(wi => (
-                          <TableHead key={weeklyMatrixData.weeks[wi].key} className="table-header text-center whitespace-nowrap min-w-[100px]">
-                            {weeklyMatrixData.weeks[wi].label}
+                          <TableHead key={hoursMatrix.columns[wi].key} className="table-header text-center whitespace-nowrap min-w-[100px]">
+                            {hoursMatrix.columns[wi].label}
                           </TableHead>
                         ))}
                         <TableHead className="table-header text-center whitespace-nowrap min-w-[90px] border-l border-border bg-muted/20">
@@ -1153,7 +1352,7 @@ export default function Reports() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {weeklyMatrixData.rows.map(row => {
+                  {hoursMatrix.rows.map(row => {
                     const isExpanded = expandedMatrixRows.has(row.employeeId);
                     const hasProjects = row.projects.length > 0;
                     return (
@@ -1174,13 +1373,13 @@ export default function Reports() {
                               {row.name}
                             </div>
                           </TableCell>
-                          {weeklyMatrixData.monthGroups.map((g, gi) => (
+                          {hoursMatrix.monthGroups.map((g, gi) => (
                             <Fragment key={g.key}>
                               {g.weekIndices.map(wi => (
                                 <TableCell
                                   key={wi}
                                   className="text-center text-sm font-medium tabular-nums transition-colors"
-                                  style={heatCellStyle(row.weekHours[wi], weeklyMatrixData.maxCellHours)}
+                                  style={heatCellStyle(row.weekHours[wi], hoursMatrix.maxCellHours)}
                                 >
                                   {row.weekHours[wi] > 0 ? `${row.weekHours[wi].toFixed(1)}h` : ''}
                                 </TableCell>
@@ -1199,13 +1398,13 @@ export default function Reports() {
                             <TableCell className="text-xs text-muted-foreground sticky left-0 bg-muted/20 z-10 shadow-[1px_0_0_0_hsl(var(--border))] pl-9">
                               {proj.name}
                             </TableCell>
-                            {weeklyMatrixData.monthGroups.map((g, gi) => (
+                            {hoursMatrix.monthGroups.map((g, gi) => (
                               <Fragment key={g.key}>
                                 {g.weekIndices.map(wi => (
                                   <TableCell
                                     key={wi}
                                     className="text-center text-xs tabular-nums transition-colors"
-                                    style={heatCellStyle(proj.weekHours[wi], weeklyMatrixData.maxCellHours)}
+                                    style={heatCellStyle(proj.weekHours[wi], hoursMatrix.maxCellHours)}
                                   >
                                     {proj.weekHours[wi] > 0 ? `${proj.weekHours[wi].toFixed(1)}h` : ''}
                                   </TableCell>
@@ -1228,20 +1427,20 @@ export default function Reports() {
                     <TableCell className="font-bold text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
                       Total
                     </TableCell>
-                    {weeklyMatrixData.monthGroups.map((g, gi) => (
+                    {hoursMatrix.monthGroups.map((g, gi) => (
                       <Fragment key={g.key}>
                         {g.weekIndices.map(wi => (
                           <TableCell key={wi} className="text-center text-sm font-bold tabular-nums text-primary">
-                            {weeklyMatrixData.totals[wi] > 0 ? `${weeklyMatrixData.totals[wi].toFixed(1)}h` : ''}
+                            {hoursMatrix.totals[wi] > 0 ? `${hoursMatrix.totals[wi].toFixed(1)}h` : ''}
                           </TableCell>
                         ))}
                         <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l border-border bg-muted/20">
-                          {weeklyMatrixData.monthTotals[gi] > 0 ? `${weeklyMatrixData.monthTotals[gi].toFixed(1)}h` : ''}
+                          {hoursMatrix.monthTotals[gi] > 0 ? `${hoursMatrix.monthTotals[gi].toFixed(1)}h` : ''}
                         </TableCell>
                       </Fragment>
                     ))}
                     <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l-2 border-border">
-                      {weeklyMatrixData.grandTotal > 0 ? `${weeklyMatrixData.grandTotal.toFixed(1)}h` : ''}
+                      {hoursMatrix.grandTotal > 0 ? `${hoursMatrix.grandTotal.toFixed(1)}h` : ''}
                     </TableCell>
                   </TableRow>
                 </TableBody>
