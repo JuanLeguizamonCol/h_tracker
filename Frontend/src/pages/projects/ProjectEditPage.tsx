@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
+import { businessUnitOptionsForArea, nextBusinessUnitForArea } from '@/lib/projectCategories';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
 export default function ProjectEditPage() {
@@ -143,8 +144,20 @@ export default function ProjectEditPage() {
   }
 
   const clientOptions = clients.map(c => ({ id: c.id, label: c.name }));
+  // Keep the project's current area category visible even if it's been retired
+  // from active selection (e.g. "Other") — same reasoning as buOptions below.
   const areaOptions = areaCategories.map(c => ({ id: c.value, label: c.value }));
-  const buOptions = businessUnits.map(c => ({ id: c.value, label: c.value }));
+  if (areaCategory && !areaOptions.some(o => o.id === areaCategory)) {
+    areaOptions.push({ id: areaCategory, label: areaCategory });
+  }
+  const buOptions = businessUnitOptionsForArea(areaCategory, businessUnits, businessUnit).map(c => ({ id: c.value, label: c.value }));
+
+  // Business Unit cascades off Area Category (1:1 by name, except Office of the
+  // CFO which also allows SG&A — see lib/projectCategories.ts).
+  const handleAreaCategoryChange = (area: string) => {
+    setAreaCategory(area);
+    setBusinessUnit(prev => nextBusinessUnitForArea(area, prev));
+  };
   // Owner must be able to invoice → Admins only. Manager may be any Manager or Admin.
   const ownerOptions = adminEmployees.map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
   const managerOptions = [...managerEmployees, ...adminEmployees]
@@ -202,11 +215,11 @@ export default function ProjectEditPage() {
             </div>
             <div className="space-y-1">
               <Label>Area Category</Label>
-              <SearchableCombobox options={areaOptions} value={areaCategory || null} onChange={v => setAreaCategory(v ?? '')} placeholder="Select category..." clearable />
+              <SearchableCombobox options={areaOptions} value={areaCategory || null} onChange={v => handleAreaCategoryChange(v ?? '')} placeholder="Select category..." clearable />
             </div>
             <div className="space-y-1">
               <Label>Business Unit</Label>
-              <SearchableCombobox options={buOptions} value={businessUnit || null} onChange={v => setBusinessUnit(v ?? '')} placeholder="Select unit..." clearable />
+              <SearchableCombobox options={buOptions} value={businessUnit || null} onChange={v => setBusinessUnit(v ?? '')} placeholder={areaCategory ? 'Select unit...' : 'Select an area category first...'} clearable />
             </div>
             <div className="space-y-1">
               <Label>Project Owner</Label>

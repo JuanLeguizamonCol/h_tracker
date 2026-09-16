@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
 import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
+import { businessUnitOptionsForArea, nextBusinessUnitForArea } from '@/lib/projectCategories';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
 const STEPS = ['Project Details', 'Roles & Rates', 'Assign Employees'];
@@ -122,6 +123,13 @@ export default function ProjectNewPage() {
 
   const set = (field: keyof Step1Form, value: any) =>
     setForm(f => ({ ...f, [field]: value }));
+
+  // Business Unit cascades off Area Category (1:1 by name, except Office of the
+  // CFO which also allows SG&A — see lib/projectCategories.ts). Changing the
+  // area keeps the current business unit if it's still valid for the new area,
+  // auto-picks it when there's exactly one option, or clears it otherwise.
+  const setAreaCategory = (area: string) =>
+    setForm(f => ({ ...f, area_category: area, business_unit: nextBusinessUnitForArea(area, f.business_unit) }));
 
   // Whether the user has typed a custom project code. While false, the code is
   // auto-suggested from the selected client's number ("{client_number}-{n}").
@@ -268,7 +276,7 @@ export default function ProjectNewPage() {
 
   const clientOptions = clients.map(c => ({ id: c.id, label: c.name }));
   const areaOptions = areaCategories.map(c => ({ id: c.value, label: c.value }));
-  const buOptions = businessUnits.map(c => ({ id: c.value, label: c.value }));
+  const buOptions = businessUnitOptionsForArea(form.area_category, businessUnits, form.business_unit).map(c => ({ id: c.value, label: c.value }));
   // Owner must be able to invoice → Admins only. Manager may be any Manager or Admin.
   const ownerOptions = adminEmployees.map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
   const managerOptions = [...managerEmployees, ...adminEmployees]
@@ -352,7 +360,7 @@ export default function ProjectNewPage() {
                 <SearchableCombobox
                   options={areaOptions}
                   value={form.area_category || null}
-                  onChange={v => set('area_category', v ?? '')}
+                  onChange={v => setAreaCategory(v ?? '')}
                   placeholder="Select category..."
                 />
               </div>
@@ -362,7 +370,7 @@ export default function ProjectNewPage() {
                   options={buOptions}
                   value={form.business_unit || null}
                   onChange={v => set('business_unit', v ?? '')}
-                  placeholder="Select unit..."
+                  placeholder={form.area_category ? 'Select unit...' : 'Select an area category first...'}
                 />
               </div>
               <div className="space-y-1">
