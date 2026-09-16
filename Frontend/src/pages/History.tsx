@@ -11,10 +11,9 @@ import { useAllProjectRoles } from '@/hooks/useProjectRoles';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { MultiFilterSelect } from '@/components/MultiFilterSelect';
 
 export default function History() {
   const { employee, canManage } = useAuth();
@@ -31,17 +30,15 @@ export default function History() {
     return new Date();
   });
 
-  // Employee filter — only relevant for admins
-  const [selectedUserId, setSelectedUserId] = useState<string>(() => {
-    return canManage ? 'all' : (employee?.id || '');
-  });
+  // Employee filter — only relevant for admins. Empty = all employees.
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
-  // Project filter
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(paramProjectId);
+  // Project filter. Empty = all projects.
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>(() => paramProjectId ? [paramProjectId] : []);
 
   // Sync project filter if URL param changes
   useEffect(() => {
-    if (paramProjectId) setSelectedProjectId(paramProjectId);
+    if (paramProjectId) setSelectedProjectIds([paramProjectId]);
   }, [paramProjectId]);
 
   const monthStart = startOfMonth(selectedDate);
@@ -52,31 +49,30 @@ export default function History() {
   const { data: employees = [] } = useEmployees();
   const { data: allRoles = [] } = useAllProjectRoles();
 
-  // Resolve which user_id to filter by (always employees.id — FK used in time_entries)
-  const filterUserId = useMemo(() => {
-    if (!canManage) return employee?.id;
-    if (selectedUserId === 'all') return undefined;
-    return selectedUserId;
-  }, [canManage, employee, selectedUserId]);
-
-  const filterProjectId = selectedProjectId || undefined;
-
+  // Fetched scope: everyone's entries for admins (multi-select employee/project
+  // filtering happens client-side below, since /time-entries only takes a single
+  // user_id/project_id each), just the signed-in employee's own for everyone else.
   const { data: monthEntries = [], isLoading } = useTimeEntriesByDateRange(
     monthStart,
     monthEnd,
-    filterUserId,
-    filterProjectId,
+    canManage ? undefined : employee?.id,
+    undefined,
   );
 
-  const sortedEntries = useMemo(() => {
-    return [...monthEntries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [monthEntries]);
+  const filteredEntries = useMemo(() => monthEntries.filter(e =>
+    (selectedUserIds.length === 0 || selectedUserIds.includes(e.user_id)) &&
+    (selectedProjectIds.length === 0 || selectedProjectIds.includes(e.project_id))
+  ), [monthEntries, selectedUserIds, selectedProjectIds]);
 
-  const totalHours = monthEntries.reduce((sum, entry) => sum + Number(entry.hours), 0);
+  const sortedEntries = useMemo(() => {
+    return [...filteredEntries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [filteredEntries]);
+
+  const totalHours = filteredEntries.reduce((sum, entry) => sum + Number(entry.hours), 0);
 
   const projectStats = useMemo(() => {
     const stats: Record<string, { hours: number; projectName: string; clientName: string }> = {};
-    monthEntries.forEach(entry => {
+    filteredEntries.forEach(entry => {
       if (!stats[entry.project_id]) {
         const project = projects.find(p => p.id === entry.project_id);
         const client = project ? clients.find(c => c.id === project.client_id) : null;
@@ -89,7 +85,7 @@ export default function History() {
       stats[entry.project_id].hours += Number(entry.hours);
     });
     return Object.entries(stats).sort((a, b) => b[1].hours - a[1].hours);
-  }, [monthEntries, projects, clients]);
+  }, [filteredEntries, projects, clients]);
 
   const navigateMonth = (direction: 'prev' | 'next') => {
     setSelectedDate(prev => (direction === 'prev' ? subMonths(prev, 1) : addMonths(prev, 1)));
@@ -101,7 +97,10 @@ export default function History() {
   const getEmployeeName = (userId: string) => employees.find(e => e.id === userId)?.name || 'Unknown Employee';
   const getRoleName = (roleId: string | null) => (roleId ? roleMap.get(roleId) ?? null : null);
 
-  const hasActiveFilters = selectedProjectId || (canManage && selectedUserId !== 'all');
+  const hasActiveFilters = selectedProjectIds.length > 0 || (canManage && selectedUserIds.length > 0);
+  // Redundant to show an Employee column once the selection already narrows to
+  // exactly one person — same as the old single-select's "not 'all'" check.
+  const showEmployeeColumn = canManage && selectedUserIds.length !== 1;
 
   if (isLoading) {
     return (<div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
@@ -145,43 +144,28 @@ export default function History() {
           </Button>
         </div>
 
-        {/* Employee filter (admin only) */}
+        {/* Employee filter (admin only) — searchable, multi-select */}
         {canManage && (
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Employee</Label>
-            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-              <SelectTrigger className="w-[180px] h-9">
-                <SelectValue placeholder="All employees" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Employees</SelectItem>
-                {employees.filter(e => e.is_active).map(emp => (
-                  <SelectItem key={emp.id} value={emp.id}>
-                    {emp.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="w-[220px]">
+            <MultiFilterSelect
+              label="Employee" allLabel="All Employees"
+              selected={selectedUserIds}
+              options={employees.filter(e => e.is_active).map(e => ({ value: e.id, label: e.name }))}
+              onChange={setSelectedUserIds}
+              onClear={() => setSelectedUserIds([])}
+            />
           </div>
         )}
 
-        {/* Project filter */}
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Project</Label>
-          <Select
-            value={selectedProjectId || 'all'}
-            onValueChange={v => setSelectedProjectId(v === 'all' ? '' : v)}
-          >
-            <SelectTrigger className="w-[200px] h-9">
-              <SelectValue placeholder="All projects" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Projects</SelectItem>
-              {projects.filter(p => p.is_active).map(p => (
-                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* Project filter — searchable, multi-select */}
+        <div className="w-[220px]">
+          <MultiFilterSelect
+            label="Project" allLabel="All Projects"
+            selected={selectedProjectIds}
+            options={projects.filter(p => p.is_active).map(p => ({ value: p.id, label: p.name }))}
+            onChange={setSelectedProjectIds}
+            onClear={() => setSelectedProjectIds([])}
+          />
         </div>
 
         {hasActiveFilters && (
@@ -190,8 +174,8 @@ export default function History() {
             size="sm"
             className="text-muted-foreground h-9 self-end"
             onClick={() => {
-              setSelectedUserId(canManage ? 'all' : (employee?.id || ''));
-              setSelectedProjectId('');
+              setSelectedUserIds([]);
+              setSelectedProjectIds([]);
             }}
           >
             Clear filters
@@ -222,7 +206,7 @@ export default function History() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Entries</p>
-                <p className="text-2xl font-bold text-foreground">{monthEntries.length}</p>
+                <p className="text-2xl font-bold text-foreground">{filteredEntries.length}</p>
               </div>
             </div>
           </CardContent>
@@ -246,7 +230,7 @@ export default function History() {
         <Card className="card-elevated">
           <CardHeader><CardTitle>By Project</CardTitle></CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="max-h-[400px] overflow-y-auto space-y-4 pr-1">
               {projectStats.map(([projectId, { hours, projectName, clientName }]) => (
                 <div key={projectId} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
                   <div>
@@ -276,7 +260,7 @@ export default function History() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="table-header">Date</TableHead>
-                    {canManage && selectedUserId === 'all' && (
+                    {showEmployeeColumn && (
                       <TableHead className="table-header">Employee</TableHead>
                     )}
                     <TableHead className="table-header">Project</TableHead>
@@ -287,7 +271,7 @@ export default function History() {
                   {sortedEntries.map(entry => (
                     <TableRow key={entry.id}>
                       <TableCell>{format(new Date(entry.date), 'MMM d')}</TableCell>
-                      {canManage && selectedUserId === 'all' && (
+                      {showEmployeeColumn && (
                         <TableCell>
                           <span className="text-sm font-medium text-foreground">
                             {getEmployeeName(entry.user_id)}
@@ -306,7 +290,7 @@ export default function History() {
                   {sortedEntries.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={canManage && selectedUserId === 'all' ? 4 : 3}
+                        colSpan={showEmployeeColumn ? 4 : 3}
                         className="text-center text-muted-foreground py-8"
                       >
                         No entries this month
