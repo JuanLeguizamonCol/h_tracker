@@ -43,7 +43,8 @@ export default function Clients() {
   const filteredClients = clients.filter(
     client =>
       client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (client.email?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false),
+      (client.email?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false) ||
+      (client.client_number?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false),
   );
 
   const getProjectsByClient = (clientId: string) =>
@@ -112,7 +113,7 @@ export default function Clients() {
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          placeholder="Search clients..."
+          placeholder="Search by name, email, or client code..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-10"
