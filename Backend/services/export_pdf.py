@@ -488,7 +488,7 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
         )
 
     return f'''
-<div class="page-last" style="page-break-before:always;">
+<div class="page-last">
   <div class="attachment-title">Attachment II<br/>Time Detail</div>
 
   <table width="100%" border="0" cellpadding="2" cellspacing="0" style="margin-bottom:14pt;">
@@ -506,7 +506,7 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
     </tr>
   </table>
 
-  <table class="detail-table" width="100%" border="0" cellpadding="3" cellspacing="0">
+  <table class="detail-table" repeat="1" width="100%" border="0" cellpadding="3" cellspacing="0">
     <thead>
       <tr>
         <th width="12%" align="left">Week of</th>

@@ -392,6 +392,18 @@ export interface InvoiceEditLine {
   original_hours?: number;
 }
 
+export interface InvoiceTimeDetailRow {
+  week_start: string;
+  user_id: string;
+  employee_name: string;
+  title: string | null;
+  hourly_rate: number;
+  hours: number;
+  subtotal: number;
+  discount: number;
+  total: number;
+}
+
 export interface InvoiceEditData {
   invoice: Invoice;
   client: {
@@ -408,6 +420,7 @@ export interface InvoiceEditData {
   } | null;
   lines: InvoiceEditLine[];
   expenses: InvoiceExpense[];
+  time_detail?: InvoiceTimeDetailRow[];
 }
 
 export interface InvoiceLinePatch {

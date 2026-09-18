@@ -1143,6 +1143,59 @@ export default function InvoiceEditPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Time Detail — Attachment II (own page(s) of the PDF) */}
+          {(data.time_detail?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Time Detail (Attachment II)</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Hours per week per professional, from the time entries on this invoice. Printed on its own
+                  page(s) after the fees summary in the PDF. Reflects the last saved rates, hours and discounts.
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="table-header">Week of</TableHead>
+                        <TableHead className="table-header">Professional</TableHead>
+                        <TableHead className="table-header text-right">Rate</TableHead>
+                        <TableHead className="table-header text-right">Hours</TableHead>
+                        <TableHead className="table-header text-right">Subtotal</TableHead>
+                        <TableHead className="table-header text-right">Discount</TableHead>
+                        <TableHead className="table-header text-right">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.time_detail!.map(r => {
+                        const [y, m, d] = r.week_start.split('-').map(Number);
+                        return (
+                          <TableRow key={`${r.week_start}-${r.user_id}`}>
+                            <TableCell className="tabular-nums">{`${m}/${d}/${String(y % 100).padStart(2, '0')}`}</TableCell>
+                            <TableCell>{r.employee_name}{r.title ? `, ${r.title}` : ''}</TableCell>
+                            <TableCell className="text-right tabular-nums">${r.hourly_rate.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.hours.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">${r.subtotal.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.discount > 0 ? `$${r.discount.toFixed(2)}` : '—'}</TableCell>
+                            <TableCell className="text-right tabular-nums font-medium">${r.total.toFixed(2)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      <TableRow className="border-t-2 font-bold">
+                        <TableCell colSpan={3}>Total</TableCell>
+                        <TableCell className="text-right tabular-nums">{data.time_detail!.reduce((s, r) => s + r.hours, 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">${data.time_detail!.reduce((s, r) => s + r.subtotal, 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">${data.time_detail!.reduce((s, r) => s + r.discount, 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">${data.time_detail!.reduce((s, r) => s + r.total, 0).toFixed(2)}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right column — sticky summary */}
