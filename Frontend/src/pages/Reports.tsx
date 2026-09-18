@@ -2,15 +2,15 @@ import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, addWeeks, addMonths, addDays, differenceInCalendarDays } from 'date-fns';
 import {
   CalendarIcon, Search, Loader2, Filter, X,
-  Clock, TrendingUp, Activity, BarChart2, Table as TableIcon,
-  LayoutDashboard, Download, Gauge, AlertTriangle, TrendingDown, CheckCircle2,
+  Clock, TrendingUp, Activity, BarChart2,
+  Download, Gauge, AlertTriangle, TrendingDown, CheckCircle2,
   ChevronRight, ChevronDown, ChevronLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import {
   ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell, ReferenceLine,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   AreaChart, Area,
 } from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
@@ -75,6 +75,15 @@ function occupancyCellClass(pct: number): string {
   if (pct > 100) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
   if (pct < UNDERLOADED_RATIO * 100) return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
   return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+}
+
+// Availability cell background for the "who can take a project" matrix —
+// the lower the projected load, the more available (and the greener) that
+// week is.
+function availabilityCellClass(pct: number): string {
+  if (pct <= 0) return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+  if (pct < 25) return 'bg-green-50 text-green-600 dark:bg-green-950/20 dark:text-green-400';
+  return 'bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400';
 }
 
 // ─── Filter state ─────────────────────────────────────────────────────────────
@@ -321,7 +330,6 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-type ViewMode = 'charts' | 'tables' | 'both';
 type TimeGroup = 'daily' | 'weekly';
 type MatrixGranularity = 'month' | 'week' | 'day';
 
@@ -331,9 +339,9 @@ export default function Reports() {
   const set = <K extends keyof Filters>(key: K, val: Filters[K]) =>
     setF(prev => ({ ...prev, [key]: val }));
 
-  const [viewMode, setViewMode] = useState<ViewMode>('both');
   const [timeGroup, setTimeGroup] = useState<TimeGroup>('daily');
   const [matrixGranularity, setMatrixGranularity] = useState<MatrixGranularity>('week');
+  const [projectMatrixGranularity, setProjectMatrixGranularity] = useState<MatrixGranularity>('week');
   const [isExporting, setIsExporting] = useState(false);
 
   const { data: projects = [] } = useProjects();
@@ -518,20 +526,6 @@ export default function Reports() {
     };
   }, [filteredEntries, f.startDate, f.endDate]);
 
-  // ── Chart: hours by employee ──────────────────────────────────────────────────
-  const employeeChartData = useMemo(() => {
-    const map: Record<string, { userId: string; name: string; Billable: number; 'Non-billable': number }> = {};
-    filteredEntries.forEach(e => {
-      if (!map[e.user_id]) map[e.user_id] = { userId: e.user_id, name: employeeMap.get(e.user_id)?.name ?? 'Deleted Employee', Billable: 0, 'Non-billable': 0 };
-      if (e.billable) map[e.user_id].Billable += Number(e.hours);
-      else map[e.user_id]['Non-billable'] += Number(e.hours);
-    });
-    return Object.values(map)
-      .map(d => ({ ...d, total: d.Billable + d['Non-billable'] }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 12);
-  }, [filteredEntries, employeeMap]);
-
   // ── Chart: hours by location ──────────────────────────────────────────────────
   const locationChartData = useMemo(() => {
     const map: Record<string, { key: string; name: string; Billable: number; 'Non-billable': number; employees: Set<string> }> = {};
@@ -546,29 +540,6 @@ export default function Reports() {
       .map(d => ({ key: d.key, name: d.name, Billable: d.Billable, 'Non-billable': d['Non-billable'], total: d.Billable + d['Non-billable'], employeeCount: d.employees.size }))
       .sort((a, b) => b.total - a.total);
   }, [filteredEntries, locationKeyOf]);
-
-  // ── Chart: hours by project (donut) ──────────────────────────────────────────
-  const projectPieData = useMemo(() => {
-    const map: Record<string, { id: string; name: string; client: string; value: number }> = {};
-    filteredEntries.forEach(e => {
-      const proj = projectMap.get(e.project_id);
-      const cli  = proj ? clientMap.get(proj.client_id) : null;
-      if (!map[e.project_id]) map[e.project_id] = { id: e.project_id, name: proj?.name ?? 'Unknown', client: cli?.name ?? '', value: 0 };
-      map[e.project_id].value += Number(e.hours);
-    });
-    return Object.values(map).sort((a, b) => b.value - a.value).slice(0, 10);
-  }, [filteredEntries, projectMap, clientMap]);
-
-  // ── Chart: billable hours by project (bar) ────────────────────────────────────
-  const projectBarData = useMemo(() =>
-    projectPieData
-      .map(d => {
-        const billable = filteredEntries.filter(e => e.project_id === d.id && e.billable).reduce((s, e) => s + Number(e.hours), 0);
-        return { id: d.id, name: d.name.length > 18 ? d.name.slice(0, 16) + '…' : d.name, fullName: d.name, Billable: billable, 'Non-billable': d.value - billable };
-      })
-      .sort((a, b) => (b.Billable + b['Non-billable']) - (a.Billable + a['Non-billable'])),
-    [projectPieData, filteredEntries]
-  );
 
   // ── Chart: hours over time ────────────────────────────────────────────────────
   const timeChartData = useMemo(() => {
@@ -585,27 +556,6 @@ export default function Reports() {
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(d => ({ ...d, date: format(parseLocalDate(d.date), 'MMM d') }));
   }, [filteredEntries, timeGroup]);
-
-  // ── Tables ────────────────────────────────────────────────────────────────────
-  const projectTotals = useMemo(() => {
-    const map: Record<string, { name: string; clientName: string; hours: number; billableHours: number; entries: number }> = {};
-    filteredEntries.forEach(e => {
-      if (!map[e.project_id]) {
-        const proj = projectMap.get(e.project_id);
-        const cli = proj ? clientMap.get(proj.client_id) : null;
-        map[e.project_id] = { name: proj?.name ?? 'Unknown', clientName: cli?.name ?? '', hours: 0, billableHours: 0, entries: 0 };
-      }
-      map[e.project_id].hours += Number(e.hours);
-      if (e.billable) map[e.project_id].billableHours += Number(e.hours);
-      map[e.project_id].entries++;
-    });
-    return Object.entries(map).sort((a, b) => b[1].hours - a[1].hours);
-  }, [filteredEntries, projectMap, clientMap]);
-
-  const sortedEntries = useMemo(() =>
-    [...filteredEntries].sort((a, b) => parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime()),
-    [filteredEntries]
-  );
 
   // ── Weekly Hours Matrix data ──────────────────────────────────────────────────
   // Each employee row also carries a project-level breakdown (same week
@@ -841,6 +791,116 @@ export default function Reports() {
     return { columns, monthGroups, rows, totals, monthTotals, grandTotal, maxCellHours };
   }, [filteredEntries, f.startDate, f.endDate, employeeMap, projectMap, matrixGranularity]);
 
+  // ── Project Hours Matrix data ───────────────────────────────────────────────
+  // Same shape and month/week/day granularity as the employee matrix above,
+  // just rooted at project instead of employee — rows are projects, and each
+  // one expands into which employees logged those hours.
+  const projectHoursMatrix = useMemo(() => {
+    const dayHoursMap: Record<string, Record<string, number>> = {};
+    const dayEmployeeHoursMap: Record<string, Record<string, Record<string, number>>> = {};
+    filteredEntries.forEach(e => {
+      if (!dayHoursMap[e.project_id]) dayHoursMap[e.project_id] = {};
+      dayHoursMap[e.project_id][e.date] = (dayHoursMap[e.project_id][e.date] ?? 0) + Number(e.hours);
+      if (!dayEmployeeHoursMap[e.project_id]) dayEmployeeHoursMap[e.project_id] = {};
+      if (!dayEmployeeHoursMap[e.project_id][e.user_id]) dayEmployeeHoursMap[e.project_id][e.user_id] = {};
+      const perEmployee = dayEmployeeHoursMap[e.project_id][e.user_id];
+      perEmployee[e.date] = (perEmployee[e.date] ?? 0) + Number(e.hours);
+    });
+
+    const monthGroups: { key: string; label: string; weekIndices: number[] }[] = [];
+    {
+      let cursor = startOfMonth(f.startDate);
+      const lastMonth = startOfMonth(f.endDate);
+      while (cursor <= lastMonth) {
+        monthGroups.push({ key: format(cursor, 'yyyy-MM'), label: format(cursor, 'MMM yyyy'), weekIndices: [] });
+        cursor = addMonths(cursor, 1);
+      }
+    }
+    const monthGroupByKey = new Map(monthGroups.map(g => [g.key, g]));
+
+    const columns: { key: string; label: string; start: Date }[] = [];
+    if (projectMatrixGranularity === 'week') {
+      let current = startOfWeek(f.startDate, { weekStartsOn: 1 });
+      while (current <= f.endDate) {
+        const anchor = addDays(current, 3);
+        const weekN = Math.ceil(anchor.getDate() / 7);
+        const idx = columns.length;
+        columns.push({ key: format(current, 'yyyy-MM-dd'), label: `${format(anchor, 'MMM')}-Week${weekN}`, start: current });
+        monthGroupByKey.get(format(anchor, 'yyyy-MM'))?.weekIndices.push(idx);
+        current = addWeeks(current, 1);
+      }
+    } else if (projectMatrixGranularity === 'day') {
+      const datesWithHours = [...new Set(filteredEntries.map(e => e.date))].sort();
+      datesWithHours.forEach(dateStr => {
+        const d = parseLocalDate(dateStr);
+        const idx = columns.length;
+        columns.push({ key: dateStr, label: format(d, 'MMM d'), start: d });
+        monthGroupByKey.get(format(d, 'yyyy-MM'))?.weekIndices.push(idx);
+      });
+    }
+
+    function columnHoursFor(dayMap: Record<string, number> | undefined): number[] {
+      if (!dayMap) return columns.map(() => 0);
+      if (projectMatrixGranularity === 'day') return columns.map(c => dayMap[c.key] ?? 0);
+      return columns.map(c => {
+        let sum = 0;
+        for (let i = 0; i < 7; i++) sum += dayMap[format(addDays(c.start, i), 'yyyy-MM-dd')] ?? 0;
+        return sum;
+      });
+    }
+
+    function monthTotalsFor(columnHours: number[], dayMap: Record<string, number> | undefined): number[] {
+      if (projectMatrixGranularity === 'month') {
+        if (!dayMap) return monthGroups.map(() => 0);
+        const byMonth: Record<string, number> = {};
+        Object.entries(dayMap).forEach(([dateStr, hours]) => {
+          const mk = dateStr.slice(0, 7);
+          byMonth[mk] = (byMonth[mk] ?? 0) + hours;
+        });
+        return monthGroups.map(g => byMonth[g.key] ?? 0);
+      }
+      return monthGroups.map(g => g.weekIndices.reduce((sum, i) => sum + columnHours[i], 0));
+    }
+
+    const projectIds = [...new Set(filteredEntries.map(e => e.project_id))];
+    const rows = projectIds
+      .map(pid => {
+        const dayMap = dayHoursMap[pid];
+        const proj = projectMap.get(pid);
+        const cli = proj ? clientMap.get(proj.client_id) : null;
+        const employeesBreakdown = Object.entries(dayEmployeeHoursMap[pid] ?? {})
+          .map(([userId, byDay]) => {
+            const weekHours = columnHoursFor(byDay);
+            return {
+              employeeId: userId,
+              name: employeeMap.get(userId)?.name ?? 'Deleted Employee',
+              weekHours,
+              monthTotals: monthTotalsFor(weekHours, byDay),
+              total: Object.values(byDay).reduce((s, h) => s + h, 0),
+            };
+          })
+          .sort((a, b) => b.total - a.total);
+        const weekHours = columnHoursFor(dayMap);
+        return {
+          projectId: pid,
+          name: proj?.name ?? 'Deleted Project',
+          clientName: cli?.name ?? '',
+          weekHours,
+          monthTotals: monthTotalsFor(weekHours, dayMap),
+          total: Object.values(dayMap ?? {}).reduce((s, h) => s + h, 0),
+          employees: employeesBreakdown,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const totals = columns.map((_, i) => rows.reduce((sum, r) => sum + r.weekHours[i], 0));
+    const monthTotals = monthGroups.map((_, gi) => rows.reduce((sum, r) => sum + r.monthTotals[gi], 0));
+    const grandTotal = rows.reduce((sum, r) => sum + r.total, 0);
+    const maxCellHours = Math.max(1, ...rows.map(r => Math.max(0, ...r.weekHours)));
+
+    return { columns, monthGroups, rows, totals, monthTotals, grandTotal, maxCellHours };
+  }, [filteredEntries, f.startDate, f.endDate, employeeMap, projectMap, clientMap, projectMatrixGranularity]);
+
   // Weekly Hours Matrix can end up with far more week columns than fit on
   // screen (a wide date range = many months of weekly columns) — the table
   // itself scrolls (overflow-x-auto below), but that's only discoverable via
@@ -893,6 +953,41 @@ export default function Reports() {
       backgroundColor: `rgba(37, 99, 235, ${alpha.toFixed(2)})`,
       color: alpha > 0.5 ? '#fff' : undefined,
     };
+  };
+
+  const projectMatrixScrollRef = useRef<HTMLDivElement>(null);
+  const [projectMatrixCanScroll, setProjectMatrixCanScroll] = useState({ left: false, right: false });
+
+  useEffect(() => {
+    const el = projectMatrixScrollRef.current;
+    if (!el) return;
+    const update = () => setProjectMatrixCanScroll({
+      left: el.scrollLeft > 4,
+      right: el.scrollLeft < el.scrollWidth - el.clientWidth - 4,
+    });
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      el.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [projectHoursMatrix]);
+
+  function scrollProjectMatrix(direction: 'left' | 'right') {
+    const el = projectMatrixScrollRef.current;
+    if (!el) return;
+    const amount = Math.round(el.clientWidth * 0.8) * (direction === 'left' ? -1 : 1);
+    el.scrollBy({ left: amount, behavior: 'smooth' });
+  }
+
+  const [expandedProjectMatrixRows, setExpandedProjectMatrixRows] = useState<Set<string>>(new Set());
+  const toggleProjectMatrixRow = (projectId: string) => {
+    setExpandedProjectMatrixRows(prev => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId); else next.add(projectId);
+      return next;
+    });
   };
 
   // ── Utilization report: cargability against a 40h/week benchmark ───────────────
@@ -1040,6 +1135,60 @@ export default function Reports() {
     return { weeks: projectedWeeks, rows };
   }, [filteredStaffing, projectedWeeks, canManage]);
 
+  // ── Utilization report: who's available for new work ───────────────────────
+  // Unlike the matrix above (which only lists people who HAVE an active
+  // allocation), this scans every active employee — someone with no Staffing
+  // row at all is 0% loaded and exactly the kind of "can take a project"
+  // person this is meant to surface. Uses the full, unfiltered `staffing`
+  // (not `filteredStaffing`) for the load computation itself — a person's
+  // TRUE total commitment across all their projects, so picking a Project
+  // filter in the Filters card can't make someone look free just because
+  // their other project got filtered out of view. The Employee/Location
+  // filters still narrow WHICH people are considered, since those describe
+  // the person being looked for, not a project-side attribute.
+  const LOW_LOAD_WEEKS = 5;
+  const LOW_LOAD_THRESHOLD_PCT = 50;
+
+  const availableCapacityForecast = useMemo(() => {
+    const weeks = projectedWeeks.slice(0, LOW_LOAD_WEEKS);
+    if (!canManage) return { weeks, rows: [] as { employeeId: string; name: string; weekPct: number[]; avgPct: number }[] };
+
+    const assignmentsByEmployee = new Map<string, typeof staffing>();
+    staffing.forEach(a => {
+      if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
+      if (!assignmentsByEmployee.has(a.user_id)) assignmentsByEmployee.set(a.user_id, []);
+      assignmentsByEmployee.get(a.user_id)!.push(a);
+    });
+
+    const pool = employees.filter(e =>
+      e.is_active &&
+      (f.employeeId.length === 0 || f.employeeId.includes(e.id)) &&
+      (f.location.length === 0 || f.location.includes(locationKeyOf(e.id)))
+    );
+
+    const rows = pool
+      .map(emp => {
+        const assignments = assignmentsByEmployee.get(emp.id) ?? [];
+        const weekPct = weeks.map(week => {
+          const hours = assignments.reduce((sum, a) => {
+            const startStr = a.start_date ?? a.project_start_date;
+            const endStr = a.end_date ?? a.project_end_date;
+            const start = startStr ? parseLocalDate(startStr) : null;
+            const end = endStr ? parseLocalDate(endStr) : null;
+            const activeThisWeek = (!start || start <= week.end) && (!end || end >= week.start);
+            return activeThisWeek ? sum + (a.allocation_percentage! / 100) * WEEKLY_CAPACITY_HOURS : sum;
+          }, 0);
+          return (hours / WEEKLY_CAPACITY_HOURS) * 100;
+        });
+        const avgPct = weekPct.reduce((s, p) => s + p, 0) / weekPct.length;
+        return { employeeId: emp.id, name: emp.name, weekPct, avgPct };
+      })
+      .filter(r => r.avgPct < LOW_LOAD_THRESHOLD_PCT)
+      .sort((a, b) => a.avgPct - b.avgPct);
+
+    return { weeks, rows };
+  }, [employees, staffing, projectedWeeks, canManage, f.employeeId, f.location, locationKeyOf]);
+
   // ── Utilization report: projected (Staffing) vs actual (registered), per person ──
   // "Projected" = what Staffing currently plans for that person on that project
   // (their allocation % → implied hrs/week), regardless of the date filter.
@@ -1118,11 +1267,6 @@ export default function Reports() {
     return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
 
-  const showCharts = viewMode === 'charts' || viewMode === 'both';
-  const showTables = viewMode === 'tables' || viewMode === 'both';
-  const barHeight = Math.max(260, employeeChartData.length * 38);
-  const utilizationBarHeight = Math.max(260, utilizationData.length * 38);
-
   return (
     <div className="space-y-6">
       {/* ── Header ────────────────────────────────────────────────────────── */}
@@ -1141,19 +1285,6 @@ export default function Reports() {
             {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             Export Excel
           </Button>
-          {/* View toggle */}
-          <div className="flex rounded-md border overflow-hidden text-sm">
-            {([['charts', LayoutDashboard], ['both', BarChart2], ['tables', TableIcon]] as [ViewMode, React.ElementType][]).map(([mode, Icon]) => (
-              <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 capitalize transition-colors ${viewMode === mode ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {mode}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -1450,6 +1581,185 @@ export default function Reports() {
         </CardContent>
       </Card>
 
+      {/* ── Project Hours Matrix ────────────────────────────────────────── */}
+      <Card className="card-elevated">
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="text-base">Project Hours Matrix</CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex rounded-md border overflow-hidden text-xs">
+                {(['month', 'week', 'day'] as MatrixGranularity[]).map(g => (
+                  <button
+                    key={g}
+                    onClick={() => setProjectMatrixGranularity(g)}
+                    className={`px-3 py-1.5 capitalize transition-colors ${projectMatrixGranularity === g ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+              {projectHoursMatrix.rows.length > 0 && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => scrollProjectMatrix('left')} disabled={!projectMatrixCanScroll.left} title="Scroll left">
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => scrollProjectMatrix('right')} disabled={!projectMatrixCanScroll.right} title="Scroll right">
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {projectMatrixGranularity === 'month'
+              ? 'Hours per project per month, with a grand total per row · '
+              : projectMatrixGranularity === 'day'
+              ? 'Hours per project per day worked (empty days are skipped), with full-month subtotals and a grand total per row · '
+              : 'Hours per project per week, with full-month subtotals and a grand total per row · '}
+            Darker cells mean more hours · Click a project to drill down by employee, with its own employee total
+          </p>
+        </CardHeader>
+        <CardContent>
+          {projectHoursMatrix.rows.length === 0 ? (
+            <p className="text-center text-muted-foreground py-6 text-sm">No data for the selected filters.</p>
+          ) : (
+            <div className="overflow-x-auto" ref={projectMatrixScrollRef}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead rowSpan={2} className="table-header sticky left-0 bg-background z-10 min-w-[200px] align-bottom shadow-[1px_0_0_0_hsl(var(--border))]">
+                      Project
+                    </TableHead>
+                    {projectHoursMatrix.monthGroups.map(g => (
+                      <TableHead
+                        key={g.key}
+                        colSpan={g.weekIndices.length + 1}
+                        className="table-header text-center whitespace-nowrap border-l border-border"
+                      >
+                        {g.label}
+                      </TableHead>
+                    ))}
+                    <TableHead rowSpan={2} className="table-header text-center whitespace-nowrap min-w-[90px] align-bottom border-l-2 border-border">
+                      Total
+                    </TableHead>
+                  </TableRow>
+                  <TableRow>
+                    {projectHoursMatrix.monthGroups.map(g => (
+                      <Fragment key={g.key}>
+                        {g.weekIndices.map(wi => (
+                          <TableHead key={projectHoursMatrix.columns[wi].key} className="table-header text-center whitespace-nowrap min-w-[100px]">
+                            {projectHoursMatrix.columns[wi].label}
+                          </TableHead>
+                        ))}
+                        <TableHead className="table-header text-center whitespace-nowrap min-w-[90px] border-l border-border bg-muted/20">
+                          Month Total
+                        </TableHead>
+                      </Fragment>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {projectHoursMatrix.rows.map(row => {
+                    const isExpanded = expandedProjectMatrixRows.has(row.projectId);
+                    const hasEmployees = row.employees.length > 0;
+                    return (
+                      <Fragment key={row.projectId}>
+                        <TableRow
+                          className={hasEmployees ? 'cursor-pointer hover:bg-muted/40' : undefined}
+                          onClick={() => hasEmployees && toggleProjectMatrixRow(row.projectId)}
+                        >
+                          <TableCell className="font-medium text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
+                            <div className="flex items-center gap-1.5">
+                              {hasEmployees ? (
+                                isExpanded
+                                  ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                  : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              ) : (
+                                <span className="w-3.5 shrink-0" />
+                              )}
+                              <div>
+                                {row.name}
+                                {row.clientName && <span className="block text-xs text-muted-foreground font-normal">{row.clientName}</span>}
+                              </div>
+                            </div>
+                          </TableCell>
+                          {projectHoursMatrix.monthGroups.map((g, gi) => (
+                            <Fragment key={g.key}>
+                              {g.weekIndices.map(wi => (
+                                <TableCell
+                                  key={wi}
+                                  className="text-center text-sm font-medium tabular-nums transition-colors"
+                                  style={heatCellStyle(row.weekHours[wi], projectHoursMatrix.maxCellHours)}
+                                >
+                                  {row.weekHours[wi] > 0 ? `${row.weekHours[wi].toFixed(1)}h` : ''}
+                                </TableCell>
+                              ))}
+                              <TableCell className="text-center text-sm font-semibold tabular-nums border-l border-border bg-muted/20">
+                                {row.monthTotals[gi] > 0 ? `${row.monthTotals[gi].toFixed(1)}h` : ''}
+                              </TableCell>
+                            </Fragment>
+                          ))}
+                          <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l-2 border-border">
+                            {row.total > 0 ? `${row.total.toFixed(1)}h` : ''}
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && row.employees.map(emp => (
+                          <TableRow key={`${row.projectId}-${emp.employeeId}`} className="bg-muted/20">
+                            <TableCell className="text-xs text-muted-foreground sticky left-0 bg-muted/20 z-10 shadow-[1px_0_0_0_hsl(var(--border))] pl-9">
+                              {emp.name}
+                            </TableCell>
+                            {projectHoursMatrix.monthGroups.map((g, gi) => (
+                              <Fragment key={g.key}>
+                                {g.weekIndices.map(wi => (
+                                  <TableCell
+                                    key={wi}
+                                    className="text-center text-xs tabular-nums transition-colors"
+                                    style={heatCellStyle(emp.weekHours[wi], projectHoursMatrix.maxCellHours)}
+                                  >
+                                    {emp.weekHours[wi] > 0 ? `${emp.weekHours[wi].toFixed(1)}h` : ''}
+                                  </TableCell>
+                                ))}
+                                <TableCell className="text-center text-xs font-medium tabular-nums border-l border-border bg-muted/30">
+                                  {emp.monthTotals[gi] > 0 ? `${emp.monthTotals[gi].toFixed(1)}h` : ''}
+                                </TableCell>
+                              </Fragment>
+                            ))}
+                            <TableCell className="text-center text-xs font-bold tabular-nums text-primary border-l-2 border-border">
+                              {emp.total > 0 ? `${emp.total.toFixed(1)}h` : ''}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </Fragment>
+                    );
+                  })}
+                  {/* Totals row */}
+                  <TableRow className="border-t-2 border-border">
+                    <TableCell className="font-bold text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
+                      Total
+                    </TableCell>
+                    {projectHoursMatrix.monthGroups.map((g, gi) => (
+                      <Fragment key={g.key}>
+                        {g.weekIndices.map(wi => (
+                          <TableCell key={wi} className="text-center text-sm font-bold tabular-nums text-primary">
+                            {projectHoursMatrix.totals[wi] > 0 ? `${projectHoursMatrix.totals[wi].toFixed(1)}h` : ''}
+                          </TableCell>
+                        ))}
+                        <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l border-border bg-muted/20">
+                          {projectHoursMatrix.monthTotals[gi] > 0 ? `${projectHoursMatrix.monthTotals[gi].toFixed(1)}h` : ''}
+                        </TableCell>
+                      </Fragment>
+                    ))}
+                    <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l-2 border-border">
+                      {projectHoursMatrix.grandTotal > 0 ? `${projectHoursMatrix.grandTotal.toFixed(1)}h` : ''}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* ── Hours by Location ─────────────────────────────────────────────── */}
       {canManage && (
         <Card className="card-elevated">
@@ -1509,10 +1819,7 @@ export default function Reports() {
         </Card>
       )}
 
-      {showCharts && (
-        <>
-          {/* ── Hours over time ─────────────────────────────────────────── */}
-          <Card>
+      <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <CardTitle className="text-base">Hours Over Time</CardTitle>
@@ -1553,160 +1860,6 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          {/* ── Hours by Employee ────────────────────────────────────────── */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Hours by Employee</CardTitle>
-              <p className="text-xs text-muted-foreground">Click a bar to filter by that employee</p>
-            </CardHeader>
-            <CardContent>
-              {employeeChartData.length === 0 ? <div className="h-[240px] flex items-center justify-center"><ChartEmpty /></div> : (
-                <ResponsiveContainer width="100%" height={barHeight}>
-                  <BarChart
-                    data={employeeChartData}
-                    layout="vertical"
-                    margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
-                    onClick={data => {
-                      const uid = data?.activePayload?.[0]?.payload?.userId;
-                      if (uid) set('employeeId', [uid]);
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                    <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
-                    <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'hsl(var(--muted)/0.5)' }} />
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="Billable" stackId="a" fill={BILLABLE_COLOR} radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="Non-billable" stackId="a" fill={NON_BILLABLE_COLOR} radius={[0, 3, 3, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* ── Billable hours by project — full-width stacked bar ───────── */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Billable vs Non-billable by Project</CardTitle>
-              <p className="text-xs text-muted-foreground">Click a bar to filter by that project</p>
-            </CardHeader>
-            <CardContent>
-              {projectBarData.length === 0 ? <div className="h-[200px] flex items-center justify-center"><ChartEmpty /></div> : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart
-                    data={projectBarData}
-                    margin={{ top: 8, right: 16, left: -16, bottom: 40 }}
-                    onClick={data => {
-                      const id = data?.activePayload?.[0]?.payload?.id;
-                      if (id) set('projectId', [id]);
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} angle={-30} textAnchor="end" interval={0} />
-                    <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'hsl(var(--muted)/0.5)' }} />
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="Billable" stackId="a" fill={BILLABLE_COLOR} radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="Non-billable" stackId="a" fill={NON_BILLABLE_COLOR} radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
-
-      {/* ── Tables ────────────────────────────────────────────────────────── */}
-      {showTables && (
-        <>
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* Totals by project */}
-            <Card className="card-elevated">
-              <CardHeader><CardTitle className="text-base">Totals by Project</CardTitle></CardHeader>
-              <CardContent>
-                <div className="max-h-[500px] overflow-y-auto space-y-3 pr-1">
-                  {projectTotals.map(([projectId, { name, clientName, hours, billableHours, entries }]) => (
-                    <div key={projectId} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                      <div>
-                        <p className="font-medium text-sm">{name}</p>
-                        <p className="text-xs text-muted-foreground">{clientName} · {entries} {entries === 1 ? 'entry' : 'entries'} · {billableHours.toFixed(1)}h billable</p>
-                      </div>
-                      <span className="font-bold text-primary">{hours.toFixed(1)}h</span>
-                    </div>
-                  ))}
-                  {projectTotals.length === 0 && <p className="text-center text-muted-foreground py-6 text-sm">No data for the selected filters.</p>}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Detailed entries */}
-            <Card className="card-elevated">
-              <CardHeader><CardTitle className="text-base">Detailed Entries</CardTitle></CardHeader>
-              <CardContent>
-                <div className="max-h-[500px] overflow-y-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="table-header">Date</TableHead>
-                        {canManage && <TableHead className="table-header">Employee</TableHead>}
-                        <TableHead className="table-header">Project</TableHead>
-                        <TableHead className="table-header">Location</TableHead>
-                        <TableHead className="table-header text-right">Hours</TableHead>
-                        <TableHead className="table-header">Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {sortedEntries.slice(0, 100).map(entry => (
-                        <TableRow key={entry.id}>
-                          <TableCell className="text-sm">{format(parseLocalDate(entry.date), 'MMM d')}</TableCell>
-                          {canManage && (
-                            <TableCell className="text-sm">
-                              {employeeMap.get(entry.user_id)?.name ?? 'Deleted Employee'}
-                            </TableCell>
-                          )}
-                          <TableCell className="text-sm">{projectMap.get(entry.project_id)?.name ?? 'Unknown'}</TableCell>
-                          <TableCell className="text-sm">
-                            {entry.location
-                              ? <span>{entry.location}</span>
-                              : <span className="text-muted-foreground">{employeeMap.get(entry.user_id)?.location ?? '—'}</span>}
-                          </TableCell>
-                          <TableCell className="text-right font-medium">{Number(entry.hours)}h</TableCell>
-                          <TableCell>
-                            <div className="flex gap-1 flex-wrap">
-                              <Badge variant={entry.billable ? 'default' : 'secondary'} className="text-xs">
-                                {entry.billable ? 'Billable' : 'Non-billable'}
-                              </Badge>
-                              {entry.status === 'on_hold' && (
-                                <Badge variant="outline" className="text-xs text-warning border-warning">On Hold</Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {sortedEntries.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={canManage ? 6 : 5} className="text-center text-muted-foreground py-8">
-                            No entries match the selected filters.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                  {sortedEntries.length > 100 && (
-                    <p className="text-xs text-muted-foreground text-center py-2">
-                      Showing first 100 of {sortedEntries.length} entries
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-        </>
-      )}
-
         </TabsContent>
 
         <TabsContent value="utilization" className="space-y-6 mt-4">
@@ -1731,37 +1884,6 @@ export default function Reports() {
               color="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
             />
           </div>
-
-          <Card className="card-elevated">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Average Weekly Hours by Person</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Benchmark: {WEEKLY_CAPACITY_HOURS}h/week (dashed line) · Red = overloaded · Amber = underloaded · Green = balanced
-              </p>
-            </CardHeader>
-            <CardContent>
-              {utilizationData.length === 0 ? <div className="h-[240px] flex items-center justify-center"><ChartEmpty /></div> : (
-                <ResponsiveContainer width="100%" height={utilizationBarHeight}>
-                  <BarChart
-                    data={utilizationData}
-                    layout="vertical"
-                    margin={{ top: 0, right: 24, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                    <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="h" />
-                    <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <Tooltip cursor={{ fill: 'hsl(var(--muted)/0.5)' }} formatter={(value: number) => [`${value.toFixed(1)}h/week avg`, 'Hours']} />
-                    <ReferenceLine x={WEEKLY_CAPACITY_HOURS} stroke="#64748b" strokeDasharray="4 4" />
-                    <Bar dataKey="avgWeeklyHours" radius={[0, 3, 3, 0]}>
-                      {utilizationData.map(d => (
-                        <Cell key={d.employeeId} fill={STATUS_COLORS[d.status]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
 
           <Card className="card-elevated">
             <CardHeader className="pb-2">
@@ -1861,6 +1983,62 @@ export default function Reports() {
                                 {pct > 0 ? `${pct.toFixed(0)}%` : ''}
                               </TableCell>
                             ))}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Who's available for new work — next 5 weeks below 50% load ─── */}
+          {canManage && (
+            <Card className="card-elevated">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <TrendingDown className="h-4 w-4" />Available for New Projects — Next {LOW_LOAD_WEEKS} Weeks
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Active employees averaging under {LOW_LOAD_THRESHOLD_PCT}% projected load over the next {LOW_LOAD_WEEKS} weeks (from Staffing, across ALL their assignments regardless of the Filters card) · Sorted lowest load first · Someone with no Staffing row at all shows as 0%.
+                </p>
+              </CardHeader>
+              <CardContent>
+                {availableCapacityForecast.rows.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-6 text-sm">No active employees are averaging under {LOW_LOAD_THRESHOLD_PCT}% for the next {LOW_LOAD_WEEKS} weeks.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="table-header sticky left-0 bg-background z-10 min-w-[160px] shadow-[1px_0_0_0_hsl(var(--border))]">
+                            Person
+                          </TableHead>
+                          {availableCapacityForecast.weeks.map(w => (
+                            <TableHead key={w.key} className="table-header text-center whitespace-nowrap min-w-[90px]">
+                              {w.label}
+                            </TableHead>
+                          ))}
+                          <TableHead className="table-header text-center whitespace-nowrap min-w-[90px] border-l-2 border-border">
+                            Avg
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {availableCapacityForecast.rows.map(row => (
+                          <TableRow key={row.employeeId}>
+                            <TableCell className="font-medium text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
+                              {row.name}
+                            </TableCell>
+                            {row.weekPct.map((pct, i) => (
+                              <TableCell key={i} className={`text-center text-sm font-medium tabular-nums transition-colors ${availabilityCellClass(pct)}`}>
+                                {pct > 0 ? `${pct.toFixed(0)}%` : '0%'}
+                              </TableCell>
+                            ))}
+                            <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l-2 border-border">
+                              {row.avgPct.toFixed(0)}%
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
