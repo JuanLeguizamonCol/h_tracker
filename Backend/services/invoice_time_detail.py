@@ -1,6 +1,6 @@
 """Weekly time detail ("Attachment II — Time Detail") for an invoice.
 
-One row per (week, professional): the hours that professional logged that
+One row per (professional, week): the hours that professional logged that
 week on the time entries linked to the invoice, priced with the rate and
 discount of their invoice line. Rendered in the invoice editor and as its own
 page(s) of the PDF, separate from the fees summary.
@@ -78,5 +78,6 @@ def build_time_detail(entries: Iterable[tuple], lines: list[dict]) -> list[dict]
                 "total": max(0.0, subtotal - discount),
             })
 
-    rows.sort(key=lambda r: (r["week_start"], r["employee_name"]))
+    # Grouped by professional (A→Z), each one's weeks in chronological order.
+    rows.sort(key=lambda r: (r["employee_name"].casefold(), r["user_id"], r["week_start"]))
     return rows
