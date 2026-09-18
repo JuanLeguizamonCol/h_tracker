@@ -1,9 +1,9 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, DollarSign, ChevronRight, Loader2, CheckCircle, Calendar, RefreshCw, Download, Zap, X, MoreHorizontal, Trash2 } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
+import { Plus, FileText, DollarSign, ChevronRight, Loader2, CheckCircle, RefreshCw, Download, X, MoreHorizontal, Trash2 } from 'lucide-react';
+import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { useInvoices, useGenerateMonthlyInvoices, useDeleteInvoice } from '@/hooks/useInvoices';
+import { useInvoices, useDeleteInvoice } from '@/hooks/useInvoices';
 import { useProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
 import { useAuth } from '@/contexts/AuthContext';
@@ -17,9 +17,6 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MultiFilterSelect } from '@/components/MultiFilterSelect';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from '@/components/ui/dialog';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -36,15 +33,12 @@ const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string }> = {
   voided: { label: 'Voided', color: 'bg-muted text-muted-foreground' },
 };
 
-const fmtDate = (d: Date) => format(d, 'yyyy-MM-dd');
-
 export default function Invoices() {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
   const { data: invoices = [], isLoading, refetch, isRefetching } = useInvoices();
   const { data: projects = [] } = useProjects();
   const { data: clients = [] } = useClients();
-  const generateInvoices = useGenerateMonthlyInvoices();
   const deleteInvoice = useDeleteInvoice();
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
 
@@ -57,49 +51,7 @@ export default function Invoices() {
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
 
-  type SchedulerStatus = {
-    last_run: string | null;
-    last_period: string | null;
-    invoices_generated: number;
-    next_run: string | null;
-    status?: string;
-  };
-  const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
   const [isExporting, setIsExporting] = useState(false);
-
-  // ── Generate-invoices dialog ────────────────────────────────────────────────
-  const [genOpen, setGenOpen] = useState(false);
-  const [genStart, setGenStart] = useState('');
-  const [genEnd, setGenEnd] = useState('');
-
-  const openGenerate = (mode: 'this-month' | 'last-month') => {
-    const today = new Date();
-    if (mode === 'last-month') {
-      const prev = subMonths(today, 1);
-      setGenStart(fmtDate(startOfMonth(prev)));
-      setGenEnd(fmtDate(endOfMonth(prev)));
-    } else {
-      setGenStart(fmtDate(startOfMonth(today)));
-      setGenEnd(fmtDate(today));
-    }
-    setGenOpen(true);
-  };
-
-  const handleGenerate = async () => {
-    if (!genStart || !genEnd) { toast.error('Please choose a start and end date.'); return; }
-    if (genStart > genEnd) { toast.error('Start date must be before end date.'); return; }
-    try {
-      const result = await generateInvoices.mutateAsync({ period_start: genStart, period_end: genEnd });
-      const parts = [`${result.generated} generated`, `${result.skipped} skipped`];
-      if (result.errors?.length) parts.push(`${result.errors.length} errors`);
-      toast.success(`Invoices: ${parts.join(', ')}.`);
-      if (result.errors?.length) result.errors.forEach(e => console.warn('[generate]', e));
-      setGenOpen(false);
-      api.get<SchedulerStatus>('/invoices/scheduler-status').then(setSchedulerStatus).catch(() => {});
-    } catch {
-      toast.error('Failed to generate invoices.');
-    }
-  };
 
   const invoiceLabel = (inv: Invoice) =>
     inv.invoice_number ? `#${inv.invoice_number}` : `#${inv.id.slice(0, 8)}`;
@@ -134,18 +86,6 @@ export default function Invoices() {
       setIsExporting(false);
     }
   };
-
-  useEffect(() => {
-    api.get<SchedulerStatus>('/invoices/scheduler-status')
-      .then(data => setSchedulerStatus(data))
-      .catch(() => {/* ignore — table may not exist yet */});
-  }, []);
-
-  const today = new Date();
-  const dayOfMonth = today.getDate();
-  const showPreBanner = dayOfMonth >= 1 && dayOfMonth <= 3;
-  const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const prevMonthName = prevMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
 
   const projectMap = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
   const clientMap = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
@@ -248,11 +188,6 @@ export default function Invoices() {
             {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Excel Report
           </Button>
-          {isAdmin && (
-            <Button variant="outline" className="gap-2" onClick={() => openGenerate('this-month')}>
-              <Zap className="h-4 w-4" />Generate Invoices
-            </Button>
-          )}
           <Button className="gap-2" onClick={() => navigate('/invoices/new')}>
             <Plus className="h-4 w-4" />New Invoice
           </Button>
@@ -301,35 +236,6 @@ export default function Invoices() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Auto-generation banners */}
-      {showPreBanner && !schedulerStatus?.last_run && (
-        <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm dark:border-blue-800 dark:bg-blue-950">
-          <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-            <Calendar className="h-4 w-4" />
-            <span>Invoices for <strong>{prevMonthName}</strong> will be auto-generated on the 3rd.</span>
-          </div>
-          {isAdmin && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300"
-              onClick={() => openGenerate('last-month')}
-            >
-              Generate Now
-            </Button>
-          )}
-        </div>
-      )}
-      {schedulerStatus?.last_run && schedulerStatus.invoices_generated > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300">
-          <CheckCircle className="h-4 w-4" />
-          <span>
-            <strong>{schedulerStatus.invoices_generated}</strong> invoice{schedulerStatus.invoices_generated !== 1 ? 's' : ''} were auto-generated for{' '}
-            <strong>{schedulerStatus.last_period?.split(' / ')[0]?.substring(0, 7)}</strong>.
-          </span>
-        </div>
-      )}
 
       {/* Search / filter panel */}
       <Card>
@@ -490,39 +396,6 @@ export default function Invoices() {
           )}
         </CardContent>
       </Card>
-
-      {/* Generate invoices dialog */}
-      <Dialog open={genOpen} onOpenChange={setGenOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Generate invoices</DialogTitle>
-            <DialogDescription>
-              Auto-generate draft invoices for all active (non-internal) projects with unbilled
-              hours in the selected period. Runs on demand — no need to wait for the billing day.
-              Already-generated periods are skipped, so it's safe to run again.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="gen-start">Period start</Label>
-              <Input id="gen-start" type="date" value={genStart} onChange={e => setGenStart(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="gen-end">Period end</Label>
-              <Input id="gen-end" type="date" value={genEnd} onChange={e => setGenEnd(e.target.value)} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setGenOpen(false)} disabled={generateInvoices.isPending}>
-              Cancel
-            </Button>
-            <Button onClick={handleGenerate} disabled={generateInvoices.isPending} className="gap-2">
-              {generateInvoices.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-              Generate
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Delete invoice confirmation */}
       <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>

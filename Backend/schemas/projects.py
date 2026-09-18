@@ -25,10 +25,6 @@ class ProjectBase(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     owner_company: str = "IPC"
-    billing_period: str = "monthly"
-    billing_day_of_period: Optional[int] = 3
-    custom_period_days: Optional[int] = None
-    billing_anchor_date: Optional[date] = None
     is_fixed_fee: bool = False
     fixed_fee_amount: Optional[float] = None
     is_managed_services: bool = False
@@ -58,10 +54,6 @@ class ProjectUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     owner_company: Optional[str] = None
-    billing_period: Optional[str] = None
-    billing_day_of_period: Optional[int] = None
-    custom_period_days: Optional[int] = None
-    billing_anchor_date: Optional[date] = None
     is_fixed_fee: Optional[bool] = None
     fixed_fee_amount: Optional[float] = None
     is_managed_services: Optional[bool] = None
@@ -93,10 +85,6 @@ class ProjectOut(BaseModel):
     end_date: Optional[date] = None
     created_at: datetime
     owner_company: str = "IPC"
-    billing_period: str = "monthly"
-    billing_day_of_period: Optional[int] = 3
-    custom_period_days: Optional[int] = None
-    billing_anchor_date: Optional[date] = None
     is_fixed_fee: bool = False
     fixed_fee_amount: Optional[float] = None
     is_managed_services: bool = False

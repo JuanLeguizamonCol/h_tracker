@@ -145,14 +145,3 @@ export function usePatchInvoice() {
     },
   });
 }
-
-export function useGenerateMonthlyInvoices() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { period_start: string; period_end: string }) =>
-      api.post<{ generated: number; skipped: number; errors: string[] }>('/invoices/generate-monthly', body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
-    },
-  });
-}

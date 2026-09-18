@@ -209,10 +209,6 @@ export interface Project {
   end_date: string | null;
   created_at: string;
   owner_company: string;
-  billing_period: string;
-  billing_day_of_period: number | null;
-  custom_period_days: number | null;
-  billing_anchor_date: string | null;
   is_fixed_fee: boolean;
   fixed_fee_amount: number | null;
   is_managed_services: boolean;

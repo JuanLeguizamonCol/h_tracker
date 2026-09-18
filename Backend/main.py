@@ -114,8 +114,3 @@ def health():
 # (see backend.Dockerfile CMD), which runs before this module is imported.
 # We intentionally do NOT call Base.metadata.create_all here — that ran on every
 # import and could silently mask a missing migration.
-
-# NOTE: Scheduled invoice generation no longer runs in this web process.
-# It runs as a standalone Azure Container Apps Job (single replica, cron trigger)
-# via `python -m jobs.generate_invoices`. Running it here would execute once per
-# replica and risk duplicate invoices under horizontal scaling.

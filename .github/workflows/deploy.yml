@@ -34,7 +34,6 @@ env:
   ACR_LOGIN_SERVER: impactpointhoursacr.azurecr.io
   BACKEND_APP: impactpoint-hours-backend
   FRONTEND_APP: impactpoint-hours-frontend
-  INVOICE_JOB: impactpoint-hours-invoice-job
   TIMESHEET_REMINDER_JOB: impactpoint-hours-reminder-job
 
 # =============================================================================
@@ -221,27 +220,9 @@ jobs:
             --image ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ needs.build-and-push.outputs.image-tag }}
 
       # -----------------------------------------------------------------------
-      # Update the scheduled invoice Job to the SHA-tagged image so the nightly
-      # run uses the same build as the web app (Bicep pins it to :latest).
-      # -----------------------------------------------------------------------
-      - name: Update invoice Job image
-        run: |
-          retry() {
-            local n=1 max=4 delay=15
-            until "$@"; do
-              if [ "$n" -ge "$max" ]; then echo "FAILED after $n attempts: $*"; return 1; fi
-              echo "Attempt $n failed; retrying in ${delay}s..."; sleep "$delay"
-              n=$((n+1)); delay=$((delay*2))
-            done
-          }
-          retry az containerapp job update \
-            --name ${{ env.INVOICE_JOB }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.ACR_LOGIN_SERVER }}/backend:${{ needs.build-and-push.outputs.image-tag }}
-
-      # -----------------------------------------------------------------------
-      # Update the scheduled timesheet-reminder Job to the SHA-tagged image,
-      # same reasoning as the invoice Job update above.
+      # Update the scheduled timesheet-reminder Job to the SHA-tagged image so
+      # its weekly run uses the same build as the web app (Bicep pins it to
+      # :latest).
       # -----------------------------------------------------------------------
       - name: Update timesheet reminder Job image
         run: |

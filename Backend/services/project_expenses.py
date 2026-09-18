@@ -76,11 +76,10 @@ def pull_unbilled_expenses_into_invoice(db: Session, invoice: Invoice) -> float:
     project into an InvoiceExpense on this invoice, so expenses logged from
     Weekly Log actually make it onto the bill instead of sitting unused.
 
-    Scoped to the invoice's period when it has one (the auto-generation job
-    and /generate-monthly always set period_start/period_end); otherwise —
-    a manual/ad-hoc invoice with no period — every unbilled expense for the
-    project is pulled in, matching how the manual flow also pulls in every
-    unlinked billable time entry regardless of date.
+    Scoped to the invoice's period when it has one; otherwise — a manual/
+    ad-hoc invoice with no period — every unbilled expense for the project is
+    pulled in, matching how the manual flow also pulls in every unlinked
+    billable time entry regardless of date.
 
     Does not commit — caller owns the transaction. Returns the total dollar
     amount pulled in, informational only: like expenses added manually in
@@ -119,15 +118,3 @@ def pull_unbilled_expenses_into_invoice(db: Session, invoice: Invoice) -> float:
         pe.invoice_id = invoice.id
         total += float(pe.amount_usd)
     return total
-
-
-def has_unbilled_expenses(db: Session, project_id: str, period_start=None, period_end=None) -> bool:
-    """Cheap existence check — used so a project with expenses but no hours
-    this period still gets an invoice generated."""
-    query = db.query(ProjectExpense.id).filter(
-        ProjectExpense.project_id == project_id,
-        ProjectExpense.invoice_id.is_(None),
-    )
-    if period_start and period_end:
-        query = query.filter(ProjectExpense.date >= period_start, ProjectExpense.date <= period_end)
-    return query.first() is not None

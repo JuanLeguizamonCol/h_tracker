@@ -53,10 +53,6 @@ export default function ProjectEditPage() {
   const [referralValue, setReferralValue] = useState('');
   const [description, setDescription] = useState('');
   const [ownerCompany, setOwnerCompany] = useState('IPC');
-  const [billingPeriod, setBillingPeriod] = useState('monthly');
-  const [billingDay, setBillingDay] = useState('3');
-  const [customPeriodDays, setCustomPeriodDays] = useState('');
-  const [billingAnchorDate, setBillingAnchorDate] = useState('');
   const [isFixedFee, setIsFixedFee] = useState(false);
   const [fixedFeeAmount, setFixedFeeAmount] = useState('');
   const [isManagedServices, setIsManagedServices] = useState(false);
@@ -80,10 +76,6 @@ export default function ProjectEditPage() {
     setReferralValue(project.referral_value != null ? String(project.referral_value) : '');
     setDescription(project.description || '');
     setOwnerCompany(project.owner_company || 'IPC');
-    setBillingPeriod(project.billing_period || 'monthly');
-    setBillingDay(project.billing_day_of_period != null ? String(project.billing_day_of_period) : '3');
-    setCustomPeriodDays(project.custom_period_days != null ? String(project.custom_period_days) : '');
-    setBillingAnchorDate(project.billing_anchor_date || '');
     setIsFixedFee(project.is_fixed_fee || false);
     setFixedFeeAmount(project.fixed_fee_amount != null ? String(project.fixed_fee_amount) : '');
     setIsManagedServices(project.is_managed_services || false);
@@ -119,10 +111,6 @@ export default function ProjectEditPage() {
           referral_value: referralId && referralValue ? parseFloat(referralValue) : undefined,
           description: description || undefined,
           owner_company: ownerCompany,
-          billing_period: billingPeriod,
-          billing_day_of_period: billingDay ? parseInt(billingDay) : undefined,
-          custom_period_days: customPeriodDays ? parseInt(customPeriodDays) : undefined,
-          billing_anchor_date: billingAnchorDate || undefined,
           is_fixed_fee: isFixedFee,
           fixed_fee_amount: isFixedFee && fixedFeeAmount ? parseFloat(fixedFeeAmount) : null,
           is_managed_services: isManagedServices,
@@ -344,59 +332,6 @@ export default function ProjectEditPage() {
           {/* Billing Configuration */}
           <div className="space-y-3 border rounded-md p-3 bg-muted/20">
             <Label className="text-sm font-semibold">Billing Configuration</Label>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label>Billing Period</Label>
-                <Select value={billingPeriod} onValueChange={setBillingPeriod}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="biweekly">Bi-weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="bimonthly">Bi-monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {['monthly', 'bimonthly', 'quarterly'].includes(billingPeriod) && (
-                <div className="space-y-1">
-                  <Label>Invoice Day of Period</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    max="31"
-                    value={billingDay}
-                    onChange={e => setBillingDay(e.target.value)}
-                    placeholder="e.g. 3"
-                  />
-                </div>
-              )}
-              {billingPeriod === 'custom' && (
-                <div className="space-y-1">
-                  <Label>Period Length (days)</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={customPeriodDays}
-                    onChange={e => setCustomPeriodDays(e.target.value)}
-                    placeholder="e.g. 30"
-                  />
-                </div>
-              )}
-              {['weekly', 'biweekly', 'custom'].includes(billingPeriod) && (
-                <div className="space-y-1">
-                  <Label>Anchor Date</Label>
-                  <Input
-                    type="date"
-                    value={billingAnchorDate}
-                    onChange={e => setBillingAnchorDate(e.target.value)}
-                  />
-                </div>
-              )}
-            </div>
-
-            <Separator />
 
             <div className="flex items-center gap-3">
               <Switch

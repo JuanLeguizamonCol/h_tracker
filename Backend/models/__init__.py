@@ -15,7 +15,6 @@ from models.invoice_fee_attachments import InvoiceFeeAttachment
 from models.invoice_time_entries import InvoiceTimeEntry
 from models.invoice_expenses import InvoiceExpense
 from models.project_categories import ProjectCategory
-from models.scheduler_log import SchedulerLog
 from models.skill_catalog import SkillCatalog
 from models.employee_skills import EmployeeSkill
 from models.notifications import Notification

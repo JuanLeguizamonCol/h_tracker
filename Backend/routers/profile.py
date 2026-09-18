@@ -168,10 +168,10 @@ def remove_skill(
 
 # ── Signature (admins only) ──────────────────────────────────────────────────
 # The uploaded image is what renders on an invoice's signature line — but only
-# for invoices this admin actually signs (auto-set at generation time from the
-# invoiced project's owner_id — see services/invoice_generator.py and
-# services/invoice.py). Uploading a signature here has no effect on invoices
-# for projects owned by someone else.
+# for invoices this admin actually signs (auto-set at creation time from the
+# invoiced project's owner_id — see services/invoice.py::create_invoice).
+# Uploading a signature here has no effect on invoices for projects owned by
+# someone else.
 
 def _delete_existing_signature(employee: Employee) -> None:
     if not employee.signature_file_name:

@@ -1,5 +1,5 @@
 from config.database import Base
-from sqlalchemy import Column, String, Boolean, ForeignKey, DateTime, Numeric, Date, Integer
+from sqlalchemy import Column, String, Boolean, ForeignKey, DateTime, Numeric, Date
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
@@ -38,10 +38,6 @@ class Project(Base):
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     # Company + billing configuration
     owner_company = Column(String(10), nullable=False, default='IPC')
-    billing_period = Column(String(20), nullable=False, default='monthly')
-    billing_day_of_period = Column(Integer, nullable=True, default=3)
-    custom_period_days = Column(Integer, nullable=True)
-    billing_anchor_date = Column(Date, nullable=True)
     is_fixed_fee = Column(Boolean, nullable=False, default=False)
     fixed_fee_amount = Column(Numeric(10, 2), nullable=True)
     # Managed Services: bills a minimum hours package (at the project's

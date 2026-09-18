@@ -16,7 +16,6 @@ Sistema de seguimiento de horas y facturación para empresas de servicios profes
 | Fechas | date-fns |
 | Notificaciones | Sonner |
 | Auth | Usuario/contraseña → JWT (HS256, python-jose + passlib/bcrypt) |
-| Facturación programada | Azure Container Apps Job (cron diario) — `python -m jobs.generate_invoices` |
 | Recordatorios de timesheet | Azure Container Apps Job (cron semanal) — `python -m jobs.send_timesheet_reminders` |
 | Email saliente | SMTP (`utils/email.py`) — notificaciones internas (PTO, facturas, anuncios, timesheet) |
 | Exportación | ReportLab / xhtml2pdf (PDF), OpenPyXL (Excel) |
@@ -39,7 +38,7 @@ H_Tracker/
 │   ├── routers/                   # ~21 routers FastAPI
 │   ├── jobs/                      # Entrypoints de una sola ejecución:
 │   │   ├── bootstrap_admin.py     #   crea el admin inicial (idempotente, al arranque)
-│   │   └── generate_invoices.py   #   generación programada de facturas (Container Apps Job)
+│   │   └── send_timesheet_reminders.py  # recordatorios semanales de timesheet (Container Apps Job)
 │   ├── utils/
 │   │   ├── auth_jwt.py            # create/verify internal JWT (get_current_employee)
 │   │   ├── auth_entra.py          # valida id_token de Entra ID contra el JWKS del tenant
@@ -136,14 +135,13 @@ Los principales (hay más: skills, costos internos, secuencias de numeración, o
 | UserRole | user_roles | Roles de app (employee / admin) |
 | EmployeeProject | employee_projects | Asignación empleado↔proyecto con role_id |
 | TimeEntry | time_entries | Entrada de horas (date, hours, billable, status=normal) |
-| Invoice | invoices | Factura (status, period_start/end, owner_company, auto_generated). Índice único parcial `(project_id, period_start, period_end) WHERE auto_generated` → no duplica facturas auto |
+| Invoice | invoices | Factura (status, period_start/end, owner_company, auto_generated). `auto_generated` es un flag histórico: la auto-generación de facturas se eliminó y nada lo setea ya; se conserva (con su índice único parcial) solo para las facturas viejas que lo traen en `true` |
 | InvoiceLine | invoice_lines | Línea de factura (employee, hours, rate_snapshot, discount) |
 | InvoiceManualLine | invoice_manual_lines | Línea manual (person_name, hours, rate_usd) |
 | InvoiceFee | invoice_fees | Honorario (label, quantity, unit_price_usd) |
 | InvoiceFeeAttachment | invoice_fee_attachments | Archivos adjuntos a honorarios |
 | InvoiceTimeEntry | invoice_time_entries | Vínculo factura↔time_entry (evita doble facturación) |
 | InvoiceExpense | invoice_expenses | Gasto (category, amount_usd, professional, vendor) |
-| SchedulerLog | scheduler_log | Log de ejecuciones del job de facturas (`jobs/generate_invoices`) |
 
 ### Relaciones clave
 ```
@@ -242,8 +240,6 @@ DEL  /time-entries/{id}           → 204
 POST /invoices/                   → InvoiceOut
 GET  /invoices/                   → List[InvoiceOut] ?project_id ?status
 GET  /invoices/check-hours        → {has_entries, total_hours, total_amount, entry_count} ?project_id ?period_start ?period_end
-POST /invoices/generate-monthly   → {generated, skipped, errors} body:{period_start, period_end}
-GET  /invoices/scheduler-status   → {last_run, last_period, invoices_generated, next_run, status}
 GET  /invoices/{id}/edit-data     → InvoiceEditDataOut (invoice + lines + expenses)
 PATCH /invoices/{id}              → InvoiceOut body:InvoicePatch
 GET  /invoices/{id}/export/pdf    → PDF binary
@@ -384,29 +380,20 @@ GET  /health                      → {status: "ok"}
 | usePatchInvoice | useInvoices.ts | PATCH /invoices/{id} |
 | useCreateInvoiceLines | useInvoices.ts | POST /invoice-lines/bulk |
 | useLinkTimeEntries | useInvoices.ts | POST /invoice-time-entries/bulk |
-| useGenerateMonthlyInvoices | useInvoices.ts | POST /invoices/generate-monthly |
 
 ---
 
 ## Servicios backend clave
 
-### invoice_generator.py
-- `generate_invoice_for_project_period(db, project, ps, pe)` — genera **una** factura draft
-  para un proyecto + período. **Idempotente**: chequea existencia previa y captura
-  `IntegrityError` del índice único (carrera). Setea `period_start/end` y `auto_generated=True`.
-- `generate_invoices_for_period(db, ps, pe)` — wrapper que itera todos los proyectos
-  activos no internos (usado por el endpoint manual `/generate-monthly`).
-- Solo toma time entries billables **no vinculadas** (evita re-facturar horas).
-- Numeración vía `invoice_number_service.atomic_generate_number` (secuencia atómica
-  por empresa, `INSERT … ON CONFLICT … RETURNING`).
-
-### jobs/generate_invoices.py  (reemplaza al viejo APScheduler)
-Entrypoint de una sola ejecución (`python -m jobs.generate_invoices`), corre como
-**Azure Container Apps Job** (cron diario, `parallelism: 1`):
-- Por cada proyecto activo no interno, si hoy es su día de facturación
-  (`services/billing_periods.py`), genera la factura del período vigente.
-- Registra en `scheduler_log` y sale con código 0/1.
-- Doble garantía anti-duplicados: el Job corre una sola vez + el índice único parcial.
+### Creación de facturas (services/invoice.py)
+Las facturas se crean **solo manualmente**, un proyecto a la vez (`POST /invoices/` →
+`services/invoice.create_invoice`). No existe auto-generación (ni Job programado ni
+endpoint de generación masiva): fue eliminada por completo, junto con los campos de
+"billing schedule" del proyecto (`billing_period`, `billing_day_of_period`,
+`billing_anchor_date`, `custom_period_days`) y la tabla `scheduler_log` (migración 051).
+- Numeración vía `invoice_number_service.atomic_generate_number_for_client` (secuencia
+  atómica por cliente, `INSERT … ON CONFLICT … RETURNING`).
+- La firma (`signatory_*`) se setea desde el `owner_id` del proyecto, si lo tiene.
 
 ### jobs/send_timesheet_reminders.py
 Entrypoint de una sola ejecución (`python -m jobs.send_timesheet_reminders`), corre
@@ -429,7 +416,7 @@ actuales, todos "best-effort" (nunca lanzan si el correo falla):
 | Nuevo cliente creado | `services/client_notifications.py` | `NEW_CLIENT_NOTIFY_EMAIL` (fijo por env) |
 | Solicitud de PTO creada | `services/pto_notifications.py::notify_pto_request_created` | El aprobador designado (`PtoRequest.approver_id`) |
 | Solicitud de PTO aprobada/rechazada | `services/pto_notifications.py::notify_pto_request_reviewed` | El empleado que la solicitó |
-| Factura generada (manual o por el job) | `services/invoice_owner_notifications.py::notify_invoice_owner` | El *owner* del proyecto (`Project.owner_id`) — distinto del manager, que sigue recibiendo la notificación in-app existente (`services/notifications.py`) |
+| Factura creada | `services/invoice_owner_notifications.py::notify_invoice_owner` | El *owner* del proyecto (`Project.owner_id`) — distinto del manager, que sigue recibiendo la notificación in-app existente (`services/notifications.py`) |
 | Anuncio publicado | `services/announcement_notifications.py::notify_announcement_published` | Toda la audiencia visible del anuncio (mismas reglas que `list_announcements`: all/locations/roles/pegasus_contractors), excluyendo a quien lo publicó |
 | Timesheet sin registrar hace 7 días | `services/timesheet_reminders.py` | El empleado activo mismo (ver `jobs/send_timesheet_reminders.py` arriba) |
 
@@ -437,10 +424,6 @@ actuales, todos "best-effort" (nunca lanzan si el correo falla):
 acción (`action_button`) que arma un link absoluto a `FRONTEND_URL` (seteado en el
 backend por el pipeline de deploy, ver `.github/workflows/deploy.yml`) — sin esa env
 var el botón simplemente no se renderiza.
-
-### services/billing_periods.py
-Cálculo de períodos por proyecto (`next_invoice_date`, `period_bounds_for_project`)
-según `billing_period` (monthly/bimonthly/quarterly/weekly/biweekly/custom).
 
 ### expensify_service.py
 - Llama a Expensify Partner API
@@ -470,6 +453,7 @@ según `billing_period` (monthly/bimonthly/quarterly/weekly/biweekly/custom).
 | 023–024 | Auth por contraseña (`password_hash`, `must_change_password`) — reemplazado por Entra ID |
 | 025 | `invoices.auto_generated` + índice único parcial anti-duplicados |
 | 030 | Elimina `password_hash`/`must_change_password` (login exclusivo por Entra ID) |
+| 051 | Elimina la auto-generación de facturas: dropea `scheduler_log` y `projects.billing_period`/`billing_day_of_period`/`billing_anchor_date`/`custom_period_days` (deja `invoices.auto_generated` como flag histórico) |
 
 Para correr migraciones:
 ```bash
@@ -481,20 +465,9 @@ alembic downgrade -1       # Revertir última
 
 ## Flujo de creación de factura
 
-### Automático (Azure Container Apps Job — cron diario)
-```
-Container Apps Job (parallelism 1) → python -m jobs.generate_invoices
-  → Por cada proyecto activo no interno:
-    → ¿Hoy == día de facturación del proyecto? (billing_periods) — si no, skip
-    → generate_invoice_for_project_period(project, período):
-        → Si ya existe factura auto para (proyecto, período) → skip
-        → time entries billables NO vinculadas → agrupar por empleado → horas × rate
-        → Crear Invoice (draft, auto_generated) + InvoiceLines + InvoiceTimeEntry links
-        → El índice único parcial impide duplicados aunque haya carrera
-    → Registrar corrida en SchedulerLog
-```
+Solo manual (no hay auto-generación).
 
-### Manual desde frontend
+### Desde frontend
 ```
 InvoiceNewPage:
   1. Usuario selecciona proyecto
@@ -573,9 +546,6 @@ docker exec -it h_tracker-postgres-1 psql -U hours_user -d hours_tracker
 # Correr migraciones manualmente
 docker exec h_tracker-backend-1 alembic upgrade head
 
-# Ejecutar el job de facturas manualmente (mismo entrypoint que el Container Apps Job)
-docker exec h_tracker-backend-1 python -m jobs.generate_invoices
-
 # Ejecutar el job de recordatorios de timesheet manualmente
 docker exec h_tracker-backend-1 python -m jobs.send_timesheet_reminders
 
@@ -602,7 +572,7 @@ IaC en `infra/` (Bicep) + CI/CD en `.github/workflows/deploy.yml`.
 
 **Recursos (`infra/main.bicep`):** ACR, PostgreSQL Flexible Server, Storage Account +
 contenedor Blob, Container Apps Environment, backend app, frontend app y el
-**Container Apps Job** de facturas.
+**Container Apps Job** de recordatorios de timesheet.
 
 **Bootstrap único (una vez):** `infra/setup.sh` crea RG, ACR, App Registration con
 federated credential (OIDC, sin secretos) y roles.
@@ -614,7 +584,7 @@ federated credential (OIDC, sin secretos) y roles.
 (App Registration de Sign in with Microsoft).
 
 **Pipeline (push a `master`):** build+push de imágenes a ACR → `az deployment group create`
-(Bicep) → update de imágenes al tag SHA (backend, frontend, job) → patch de `CORS_ORIGINS`.
+(Bicep) → update de imágenes al tag SHA (backend, frontend, job de recordatorios) → patch de `CORS_ORIGINS`.
 
 **URL del backend en el frontend:** inyectada en runtime vía `/config.js` desde la env
 `BACKEND_URL` (no se hornea en build) → un solo deploy queda correcto desde el primer run.

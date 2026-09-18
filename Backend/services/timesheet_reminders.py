@@ -1,9 +1,8 @@
 """Emails active employees who haven't logged any hours in the trailing 7
 days. Run weekly by jobs/send_timesheet_reminders.py (Azure Container Apps
-Job, same pattern as jobs/generate_invoices.py) — not on every backend
-request. Reuses the same SMTP system (utils/email.py) originally built for
-password-reset emails. Best-effort per employee: one bad address never blocks
-the rest of the run.
+Job) — not on every backend request. Reuses the same SMTP system
+(utils/email.py) originally built for password-reset emails. Best-effort per
+employee: one bad address never blocks the rest of the run.
 """
 import logging
 from datetime import date, timedelta

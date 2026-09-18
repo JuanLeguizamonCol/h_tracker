@@ -43,10 +43,6 @@ interface Step1Form {
   referral_value: string;
   description: string;
   owner_company: string;
-  billing_period: string;
-  billing_day_of_period: string;
-  custom_period_days: string;
-  billing_anchor_date: string;
   is_fixed_fee: boolean;
   fixed_fee_amount: string;
   is_managed_services: boolean;
@@ -111,10 +107,6 @@ export default function ProjectNewPage() {
     referral_value: '',
     description: '',
     owner_company: 'IPC',
-    billing_period: 'monthly',
-    billing_day_of_period: '3',
-    custom_period_days: '',
-    billing_anchor_date: '',
     is_fixed_fee: false,
     fixed_fee_amount: '',
     is_managed_services: false,
@@ -230,10 +222,6 @@ export default function ProjectNewPage() {
         referral_value: form.referral_id && form.referral_value ? parseFloat(form.referral_value) : undefined,
         description: form.description || undefined,
         owner_company: form.owner_company,
-        billing_period: form.billing_period,
-        billing_day_of_period: form.billing_day_of_period ? parseInt(form.billing_day_of_period) : undefined,
-        custom_period_days: form.custom_period_days ? parseInt(form.custom_period_days) : undefined,
-        billing_anchor_date: form.billing_anchor_date || undefined,
         is_fixed_fee: form.is_fixed_fee,
         fixed_fee_amount: form.is_fixed_fee && form.fixed_fee_amount ? parseFloat(form.fixed_fee_amount) : undefined,
         is_managed_services: form.is_managed_services,
@@ -529,59 +517,6 @@ export default function ProjectNewPage() {
             {/* Billing Configuration */}
             <div className="space-y-3 border rounded-md p-3 bg-muted/20">
               <Label className="text-sm font-semibold">Billing Configuration</Label>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label>Billing Period</Label>
-                  <Select value={form.billing_period} onValueChange={v => set('billing_period', v)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="weekly">Weekly</SelectItem>
-                      <SelectItem value="biweekly">Bi-weekly</SelectItem>
-                      <SelectItem value="monthly">Monthly</SelectItem>
-                      <SelectItem value="bimonthly">Bi-monthly</SelectItem>
-                      <SelectItem value="quarterly">Quarterly</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {['monthly', 'bimonthly', 'quarterly'].includes(form.billing_period) && (
-                  <div className="space-y-1">
-                    <Label>Invoice Day of Period</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      max="31"
-                      value={form.billing_day_of_period}
-                      onChange={e => set('billing_day_of_period', e.target.value)}
-                      placeholder="e.g. 3"
-                    />
-                  </div>
-                )}
-                {form.billing_period === 'custom' && (
-                  <div className="space-y-1">
-                    <Label>Period Length (days)</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={form.custom_period_days}
-                      onChange={e => set('custom_period_days', e.target.value)}
-                      placeholder="e.g. 30"
-                    />
-                  </div>
-                )}
-                {['weekly', 'biweekly', 'custom'].includes(form.billing_period) && (
-                  <div className="space-y-1">
-                    <Label>Anchor Date</Label>
-                    <Input
-                      type="date"
-                      value={form.billing_anchor_date}
-                      onChange={e => set('billing_anchor_date', e.target.value)}
-                    />
-                  </div>
-                )}
-              </div>
-
-              <Separator />
 
               <div className="flex items-center gap-3">
                 <Switch

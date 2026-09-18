@@ -29,8 +29,7 @@ def create_invoice(db: Session, invoice_in: InvoiceCreate) -> Invoice:
         db, client.id, client.client_number, owner_company
     )
 
-    # Signature: same rule as the auto-generation job — only set when the
-    # project has an owner, who is who signs it.
+    # Signature: only set when the project has an owner, who is who signs it.
     if project and project.owner_id:
         owner = db.query(Employee).filter(Employee.id == project.owner_id).first()
         if owner:

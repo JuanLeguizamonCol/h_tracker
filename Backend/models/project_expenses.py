@@ -10,9 +10,8 @@ class ProjectExpense(Base):
     of Invoices while unbilled: unlike InvoiceExpense (which always belongs to
     a specific invoice), this just records that the expense happened on a
     project/date. `invoice_id` is null until an invoice for that project gets
-    generated/created — see services/project_expenses.py::
-    pull_unbilled_expenses_into_invoice, called from both the auto-generation
-    job and manual invoice creation — at which point it's set and a matching
+    created — see services/project_expenses.py::pull_unbilled_expenses_into_invoice,
+    called on manual invoice creation — at which point it's set and a matching
     InvoiceExpense is created on that invoice."""
 
     __tablename__ = "project_expenses"

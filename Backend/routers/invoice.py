@@ -1,5 +1,5 @@
-from typing import List, Optional, Dict, Any
-from datetime import date as date_type, datetime
+from typing import List, Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -13,10 +13,10 @@ from services.invoice import create_invoice, get_invoices, get_invoice, update_i
 from services.invoice_expenses import create_expense, get_expenses, get_expense, update_expense, delete_expense
 from services.export_pdf import generate_invoice_pdf
 from services.export_excel import generate_invoice_xlsx, generate_invoices_report_xlsx
-from services.invoice_generator import generate_invoices_for_period
 from schemas.invoice import (
     InvoiceCreate, InvoiceUpdate, InvoiceOut,
     InvoiceEditDataOut, InvoiceEditClient, InvoiceEditProject, InvoiceEditLine, InvoiceEditExpense,
+    InvoiceEditTimeDetail,
     InvoicePatch,
 )
 from schemas.invoice_expenses import InvoiceExpenseCreate
@@ -24,7 +24,6 @@ from schemas.invoice_lines import InvoiceLineUpdate
 from models.invoice_lines import InvoiceLine
 from models.invoice_expenses import InvoiceExpense
 from models.time_entries import TimeEntry
-from models.scheduler_log import SchedulerLog
 from models.projects import Project
 from models.project_roles import ProjectRole
 from models.clients import Client
@@ -32,8 +31,8 @@ from models.employees import Employee
 from models.user_roles import UserRole
 from models.invoice_time_entries import InvoiceTimeEntry
 from services.invoice_hours_on_hold import upsert_on_hold_entry, delete_on_hold_entry
+from services.invoice_time_detail import build_time_detail
 from sqlalchemy import func
-from dateutil.relativedelta import relativedelta
 import uuid
 
 invoice_router = APIRouter(prefix="/invoices", tags=["invoices"])
@@ -223,69 +222,6 @@ def check_hours(
     }
 
 
-@invoice_router.post("/generate-monthly")
-def generate_monthly_invoices(
-    body: Dict[str, Any],
-    db: Session = Depends(get_db),
-    current_employee: Employee = Depends(get_current_employee),
-):
-    """Manually trigger invoice generation for a given period. Only the caller's
-    own projects (those they own) are billed — unless the caller is a super
-    admin, who can generate for every project."""
-    period_start_str = body.get("period_start")
-    period_end_str = body.get("period_end")
-    if not period_start_str or not period_end_str:
-        raise HTTPException(status_code=400, detail="period_start and period_end are required (YYYY-MM-DD)")
-
-    period_start = datetime.strptime(period_start_str, "%Y-%m-%d").date()
-    period_end = datetime.strptime(period_end_str, "%Y-%m-%d").date()
-
-    owner_id = None if is_super_admin(current_employee) else current_employee.id
-    result = generate_invoices_for_period(db, period_start, period_end, owner_id=owner_id)
-
-    log = SchedulerLog(
-        id=str(uuid.uuid4()),
-        run_at=datetime.now(),
-        period_start=period_start_str,
-        period_end=period_end_str,
-        invoices_generated=result["generated"],
-        invoices_skipped=result["skipped"],
-        status="success" if not result["errors"] else "error",
-        error_message="; ".join(result["errors"]) if result["errors"] else None,
-    )
-    db.add(log)
-    db.commit()
-
-    return result
-
-
-@invoice_router.get("/scheduler-status")
-def get_scheduler_status(db: Session = Depends(get_db)):
-    """Get the last scheduler run info."""
-    last_log = db.query(SchedulerLog).order_by(SchedulerLog.run_at.desc()).first()
-    if not last_log:
-        return {
-            "last_run": None,
-            "last_period": None,
-            "invoices_generated": 0,
-            "next_run": None,
-        }
-
-    today = date_type.today()
-    if today.day <= 3:
-        next_run = today.replace(day=3)
-    else:
-        next_run = (today.replace(day=1) + relativedelta(months=1)).replace(day=3)
-
-    return {
-        "last_run": last_log.run_at.isoformat() if last_log.run_at else None,
-        "last_period": f"{last_log.period_start} / {last_log.period_end}",
-        "invoices_generated": last_log.invoices_generated,
-        "next_run": next_run.isoformat(),
-        "status": last_log.status,
-    }
-
-
 def _build_edit_data(invoice_id: str, db: Session) -> dict:
     """Shared helper — returns a plain dict suitable for PDF/Excel generators and the API response."""
     invoice = get_invoice(db, invoice_id)
@@ -357,6 +293,11 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
         for exp in get_expenses(db, invoice_id)
     ]
 
+    linked_entries = db.query(TimeEntry.user_id, TimeEntry.date, TimeEntry.hours).join(
+        InvoiceTimeEntry, InvoiceTimeEntry.time_entry_id == TimeEntry.id
+    ).filter(InvoiceTimeEntry.invoice_id == invoice.id).all()
+    time_detail = build_time_detail(linked_entries, lines_out)
+
     return {
         "invoice": {
             "id": invoice.id,
@@ -413,6 +354,7 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
         } if project else None,
         "lines": lines_out,
         "expenses": expenses_out,
+        "time_detail": time_detail,
     }
 
 
@@ -470,6 +412,7 @@ def get_invoice_edit_data(
         project=InvoiceEditProject(**project_d) if project_d else None,
         lines=[_line(l) for l in data["lines"]],
         expenses=[_exp(e) for e in data["expenses"]],
+        time_detail=[InvoiceEditTimeDetail(**d) for d in data["time_detail"]],
     )
 
 

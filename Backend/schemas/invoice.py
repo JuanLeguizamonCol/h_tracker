@@ -124,12 +124,25 @@ class InvoiceEditExpense(BaseModel):
     notes: Optional[str] = None
 
 
+class InvoiceEditTimeDetail(BaseModel):
+    week_start: date
+    user_id: str
+    employee_name: str
+    title: Optional[str] = None
+    hourly_rate: float
+    hours: float
+    subtotal: float
+    discount: float
+    total: float
+
+
 class InvoiceEditDataOut(BaseModel):
     invoice: InvoiceOut
     client: Optional[InvoiceEditClient] = None
     project: Optional[InvoiceEditProject] = None
     lines: List[InvoiceEditLine] = []
     expenses: List[InvoiceEditExpense] = []
+    time_detail: List[InvoiceEditTimeDetail] = []
 
 
 # ── PATCH payload ──

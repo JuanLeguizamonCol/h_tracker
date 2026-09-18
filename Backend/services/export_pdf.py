@@ -1,9 +1,13 @@
 """
 PDF invoice generator using xhtml2pdf (HTML → PDF).
 
-Produces a 2-page PDF:
+Produces a PDF of:
   Page 1 — Cover letter with logo, client address, body text, and signature.
   Page 2 — Invoice detail: period, fees table, total-due box, ACH instructions.
+  Page 3+ — "Attachment II — Time Detail": hours per week per professional, on
+            its own page(s) (never on the fees-summary page); flows onto extra
+            pages when there are many rows. Omitted when the invoice has no
+            linked time entries (e.g. a fully manual invoice).
 """
 
 import base64
@@ -102,10 +106,10 @@ def _fetch_image_base64_from_url(url: str) -> Optional[str]:
 def _get_signature_base64_for_invoice(invoice: dict) -> Optional[str]:
     """Resolve the signature image for an invoice: prefer the self-service
     image uploaded by the signing employee (the project's owner, set at
-    generation time — see services/invoice_generator.py), falling back to the
-    legacy static-file-by-name mapping for signatories who haven't uploaded
-    one yet. Returns None (no image, name/title still render as text) if
-    neither is available."""
+    creation time — see services/invoice.py::create_invoice), falling back to
+    the legacy static-file-by-name mapping for signatories who haven't
+    uploaded one yet. Returns None (no image, name/title still render as
+    text) if neither is available."""
     file_name = invoice.get("signatory_signature_file_name")
     if file_name:
         if blob_storage.blob_enabled():
@@ -232,6 +236,18 @@ _INVOICE_HTML_TEMPLATE = '''
     .text-right {{
       text-align: right;
     }}
+
+    .attachment-title {{
+      text-align: right;
+      font-weight: bold;
+      line-height: 1.3;
+      margin-bottom: 14pt;
+    }}
+
+    .detail-table th {{
+      border-bottom: 1pt solid #000;
+      font-weight: bold;
+    }}
   </style>
 </head>
 <body>
@@ -281,7 +297,7 @@ _INVOICE_HTML_TEMPLATE = '''
 </div>
 
 <!-- PAGE 2: INVOICE DETAIL -->
-<div class="page-last">
+<div class="{page2_class}">
 
   <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:30pt;">
     <tr>
@@ -377,6 +393,8 @@ _INVOICE_HTML_TEMPLATE = '''
 
 </div>
 
+{time_detail_html}
+
 </body>
 </html>
 '''
@@ -426,6 +444,96 @@ def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
         )
 
     return "".join(rows_html), total_subtotal, total_discount, total_net
+
+
+def _format_week_of(d) -> str:
+    """Format as '4/27/26' (Week of column)."""
+    if isinstance(d, str):
+        d = date.fromisoformat(d)
+    return f"{d.month}/{d.day}/{d.year % 100:02d}"
+
+
+def _build_time_detail_html(time_detail: list, client_name: str, invoice_number: str,
+                            period_from: str, period_to: str) -> str:
+    """Attachment II — weekly time detail. Its own page(s); returns "" when
+    there's nothing to show. The header row is a <thead> so xhtml2pdf repeats it
+    on every page the table spills onto."""
+    if not time_detail:
+        return ""
+
+    rows = []
+    t_hours = t_sub = t_disc = t_net = 0.0
+    for r in time_detail:
+        hours = float(r.get("hours") or 0)
+        subtotal = float(r.get("subtotal") or 0)
+        discount = float(r.get("discount") or 0)
+        net = float(r.get("total") or 0)
+        t_hours += hours
+        t_sub += subtotal
+        t_disc += discount
+        t_net += net
+        name = r.get("employee_name") or "—"
+        title = r.get("title")
+        prof = f"{name}, {title}" if title else name
+        rows.append(
+            "<tr>"
+            f"<td width='12%' align='left'>{_format_week_of(r['week_start'])}</td>"
+            f"<td width='34%' align='left'>{prof}</td>"
+            f"<td width='10%' align='right'>{_format_currency(float(r.get('hourly_rate') or 0))}</td>"
+            f"<td width='9%' align='right'>{hours:.2f}</td>"
+            f"<td width='12%' align='right'>{_format_currency(subtotal)}</td>"
+            f"<td width='11%' align='right'>{_format_currency(discount) if discount > 0 else '—'}</td>"
+            f"<td width='12%' align='right'>{_format_currency(net)}</td>"
+            "</tr>"
+        )
+
+    return f'''
+<div class="page-last" style="page-break-before:always;">
+  <div class="attachment-title">Attachment II<br/>Time Detail</div>
+
+  <table width="100%" border="0" cellpadding="2" cellspacing="0" style="margin-bottom:14pt;">
+    <tr>
+      <td width="14%" align="left" style="font-weight:bold;">Client:</td>
+      <td width="46%" align="left">{client_name}</td>
+      <td width="10%" align="left">From</td>
+      <td width="30%" align="right"><i>{period_from}</i></td>
+    </tr>
+    <tr>
+      <td align="left" style="font-weight:bold;">Invoice Number:</td>
+      <td align="left">{invoice_number}</td>
+      <td align="left">To</td>
+      <td align="right"><i>{period_to}</i></td>
+    </tr>
+  </table>
+
+  <table class="detail-table" width="100%" border="0" cellpadding="3" cellspacing="0">
+    <thead>
+      <tr>
+        <th width="12%" align="left">Week of</th>
+        <th width="34%" align="left">Professional</th>
+        <th width="10%" align="right">Rate</th>
+        <th width="9%" align="right">Hours</th>
+        <th width="12%" align="right">Subtotal</th>
+        <th width="11%" align="right">Discount</th>
+        <th width="12%" align="right">Total</th>
+      </tr>
+    </thead>
+    {"".join(rows)}
+    <tr>
+      <td colspan="7" style="border-bottom:1.5pt solid #000; padding-top:8pt;"></td>
+    </tr>
+    <tr>
+      <td></td>
+      <td align="right" style="font-weight:bold; padding-top:8pt;">Total</td>
+      <td></td>
+      <td align="right" style="font-weight:bold; padding-top:8pt;">{t_hours:.2f}</td>
+      <td align="right" style="padding-top:8pt;">{_format_currency(t_sub)}</td>
+      <td align="right" style="padding-top:8pt;">{_format_currency(t_disc)}</td>
+      <td align="right" class="total-box" style="padding-top:8pt;">{_format_currency(t_net)}</td>
+    </tr>
+  </table>
+</div>
+'''
 
 
 def generate_invoice_html(edit_data: dict) -> str:
@@ -544,7 +652,14 @@ def generate_invoice_html(edit_data: dict) -> str:
     else:
         cap_row = ""
 
+    time_detail_html = _build_time_detail_html(
+        edit_data.get("time_detail") or [], client_company, invoice_number,
+        period_from or "—", period_to or "—",
+    )
+
     return _INVOICE_HTML_TEMPLATE.format(
+        page2_class="page" if time_detail_html else "page-last",
+        time_detail_html=time_detail_html,
         # Header / logo + company
         logo_img=logo_img,
         company_address=company_address,

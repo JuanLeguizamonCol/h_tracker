@@ -26,15 +26,6 @@ const STATUS_COLORS: Record<string, string> = {
   completed: 'outline',
 };
 
-const BILLING_PERIOD_LABELS: Record<string, string> = {
-  weekly: 'Weekly',
-  biweekly: 'Bi-weekly',
-  monthly: 'Monthly',
-  bimonthly: 'Bi-monthly',
-  quarterly: 'Quarterly',
-  custom: 'Custom',
-};
-
 export default function Projects() {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
@@ -250,13 +241,6 @@ function ProjectCard({
                 {project.business_unit}
               </span>
             )}
-          </div>
-        )}
-
-        {/* Billing period */}
-        {!project.is_internal && (
-          <div className="text-xs text-muted-foreground">
-            Billing: {BILLING_PERIOD_LABELS[project.billing_period] || project.billing_period || 'Monthly'}
           </div>
         )}
 

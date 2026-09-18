@@ -2,8 +2,9 @@
 Scheduled timesheet-reminder job.
 
 Runs as an Azure Container Apps Job (weekly cron trigger, single replica) —
-NOT inside the web process, same pattern as jobs/generate_invoices.py. Emails
-every active employee who hasn't logged any hours in the trailing 7 days.
+NOT inside the web process, so it fires exactly once regardless of how many
+backend replicas are running. Emails every active employee who hasn't logged
+any hours in the trailing 7 days.
 
 Run:
     python -m jobs.send_timesheet_reminders

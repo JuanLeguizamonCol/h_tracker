@@ -75,7 +75,6 @@ var pgServerName = '${prefix}-db'
 var containerAppsEnvName = '${prefix}-env'
 var backendAppName = '${prefix}-backend'
 var frontendAppName = '${prefix}-frontend'
-var invoiceJobName = '${prefix}-invoice-job'
 // Container Apps Job names cap at 32 chars — 'timesheet-reminder-job' pushed
 // the full '${prefix}-...' name to 40, so this is shortened to 'reminder-job'.
 var timesheetReminderJobName = '${prefix}-reminder-job'
@@ -209,7 +208,7 @@ resource pgDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-12
 // Admins upload their own invoice signature (PNG/JPEG) from their Profile
 // page (POST /profile/signature) — it lands in this same container and gets
 // pulled onto an invoice's PDF only when that admin is the invoiced
-// project's owner (see services/invoice_generator.py).
+// project's owner (see services/invoice.py::create_invoice).
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
@@ -569,81 +568,13 @@ resource frontendApp 'Microsoft.App/containerApps@2024-03-01' = {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Scheduled Invoice Generation — Container Apps Job
-// ---------------------------------------------------------------------------
-// Runs `python -m jobs.generate_invoices` once per day on a single replica.
-// Kept OUT of the backend web app so it executes exactly once regardless of how
-// many backend replicas are running. Idempotency is additionally guaranteed at
-// the DB layer by a partial unique index on (project_id, period_start, period_end).
-//
-// cronExpression is UTC. '0 13 * * *' = 13:00 UTC = 08:00 America/Bogota (UTC-5).
-
-resource invoiceJob 'Microsoft.App/jobs@2024-03-01' = {
-  name: invoiceJobName
-  location: location
-  tags: tags
-  properties: {
-    environmentId: containerAppsEnv.id
-    configuration: {
-      triggerType: 'Schedule'
-      replicaTimeout: 1800          // 30 min hard cap per run
-      replicaRetryLimit: 1
-      scheduleTriggerConfig: {
-        cronExpression: '0 13 * * *'
-        parallelism: 1              // never run two replicas at once
-        replicaCompletionCount: 1
-      }
-      secrets: [
-        {
-          name: 'database-url'
-          value: databaseUrl
-        }
-        {
-          name: 'acr-password'
-          value: acrAdminPassword0
-        }
-      ]
-      registries: [
-        {
-          server: acrLoginServer
-          username: acrAdminUsername
-          passwordSecretRef: 'acr-password'
-        }
-      ]
-    }
-    template: {
-      containers: [
-        {
-          name: 'invoice-job'
-          image: '${acrLoginServer}/backend:latest'
-          command: [
-            'python'
-            '-m'
-            'jobs.generate_invoices'
-          ]
-          resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
-          }
-          env: [
-            {
-              name: 'DATABASE_URL'
-              secretRef: 'database-url'
-            }
-          ]
-        }
-      ]
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 8. Scheduled Timesheet Reminders — Container Apps Job
+// 7. Scheduled Timesheet Reminders — Container Apps Job
 // ---------------------------------------------------------------------------
 // Runs `python -m jobs.send_timesheet_reminders` once a week, emailing every
-// active employee who hasn't logged hours in the trailing 7 days. Same
-// single-replica pattern as invoiceJob above; no DB-level idempotency guard
-// is needed here since it only sends email, never writes rows.
+// active employee who hasn't logged hours in the trailing 7 days. Runs as a
+// single replica so each reminder goes out exactly once regardless of how many
+// backend replicas are running; no DB-level idempotency guard is needed here
+// since it only sends email, never writes rows.
 //
 // cronExpression is UTC. '0 13 * * 1' = 13:00 UTC Monday = 08:00 America/Bogota.
 //
@@ -743,9 +674,6 @@ output uploadsContainerName string = uploadsContainerName
 
 @description('Log Analytics Workspace resource ID.')
 output logAnalyticsWorkspaceId string = logAnalytics.id
-
-@description('Name of the scheduled invoice-generation Container Apps Job.')
-output invoiceJobName string = invoiceJob.name
 
 @description('Name of the scheduled timesheet-reminder Container Apps Job.')
 output timesheetReminderJobName string = timesheetReminderJob.name
