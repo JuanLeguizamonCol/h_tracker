@@ -151,6 +151,27 @@ _INVOICE_HTML_TEMPLATE = '''
       line-height: 1.4;
     }}
 
+    /* Attachment II spans 1+ pages; every one of them repeats the logo/company
+       header (a static frame), like the cover and fees pages that have it inline. */
+    @page detail {{
+      size: letter;
+      margin: 0.75in;
+      margin-top: 1.9in;
+      -pdf-next-page: "detail";
+      @frame detail_header {{
+        -pdf-frame-content: detail_header_content;
+        left: 0.75in;
+        top: 0.75in;
+        width: 7in;
+        height: 1in;
+      }}
+    }}
+
+    @page main {{
+      size: letter;
+      margin: 0.75in;
+    }}
+
     .page {{
       page-break-after: always;
     }}
@@ -366,6 +387,8 @@ _INVOICE_HTML_TEMPLATE = '''
     </tr>
   </table>
 
+  {to_detail_template}
+
 </div>
 
 {time_detail_html}
@@ -473,7 +496,9 @@ def _format_week_of(d) -> str:
 
 
 def _build_time_detail_html(time_detail: list, client_name: str, invoice_number: str,
-                            period_from: str, period_to: str) -> str:
+                            period_from: str, period_to: str, logo_img: str,
+                            company_address: str, company_city_state_zip: str,
+                            company_phone: str) -> str:
     """Attachment II — weekly time detail. Its own page(s); returns "" when
     there's nothing to show. The header row is a <thead> so xhtml2pdf repeats it
     on every page the table spills onto."""
@@ -507,13 +532,25 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
         )
 
     return f'''
+<div id="detail_header_content">
+  <table width="100%" border="0" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="left" valign="top" class="logo-img">{logo_img}</td>
+      <td align="right" valign="top" class="address-cell">
+        {company_address}<br/>
+        {company_city_state_zip}<br/>
+        {company_phone}
+      </td>
+    </tr>
+  </table>
+</div>
 <div class="page">
   <div class="attachment-title">Attachment II<br/>Time Detail</div>
 
   <table width="100%" border="0" cellpadding="2" cellspacing="0" style="margin-bottom:14pt;">
     <tr>
-      <td width="14%" align="left" style="font-weight:bold;">Client:</td>
-      <td width="46%" align="left">{client_name}</td>
+      <td width="20%" align="left" style="font-weight:bold;">Client:</td>
+      <td width="40%" align="left">{client_name}</td>
       <td width="10%" align="left">From</td>
       <td width="30%" align="right"><i>{period_from}</i></td>
     </tr>
@@ -551,6 +588,7 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
       <td align="right" class="total-box" style="padding-top:8pt;">{_format_currency(t_net)}</td>
     </tr>
   </table>
+  <pdf:nexttemplate name="main"/>
 </div>
 '''
 
@@ -674,10 +712,12 @@ def generate_invoice_html(edit_data: dict) -> str:
     time_detail_html = _build_time_detail_html(
         edit_data.get("time_detail") or [], client_company, invoice_number,
         period_from or "—", period_to or "—",
+        logo_img, company_address, company_city_state_zip, company_phone,
     )
 
     return _INVOICE_HTML_TEMPLATE.format(
         time_detail_html=time_detail_html,
+        to_detail_template='<pdf:nexttemplate name="detail"/>' if time_detail_html else "",
         # Header / logo + company
         logo_img=logo_img,
         company_address=company_address,
