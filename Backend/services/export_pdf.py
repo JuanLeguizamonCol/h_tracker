@@ -8,6 +8,7 @@ Produces a PDF of:
             its own page(s) (never on the fees-summary page); flows onto extra
             pages when there are many rows. Omitted when the invoice has no
             linked time entries (e.g. a fully manual invoice).
+  Last page — ACH instructions, always on their own final page.
 """
 
 import base64
@@ -297,7 +298,7 @@ _INVOICE_HTML_TEMPLATE = '''
 </div>
 
 <!-- PAGE 2: INVOICE DETAIL -->
-<div class="{page2_class}">
+<div class="page">
 
   <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:30pt;">
     <tr>
@@ -365,7 +366,27 @@ _INVOICE_HTML_TEMPLATE = '''
     </tr>
   </table>
 
-  <div class="ach-section">
+</div>
+
+{time_detail_html}
+
+<!-- LAST PAGE: ACH INSTRUCTIONS (own page, after everything else) -->
+<div class="page-last">
+
+  <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:30pt;">
+    <tr>
+      <td align="left" valign="top" class="logo-img">{logo_img}</td>
+      <td align="right" valign="top" class="address-cell">
+        {company_address}<br/>
+        {company_city_state_zip}<br/>
+        {company_phone}
+      </td>
+    </tr>
+  </table>
+
+  <div class="invoice-title">Invoice {invoice_number}</div>
+
+  <div>
     <div class="ach-title">ACH Instructions</div>
     <table width="100%" border="0" cellpadding="3" cellspacing="0">
       <tr>
@@ -392,8 +413,6 @@ _INVOICE_HTML_TEMPLATE = '''
   </div>
 
 </div>
-
-{time_detail_html}
 
 </body>
 </html>
@@ -488,7 +507,7 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
         )
 
     return f'''
-<div class="page-last">
+<div class="page">
   <div class="attachment-title">Attachment II<br/>Time Detail</div>
 
   <table width="100%" border="0" cellpadding="2" cellspacing="0" style="margin-bottom:14pt;">
@@ -658,7 +677,6 @@ def generate_invoice_html(edit_data: dict) -> str:
     )
 
     return _INVOICE_HTML_TEMPLATE.format(
-        page2_class="page" if time_detail_html else "page-last",
         time_detail_html=time_detail_html,
         # Header / logo + company
         logo_img=logo_img,
