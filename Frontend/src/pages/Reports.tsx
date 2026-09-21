@@ -1447,9 +1447,9 @@ export default function Reports() {
           {hoursMatrix.rows.length === 0 ? (
             <p className="text-center text-muted-foreground py-6 text-sm">No data for the selected filters.</p>
           ) : (
-            <div className="overflow-x-auto" ref={matrixScrollRef}>
-              <Table>
-                <TableHeader>
+            <div className="max-h-[420px] overflow-auto" ref={matrixScrollRef}>
+              <Table containerClassName="overflow-visible">
+                <TableHeader className="sticky top-0 z-20 bg-background">
                   <TableRow>
                     <TableHead rowSpan={2} className="table-header sticky left-0 bg-background z-10 min-w-[200px] align-bottom shadow-[1px_0_0_0_hsl(var(--border))]">
                       Employee
@@ -1623,9 +1623,9 @@ export default function Reports() {
           {projectHoursMatrix.rows.length === 0 ? (
             <p className="text-center text-muted-foreground py-6 text-sm">No data for the selected filters.</p>
           ) : (
-            <div className="overflow-x-auto" ref={projectMatrixScrollRef}>
-              <Table>
-                <TableHeader>
+            <div className="max-h-[420px] overflow-auto" ref={projectMatrixScrollRef}>
+              <Table containerClassName="overflow-visible">
+                <TableHeader className="sticky top-0 z-20 bg-background">
                   <TableRow>
                     <TableHead rowSpan={2} className="table-header sticky left-0 bg-background z-10 min-w-[200px] align-bottom shadow-[1px_0_0_0_hsl(var(--border))]">
                       Project
@@ -1894,9 +1894,9 @@ export default function Reports() {
               </p>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
+              <div className="max-h-[420px] overflow-auto">
+                <Table containerClassName="overflow-visible">
+                  <TableHeader className="sticky top-0 z-20 bg-background">
                     <TableRow>
                       <TableHead className="table-header">Person</TableHead>
                       <TableHead className="table-header text-right">Avg Hours/Week</TableHead>
@@ -1958,9 +1958,9 @@ export default function Reports() {
                 {projectedMatrixData.rows.length === 0 ? (
                   <p className="text-center text-muted-foreground py-6 text-sm">No staffing plan with an allocation % set.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
+                  <div className="max-h-[420px] overflow-auto">
+                    <Table containerClassName="overflow-visible">
+                      <TableHeader className="sticky top-0 z-20 bg-background">
                         <TableRow>
                           <TableHead className="table-header sticky left-0 bg-background z-10 min-w-[160px] shadow-[1px_0_0_0_hsl(var(--border))]">
                             Person
@@ -2008,9 +2008,9 @@ export default function Reports() {
                 {availableCapacityForecast.rows.length === 0 ? (
                   <p className="text-center text-muted-foreground py-6 text-sm">No active employees are averaging under {LOW_LOAD_THRESHOLD_PCT}% for the next {LOW_LOAD_WEEKS} weeks.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
+                  <div className="max-h-[420px] overflow-auto">
+                    <Table containerClassName="overflow-visible">
+                      <TableHeader className="sticky top-0 z-20 bg-background">
                         <TableRow>
                           <TableHead className="table-header sticky left-0 bg-background z-10 min-w-[160px] shadow-[1px_0_0_0_hsl(var(--border))]">
                             Person
