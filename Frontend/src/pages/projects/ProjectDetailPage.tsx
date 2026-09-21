@@ -10,7 +10,7 @@ import { useProjectRoles, useCreateProjectRole, useUpdateProjectRole, useDeleteP
 import { useSkillCatalog } from '@/hooks/useSkills';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
-import { ProjectRole, AssignableEmployee, ProjectRequiredSkill, SkillCoverage } from '@/types';
+import { ProjectRole, MinHoursBasis, MIN_HOURS_BASIS_LABELS, AssignableEmployee, ProjectRequiredSkill, SkillCoverage } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -205,12 +205,13 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<ProjectRole | null>(null);
-  const emptyForm = { name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '', additional_hours_enabled: false, additional_hours_rate: '' };
+  const emptyForm = { name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '', min_hours_basis: 'week' as MinHoursBasis, additional_hours_enabled: false, additional_hours_rate: '' };
   const [form, setForm] = useState(emptyForm);
 
   const minPayload = () => ({
     min_hours_enabled: isManagedServices && form.min_hours_enabled,
     min_hours: isManagedServices && form.min_hours_enabled && form.min_hours ? parseFloat(form.min_hours) : null,
+    min_hours_basis: form.min_hours_basis,
     additional_hours_enabled: isManagedServices && form.additional_hours_enabled,
     additional_hours_rate: isManagedServices && form.additional_hours_enabled && form.additional_hours_rate ? parseFloat(form.additional_hours_rate) : null,
   });
@@ -277,7 +278,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
                 {isManagedServices && (
                   <TableCell className="text-right text-sm">
                     {role.min_hours_enabled && role.min_hours != null
-                      ? <span className="font-medium">{Number(role.min_hours)}h min</span>
+                      ? <span className="font-medium">{Number(role.min_hours)}h min · {MIN_HOURS_BASIS_LABELS[role.min_hours_basis ?? 'period'].toLowerCase()}</span>
                       : <span className="text-muted-foreground">Flat</span>}
                   </TableCell>
                 )}
@@ -291,7 +292,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
                 {canEdit && (
                   <TableCell className="text-right">
                     <div className="flex gap-1 justify-end">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd), min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd), min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', min_hours_basis: (role.min_hours_basis ?? 'period') as MinHoursBasis, additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
                         <Edit className="h-4 w-4" />
                       </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(role.id)}>
@@ -328,9 +329,19 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
                 </div>
                 {form.min_hours_enabled && (
                   <div className="space-y-1">
-                    <Label>Minimum hours (per billing period)</Label>
-                    <Input type="number" min="0" step="0.5" value={form.min_hours} onChange={e => setForm({ ...form, min_hours: e.target.value })} placeholder="e.g. 40" />
-                    <p className="text-xs text-muted-foreground">Bills max(actual hours, minimum) × rate for the period.</p>
+                    <Label>Minimum hours</Label>
+                    <div className="flex gap-2">
+                      <Input type="number" min="0" step="0.5" value={form.min_hours} onChange={e => setForm({ ...form, min_hours: e.target.value })} placeholder="e.g. 10" />
+                      <Select value={form.min_hours_basis} onValueChange={v => setForm({ ...form, min_hours_basis: v as MinHoursBasis })}>
+                        <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(MIN_HOURS_BASIS_LABELS) as MinHoursBasis[]).map(b => (
+                            <SelectItem key={b} value={b}>{MIN_HOURS_BASIS_LABELS[b]}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Each week / month / period bills max(actual hours, minimum) × rate. Editable per invoice.</p>
                   </div>
                 )}
               </div>
@@ -348,7 +359,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
                   <div className="space-y-1">
                     <Label>Additional hours rate (USD/h)</Label>
                     <Input type="number" min="0" step="0.5" value={form.additional_hours_rate} onChange={e => setForm({ ...form, additional_hours_rate: e.target.value })} placeholder="e.g. 120" />
-                    <p className="text-xs text-muted-foreground">Requires a minimum set above — additional hours = monthly hours over that minimum.</p>
+                    <p className="text-xs text-muted-foreground">Requires a minimum set above — additional hours = hours over that minimum.</p>
                   </div>
                 )}
               </div>

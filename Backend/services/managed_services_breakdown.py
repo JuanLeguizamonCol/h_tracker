@@ -1,18 +1,43 @@
-"""Managed Services breakdown for an invoice — the data behind the panel shown
+"""Managed Services breakdown for an invoice â€” the data behind the panel shown
 in the invoice editor for projects marked Managed Services.
 
-Per role: the minimum-hours package (min hours x the role's hourly rate), the
+Per role: the minimum-hours package (the minimum, measured weekly / monthly /
+per period — see services/managed_services_calc — x the role's hourly rate), the
 hours actually worked (from the invoice's lines), how many of those exceed the
-minimum, and — for roles with "additional hours" enabled — what those extra
+minimum, and â€” for roles with "additional hours" enabled â€” what those extra
 hours amount to at the separate additional-hours rate. Informational: it shows
 how the package and the extra hours split; the invoice's billed total is still
 the one on the invoice itself.
 """
+from services.managed_services_calc import compute_role_billing
 
 
-def build_managed_services_breakdown(roles: list, lines: list[dict], fees: list) -> dict:
+def role_entries_by_role(linked_entries, lines: list[dict]) -> dict[str, list]:
+    """Spread each employee's linked (date, hours) entries onto their line's
+    role, scaled so a role's total matches the hours actually billed on the
+    lines (hours on hold are already out of the line's hours)."""
+    line_by_user = {ln["user_id"]: ln for ln in lines if ln.get("user_id") and ln.get("role_id")}
+    out: dict[str, list] = {}
+    for user_id, d, h in linked_entries:
+        ln = line_by_user.get(user_id)
+        if not ln:
+            continue
+        orig = float(ln.get("original_hours") or 0)
+        scale = float(ln.get("hours") or 0) / orig if orig else 1.0
+        out.setdefault(ln["role_id"], []).append((d, float(h or 0) * scale))
+    return out
+
+
+def build_managed_services_breakdown(
+    roles: list, lines: list[dict], fees: list,
+    entries_by_role: dict | None = None, period_start=None, period_end=None,
+    overrides: dict | None = None,
+) -> dict:
     """roles: ProjectRole rows; lines: edit-data lines (role_id, hours);
-    fees: InvoiceFee rows already on the invoice."""
+    fees: InvoiceFee rows already on the invoice; overrides: role_id ->
+    InvoiceRoleMinimum (per-invoice min/basis edits)."""
+    entries_by_role = entries_by_role or {}
+    overrides = overrides or {}
     worked_by_role: dict[str, float] = {}
     for ln in lines:
         rid = ln.get("role_id")
@@ -21,22 +46,39 @@ def build_managed_services_breakdown(roles: list, lines: list[dict], fees: list)
 
     rows = []
     for r in roles:
-        min_on = bool(r.min_hours_enabled) and r.min_hours is not None
-        worked = worked_by_role.get(r.id, 0.0)
-        if not min_on and worked <= 0:
+        ov = overrides.get(r.id)
+        if ov is not None:
+            cfg_min = float(ov.min_hours) if ov.min_hours is not None else None
+            basis = ov.basis
+        else:
+            cfg_min = float(r.min_hours) if r.min_hours_enabled and r.min_hours is not None else None
+            basis = r.min_hours_basis or "period"
+        worked_lines = worked_by_role.get(r.id, 0.0)
+        if cfg_min is None and worked_lines <= 0:
             continue  # role plays no part in this invoice
         rate = float(r.hourly_rate_usd or 0)
-        min_hours = float(r.min_hours) if min_on else None
-        over = max(0.0, worked - min_hours) if min_on else 0.0
+        entries = entries_by_role.get(r.id)
+        if entries is None or not entries:
+            # No dated entries (manual lines / legacy): treat the lines' hours as one lump.
+            entries = [(period_end, worked_lines)] if worked_lines and period_end else []
+        calc = compute_role_billing(entries, period_start, period_end, cfg_min, basis)
+        worked = calc["worked_hours"] if entries else worked_lines
+        minimum_total = calc["minimum_total"]
+        billed = calc["billed_hours"] if entries or cfg_min is not None else worked
+        over = max(0.0, billed - minimum_total) if cfg_min is not None else 0.0
         add_on = bool(r.additional_hours_enabled) and r.additional_hours_rate is not None
         add_rate = float(r.additional_hours_rate) if add_on else None
         rows.append({
             "role_id": r.id,
             "role_name": r.name,
             "hourly_rate": rate,
-            "min_hours": min_hours,
-            "package_amount": (min_hours or 0.0) * rate,
+            "min_hours": cfg_min,
+            "min_hours_basis": basis,
+            "minimum_total": minimum_total,
+            "package_amount": minimum_total * rate,
             "worked_hours": worked,
+            "billed_hours": billed,
+            "billed_amount": billed * rate,
             "hours_over_min": over,
             "additional_rate": add_rate,
             "additional_amount": over * add_rate if add_on else 0.0,
@@ -55,6 +97,7 @@ def build_managed_services_breakdown(roles: list, lines: list[dict], fees: list)
     return {
         "roles": rows,
         "package_total": sum(x["package_amount"] for x in rows),
+        "billed_total": sum(x["billed_amount"] for x in rows),
         "additional_total": sum(x["additional_amount"] for x in rows),
         "additional_fees": additional_fees,
     }

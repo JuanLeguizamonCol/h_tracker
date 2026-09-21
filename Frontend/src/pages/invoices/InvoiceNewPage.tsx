@@ -129,7 +129,7 @@ export default function InvoiceNewPage() {
       const availableEntries = entries.filter(e => !linkedIds.has(e.id));
 
       if (availableEntries.length > 0) {
-        const projectRoles = await api.get<{ id: string; name: string; hourly_rate_usd: number; min_hours_enabled: boolean; min_hours: number | null; additional_hours_enabled: boolean; additional_hours_rate: number | null }[]>(
+        const projectRoles = await api.get<{ id: string; name: string; hourly_rate_usd: number; min_hours_enabled: boolean; min_hours: number | null; min_hours_basis: 'week' | 'month' | 'period'; additional_hours_enabled: boolean; additional_hours_rate: number | null }[]>(
           `/project-roles?project_id=${selectedProjectId}`
         );
         const assignments = await api.get<{ user_id: string; role_id: string | null }[]>(
@@ -179,30 +179,9 @@ export default function InvoiceNewPage() {
             updates: { fixed_fee_amount: feeVal, subtotal: feeVal, total: feeVal },
           });
         } else if (isManagedServices) {
-          // Per-role minimum: each role bills max(actual, min) when its minimum
-          // is enabled, else flat on actual hours. Min-enabled roles bill their
-          // minimum even without logged hours.
-          const actualByRole = new Map<string, number>();
-          Object.values(employeeHours).forEach(eh => {
-            const roleId = assignmentMap.get(eh.userId);
-            if (roleId) actualByRole.set(roleId, (actualByRole.get(roleId) || 0) + eh.hours);
-          });
-          const roleIds = new Set<string>([
-            ...actualByRole.keys(),
-            ...projectRoles.filter(r => r.min_hours_enabled).map(r => r.id),
-          ]);
-          let feeVal = 0;
-          roleIds.forEach(rid => {
-            const role = rolesMap.get(rid);
-            if (!role) return;
-            const rate = Number(role.hourly_rate_usd);
-            const actual = actualByRole.get(rid) || 0;
-            const billed = role.min_hours_enabled && role.min_hours != null
-              ? Math.max(actual, Number(role.min_hours))
-              : actual;
-            feeVal += billed * rate;
-          });
-
+          // Per-role minimums (weekly / monthly / per period) are priced by the
+          // backend — see services/managed_services_calc.py. It runs after the
+          // additional-hours fees below so their total is included.
           // Quarterly true-up: on the quarter's 3rd calendar month, bill
           // accumulated additional hours (monthly hours over each role's
           // floor) as separate fee lines — mirrors the auto-generation job.
@@ -216,6 +195,11 @@ export default function InvoiceNewPage() {
             const quarterNum = Math.floor(today.getMonth() / 3) + 1;
             const quarterStartMonth = today.getMonth() - 2;
             const fmt = (d: Date) => d.toISOString().slice(0, 10);
+            // Role minimum expressed as a floor for one calendar month.
+            const monthFloor = (role: (typeof projectRoles)[number], start: Date, end: Date) =>
+              role.min_hours_basis === 'week'
+                ? (Number(role.min_hours) * ((end.getTime() - start.getTime()) / 86400000 + 1)) / 7
+                : Number(role.min_hours);
             const monthRanges = [0, 1, 2].map(i => ({
               start: new Date(year, quarterStartMonth + i, 1),
               end: new Date(year, quarterStartMonth + i + 1, 0),
@@ -231,12 +215,11 @@ export default function InvoiceNewPage() {
                   (sum, e) => (assignmentMap.get(e.user_id) === role.id ? sum + Number(e.hours) : sum),
                   0
                 );
-                excess += Math.max(0, roleHours - Number(role.min_hours));
+                excess += Math.max(0, roleHours - monthFloor(role, start, end));
               }
               if (excess > 0) {
                 const addRate = Number(role.additional_hours_rate);
                 const addAmount = excess * addRate;
-                feeVal += addAmount;
                 await api.post('/invoice-fees/', {
                   invoice_id: invoice.id,
                   label: `Additional Hours - ${role.name} (Q${quarterNum} ${year})`,
@@ -249,10 +232,7 @@ export default function InvoiceNewPage() {
             }
           }
 
-          await updateInvoice.mutateAsync({
-            id: invoice.id,
-            updates: { fixed_fee_amount: feeVal, subtotal: feeVal, total: feeVal },
-          });
+          await api.post(`/invoices/${invoice.id}/managed-services/recalculate`, {});
         } else {
           const subtotalVal = lineData.reduce((sum, l) => sum + l.amount, 0);
           await updateInvoice.mutateAsync({ id: invoice.id, updates: { subtotal: subtotalVal, total: subtotalVal } });

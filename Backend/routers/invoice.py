@@ -17,7 +17,7 @@ from schemas.invoice import (
     InvoiceCreate, InvoiceUpdate, InvoiceOut,
     InvoiceEditDataOut, InvoiceEditClient, InvoiceEditProject, InvoiceEditLine, InvoiceEditExpense,
     InvoiceEditTimeDetail, InvoiceManagedServices,
-    InvoicePatch,
+    InvoicePatch, ManagedServicesMinimumsUpdate,
 )
 from schemas.invoice_expenses import InvoiceExpenseCreate
 from schemas.invoice_lines import InvoiceLineUpdate
@@ -32,7 +32,8 @@ from models.user_roles import UserRole
 from models.invoice_time_entries import InvoiceTimeEntry
 from services.invoice_hours_on_hold import upsert_on_hold_entry, delete_on_hold_entry
 from services.invoice_time_detail import build_time_detail
-from services.managed_services_breakdown import build_managed_services_breakdown
+from services.managed_services_breakdown import build_managed_services_breakdown, role_entries_by_role
+from models.invoice_role_minimums import InvoiceRoleMinimum
 from models.invoice_fees import InvoiceFee
 from sqlalchemy import func
 import uuid
@@ -304,7 +305,15 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
     if project and project.is_managed_services:
         project_roles = db.query(ProjectRole).filter(ProjectRole.project_id == project.id).all()
         invoice_fees = db.query(InvoiceFee).filter(InvoiceFee.invoice_id == invoice.id).all()
-        managed_services = build_managed_services_breakdown(project_roles, lines_out, invoice_fees)
+        overrides = {
+            o.role_id: o for o in
+            db.query(InvoiceRoleMinimum).filter(InvoiceRoleMinimum.invoice_id == invoice.id).all()
+        }
+        managed_services = build_managed_services_breakdown(
+            project_roles, lines_out, invoice_fees,
+            role_entries_by_role(linked_entries, lines_out),
+            invoice.period_start, invoice.period_end, overrides,
+        )
 
     return {
         "invoice": {
@@ -424,6 +433,72 @@ def get_invoice_edit_data(
         time_detail=[InvoiceEditTimeDetail(**d) for d in data["time_detail"]],
         managed_services=InvoiceManagedServices(**data["managed_services"]) if data["managed_services"] else None,
     )
+
+
+def _managed_services_project_invoice(invoice_id: str, db: Session):
+    invoice = get_invoice(db, invoice_id)
+    project = db.query(Project).filter(Project.id == invoice.project_id).first()
+    if not project or not project.is_managed_services:
+        raise HTTPException(status_code=400, detail="Invoice is not for a Managed Services project")
+    return invoice
+
+
+def _recalculate_managed_services_amount(invoice_id: str, db: Session) -> None:
+    """Amount to Bill = every role's billed hours x rate (minimums applied per
+    week/month/period) plus the additional-hours fees already on the invoice."""
+    data = _build_edit_data(invoice_id, db)
+    ms = data["managed_services"]
+    fees_total = sum(f["total"] for f in ms["additional_fees"])
+    total = round(ms["billed_total"] + fees_total, 2)
+    invoice = get_invoice(db, invoice_id)
+    invoice.fixed_fee_amount = total
+    invoice.subtotal = total
+    invoice.total = total
+    db.commit()
+
+
+@invoice_router.put("/{invoice_id}/managed-services/minimums", response_model=InvoiceEditDataOut)
+def update_managed_services_minimums(
+    invoice_id: str,
+    payload: ManagedServicesMinimumsUpdate,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Edit this invoice's per-role minimum hours / basis and re-price the invoice."""
+    invoice = _managed_services_project_invoice(invoice_id, db)
+    _ensure_can_access_invoice(invoice, current_employee, db)
+    valid_roles = {r.id for r in db.query(ProjectRole).filter(ProjectRole.project_id == invoice.project_id).all()}
+    existing = {
+        o.role_id: o for o in
+        db.query(InvoiceRoleMinimum).filter(InvoiceRoleMinimum.invoice_id == invoice_id).all()
+    }
+    for item in payload.roles:
+        if item.role_id not in valid_roles:
+            raise HTTPException(status_code=400, detail="Role does not belong to this project")
+        if item.min_hours is not None and item.min_hours < 0:
+            raise HTTPException(status_code=400, detail="Minimum hours cannot be negative")
+        row = existing.get(item.role_id)
+        if row is None:
+            db.add(InvoiceRoleMinimum(invoice_id=invoice_id, role_id=item.role_id,
+                                      min_hours=item.min_hours, basis=item.basis))
+        else:
+            row.min_hours = item.min_hours
+            row.basis = item.basis
+    db.commit()
+    _recalculate_managed_services_amount(invoice_id, db)
+    return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
+
+
+@invoice_router.post("/{invoice_id}/managed-services/recalculate", response_model=InvoiceEditDataOut)
+def recalculate_managed_services(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    invoice = _managed_services_project_invoice(invoice_id, db)
+    _ensure_can_access_invoice(invoice, current_employee, db)
+    _recalculate_managed_services_amount(invoice_id, db)
+    return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
 
 
 @invoice_router.patch("/{invoice_id}", response_model=InvoiceOut)

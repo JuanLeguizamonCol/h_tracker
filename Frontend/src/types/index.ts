@@ -232,6 +232,11 @@ export interface ProjectAssignment {
   rate: number | null;
 }
 
+export type MinHoursBasis = 'week' | 'month' | 'period';
+export const MIN_HOURS_BASIS_LABELS: Record<MinHoursBasis, string> = {
+  week: 'Weekly', month: 'Monthly', period: 'Per period',
+};
+
 export interface ProjectRole {
   id: string;
   project_id: string;

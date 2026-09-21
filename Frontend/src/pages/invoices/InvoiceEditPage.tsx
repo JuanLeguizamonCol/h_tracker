@@ -3,9 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Clock, FileDown, FileSpreadsheet, RefreshCw, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { useInvoiceEditData, usePatchInvoice } from '@/hooks/useInvoices';
+import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums } from '@/hooks/useInvoices';
 import { useAuth } from '@/contexts/AuthContext';
-import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch } from '@/types';
+import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, MinHoursBasis, MIN_HOURS_BASIS_LABELS } from '@/types';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -93,6 +93,9 @@ export default function InvoiceEditPage() {
   const [signatoryTitle, setSignatoryTitle] = useState('');
   const [ownerCompany, setOwnerCompany] = useState<CompanyCode>('IPC');
   const [fixedFeeAmount, setFixedFeeAmount] = useState<string>('');
+  // Managed Services panel: unsaved per-role minimum edits (role_id -> draft).
+  const [msDraft, setMsDraft] = useState<Record<string, { min: string; basis: MinHoursBasis }>>({});
+  const updateMinimums = useUpdateManagedServicesMinimums();
   const [billToContact, setBillToContact] = useState('');
   const [billToTitle, setBillToTitle] = useState('');
   const [billToCompany, setBillToCompany] = useState('');
@@ -801,9 +804,11 @@ export default function InvoiceEditPage() {
               <CardHeader>
                 <CardTitle className="text-base">Managed Services</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Each role bills a minimum-hours package at its rate. Hours worked beyond that minimum are billed
-                  separately at the role's additional-hours rate (roles without one just show the extra hours).
-                  Reflects the last saved hours.
+                  Each role bills at least its minimum hours at its rate. The minimum is measured per week by default
+                  (or per month / per period) — each bucket bills the greater of hours worked and its minimum, and
+                  partial weeks / months at the edges of the period are prorated by days. Hours over the minimum
+                  show separately at the role's additional-hours rate. Edit a minimum below and apply to re-price
+                  the invoice; it reflects the last saved hours.
                 </p>
               </CardHeader>
               <CardContent className="p-0">
@@ -816,9 +821,11 @@ export default function InvoiceEditPage() {
                         <TableRow>
                           <TableHead className="text-xs">Role</TableHead>
                           <TableHead className="text-xs text-right">Min. hours</TableHead>
+                          <TableHead className="text-xs">Per</TableHead>
                           <TableHead className="text-xs text-right">Rate</TableHead>
                           <TableHead className="text-xs text-right">Package</TableHead>
                           <TableHead className="text-xs text-right">Worked</TableHead>
+                          <TableHead className="text-xs text-right">Billed hrs</TableHead>
                           <TableHead className="text-xs text-right">Over min.</TableHead>
                           <TableHead className="text-xs text-right">Add'l rate</TableHead>
                           <TableHead className="text-xs text-right">Additional</TableHead>
@@ -828,10 +835,31 @@ export default function InvoiceEditPage() {
                         {data.managed_services.roles.map(r => (
                           <TableRow key={r.role_id}>
                             <TableCell className="font-medium">{r.role_name}</TableCell>
-                            <TableCell className="text-right tabular-nums">{r.min_hours != null ? r.min_hours.toFixed(2) : '—'}</TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number" min="0" step="0.5" placeholder="none"
+                                className="h-8 w-24 ml-auto text-right"
+                                value={msDraft[r.role_id]?.min ?? (r.min_hours != null ? String(r.min_hours) : '')}
+                                onChange={e => setMsDraft(d => ({ ...d, [r.role_id]: { min: e.target.value, basis: d[r.role_id]?.basis ?? r.min_hours_basis } }))}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                value={msDraft[r.role_id]?.basis ?? r.min_hours_basis}
+                                onValueChange={v => setMsDraft(d => ({ ...d, [r.role_id]: { min: d[r.role_id]?.min ?? (r.min_hours != null ? String(r.min_hours) : ''), basis: v as MinHoursBasis } }))}
+                              >
+                                <SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {(Object.keys(MIN_HOURS_BASIS_LABELS) as MinHoursBasis[]).map(b => (
+                                    <SelectItem key={b} value={b}>{MIN_HOURS_BASIS_LABELS[b]}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
                             <TableCell className="text-right tabular-nums">${r.hourly_rate.toFixed(2)}</TableCell>
                             <TableCell className="text-right tabular-nums">${r.package_amount.toFixed(2)}</TableCell>
                             <TableCell className="text-right tabular-nums">{r.worked_hours.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.billed_hours.toFixed(2)}</TableCell>
                             <TableCell className="text-right tabular-nums">{r.hours_over_min.toFixed(2)}</TableCell>
                             <TableCell className="text-right tabular-nums">{r.additional_rate != null ? `$${r.additional_rate.toFixed(2)}` : '—'}</TableCell>
                             <TableCell className="text-right tabular-nums font-medium">
@@ -840,13 +868,47 @@ export default function InvoiceEditPage() {
                           </TableRow>
                         ))}
                         <TableRow className="border-t-2 font-bold">
-                          <TableCell colSpan={3}>Total</TableCell>
+                          <TableCell colSpan={4}>Total</TableCell>
                           <TableCell className="text-right tabular-nums">${data.managed_services.package_total.toFixed(2)}</TableCell>
-                          <TableCell colSpan={3} />
+                          <TableCell colSpan={4} />
                           <TableCell className="text-right tabular-nums">${data.managed_services.additional_total.toFixed(2)}</TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
+                  </div>
+                )}
+                {Object.keys(msDraft).length > 0 && (
+                  <div className="px-6 py-3 border-t flex items-center justify-between gap-3">
+                    <p className="text-xs text-muted-foreground">
+                      Applying re-prices "Amount to Bill" from the saved hours.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setMsDraft({})}>Discard</Button>
+                      <Button
+                        size="sm"
+                        disabled={updateMinimums.isPending}
+                        onClick={async () => {
+                          try {
+                            const res = await updateMinimums.mutateAsync({
+                              id: data.invoice.id,
+                              roles: Object.entries(msDraft).map(([role_id, d]) => ({
+                                role_id,
+                                min_hours: d.min.trim() === '' ? null : parseFloat(d.min),
+                                basis: d.basis,
+                              })),
+                            });
+                            setFixedFeeAmount(res.invoice.fixed_fee_amount != null ? String(res.invoice.fixed_fee_amount) : '');
+                            setMsDraft({});
+                            toast.success('Minimums updated and invoice re-priced.');
+                          } catch (e: any) {
+                            toast.error(e?.message || 'Could not update minimums.');
+                          }
+                        }}
+                      >
+                        {updateMinimums.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                        Apply minimums
+                      </Button>
+                    </div>
                   </div>
                 )}
                 {data.managed_services.additional_fees.length > 0 && (

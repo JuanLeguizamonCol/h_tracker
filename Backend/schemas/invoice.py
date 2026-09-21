@@ -1,6 +1,6 @@
 # schemas/invoice.py
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import date, datetime
 
 
@@ -141,8 +141,12 @@ class InvoiceManagedServicesRole(BaseModel):
     role_name: str
     hourly_rate: float
     min_hours: Optional[float] = None
+    min_hours_basis: str = "period"
+    minimum_total: float = 0
     package_amount: float = 0
     worked_hours: float = 0
+    billed_hours: float = 0
+    billed_amount: float = 0
     hours_over_min: float = 0
     additional_rate: Optional[float] = None
     additional_amount: float = 0
@@ -158,6 +162,7 @@ class InvoiceManagedServicesFee(BaseModel):
 class InvoiceManagedServices(BaseModel):
     roles: List[InvoiceManagedServicesRole] = []
     package_total: float = 0
+    billed_total: float = 0
     additional_total: float = 0
     additional_fees: List[InvoiceManagedServicesFee] = []
 
@@ -236,3 +241,13 @@ class InvoicePatch(BaseModel):
     lines: Optional[List[InvoiceLinePatch]] = None
     expenses: Optional[List[InvoiceExpensePatch]] = None
     on_hold_entries: Optional[List[OnHoldEntryPatch]] = None
+
+
+class ManagedServicesRoleMinimum(BaseModel):
+    role_id: str
+    min_hours: Optional[float] = None  # None = no minimum for this role
+    basis: Literal["week", "month", "period"] = "week"
+
+
+class ManagedServicesMinimumsUpdate(BaseModel):
+    roles: List[ManagedServicesRoleMinimum]

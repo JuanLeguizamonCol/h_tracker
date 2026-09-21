@@ -1,6 +1,6 @@
 # schemas/project_roles.py
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 
 
@@ -11,6 +11,7 @@ class ProjectRoleBase(BaseModel):
     # Managed Services: bill a per-period minimum for this role when enabled.
     min_hours_enabled: bool = False
     min_hours: Optional[float] = None
+    min_hours_basis: Literal['week', 'month', 'period'] = 'week'
     # Managed Services: hours beyond min_hours in a month accrue instead of
     # billing that month, and are billed as one quarterly line at this rate.
     additional_hours_enabled: bool = False
@@ -26,6 +27,7 @@ class ProjectRoleUpdate(BaseModel):
     hourly_rate_usd: Optional[float] = None
     min_hours_enabled: Optional[bool] = None
     min_hours: Optional[float] = None
+    min_hours_basis: Optional[Literal['week', 'month', 'period']] = None
     additional_hours_enabled: Optional[bool] = None
     additional_hours_rate: Optional[float] = None
 

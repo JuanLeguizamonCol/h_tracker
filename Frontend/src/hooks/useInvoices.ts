@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Invoice, InvoiceLine, InvoiceTimeEntry, InvoiceEditData, InvoicePatch } from '@/types';
+import { Invoice, InvoiceLine, InvoiceTimeEntry, InvoiceEditData, InvoicePatch, MinHoursBasis } from '@/types';
 
 export function useInvoices(opts?: { enabled?: boolean }) {
   return useQuery({
@@ -142,6 +142,18 @@ export function usePatchInvoice() {
         old ? old.map(inv => inv.id === updatedInvoice.id ? updatedInvoice : inv) : old
       );
       queryClient.invalidateQueries({ queryKey: ['invoice-edit-data', updatedInvoice.id] });
+    },
+  });
+}
+
+export function useUpdateManagedServicesMinimums() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, roles }: { id: string; roles: { role_id: string; min_hours: number | null; basis: MinHoursBasis }[] }) =>
+      api.put<InvoiceEditData>(`/invoices/${id}/managed-services/minimums`, { roles }),
+    onSuccess: (data, { id }) => {
+      queryClient.setQueryData(['invoice-edit-data', id], data);
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
     },
   });
 }

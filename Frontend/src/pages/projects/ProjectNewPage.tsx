@@ -7,7 +7,7 @@ import { useActiveClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Employee, ProjectRole } from '@/types';
+import { Employee, ProjectRole, MinHoursBasis, MIN_HOURS_BASIS_LABELS } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -56,6 +56,7 @@ interface RoleRow {
   hourly_rate_usd: number;
   min_hours_enabled: boolean;
   min_hours: string;
+  min_hours_basis: MinHoursBasis;
   additional_hours_enabled: boolean;
   additional_hours_rate: string;
 }
@@ -140,7 +141,7 @@ export default function ProjectNewPage() {
   const [roles, setRoles] = useState<RoleRow[]>([]);
 
   const addRole = () =>
-    setRoles(r => [...r, { _tempId: crypto.randomUUID(), name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '', additional_hours_enabled: false, additional_hours_rate: '' }]);
+    setRoles(r => [...r, { _tempId: crypto.randomUUID(), name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '', min_hours_basis: 'week', additional_hours_enabled: false, additional_hours_rate: '' }]);
 
   const updateRole = (id: string, field: keyof Omit<RoleRow, '_tempId'>, val: any) =>
     setRoles(r => r.map(row => row._tempId === id ? { ...row, [field]: val } : row));
@@ -236,6 +237,7 @@ export default function ProjectNewPage() {
           hourly_rate_usd: role.hourly_rate_usd,
           min_hours_enabled: form.is_managed_services && role.min_hours_enabled,
           min_hours: form.is_managed_services && role.min_hours_enabled && role.min_hours ? parseFloat(role.min_hours) : null,
+          min_hours_basis: role.min_hours_basis,
           additional_hours_enabled: form.is_managed_services && role.additional_hours_enabled,
           additional_hours_rate: form.is_managed_services && role.additional_hours_enabled && role.additional_hours_rate ? parseFloat(role.additional_hours_rate) : null,
         });
@@ -626,10 +628,20 @@ export default function ProjectNewPage() {
                                 value={row.min_hours}
                                 onChange={e => updateRole(row._tempId, 'min_hours', e.target.value)}
                                 placeholder="min h"
-                                className="h-8 w-24 text-right"
+                                className="h-8 w-20 text-right"
                               />
                             ) : (
                               <span className="text-xs text-muted-foreground">Flat bill</span>
+                            )}
+                            {row.min_hours_enabled && (
+                              <Select value={row.min_hours_basis} onValueChange={v => updateRole(row._tempId, 'min_hours_basis', v)}>
+                                <SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {(Object.keys(MIN_HOURS_BASIS_LABELS) as MinHoursBasis[]).map(b => (
+                                    <SelectItem key={b} value={b}>{MIN_HOURS_BASIS_LABELS[b]}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             )}
                           </div>
                         </TableCell>

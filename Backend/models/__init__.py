@@ -19,6 +19,7 @@ from models.skill_catalog import SkillCatalog
 from models.employee_skills import EmployeeSkill
 from models.notifications import Notification
 from models.invoice_hours_on_hold import InvoiceHoursOnHold
+from models.invoice_role_minimums import InvoiceRoleMinimum
 from models.employee_internal_cost import EmployeeInternalCost
 from models.project_required_skill import ProjectRequiredSkill
 from models.invoice_number_sequence import InvoiceNumberSequence
