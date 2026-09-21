@@ -4,6 +4,8 @@ import { ArrowLeft, Loader2, AlertTriangle, Clock, CheckCircle } from 'lucide-re
 import { toast } from 'sonner';
 import { useProjects } from '@/hooks/useProjects';
 import { useEmployees } from '@/hooks/useEmployees';
+import { useClients } from '@/hooks/useClients';
+import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCreateInvoice, useCreateInvoiceLines, useLinkTimeEntries, useUpdateInvoice } from '@/hooks/useInvoices';
 import { api } from '@/lib/api';
@@ -11,7 +13,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
 type CheckResult = {
@@ -26,6 +27,7 @@ export default function InvoiceNewPage() {
   const { employee, isAdmin, isSuperAdmin } = useAuth();
   const { data: projects = [] } = useProjects();
   const { data: employees = [] } = useEmployees();
+  const { data: clients = [] } = useClients();
 
   const createInvoice = useCreateInvoice();
   const createLines = useCreateInvoiceLines();
@@ -51,6 +53,18 @@ export default function InvoiceNewPage() {
       (isSuperAdmin || (p.owner_id ? p.owner_id === employee?.id : isAdmin))
     ),
     [projects, employee?.id, isAdmin, isSuperAdmin]
+  );
+
+  // Searchable by project name, client name or project code.
+  const projectOptions = useMemo(
+    () => [...activeProjects]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(p => ({
+        id: p.id,
+        label: p.name,
+        sublabel: [clients.find(c => c.id === p.client_id)?.name, p.project_code].filter(Boolean).join(' · ') || undefined,
+      })),
+    [activeProjects, clients]
   );
 
   const selectedProject = useMemo(
@@ -303,16 +317,14 @@ export default function InvoiceNewPage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>Project *</Label>
-            <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a project..." />
-              </SelectTrigger>
-              <SelectContent>
-                {activeProjects.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableCombobox
+              options={projectOptions}
+              value={selectedProjectId || null}
+              onChange={id => setSelectedProjectId(id ?? '')}
+              placeholder="Choose a project..."
+              emptyText="No projects match your search."
+              clearable
+            />
           </div>
 
           {selectedProject?.status !== 'on_hold' && (
