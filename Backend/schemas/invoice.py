@@ -136,6 +136,32 @@ class InvoiceEditTimeDetail(BaseModel):
     total: float
 
 
+class InvoiceManagedServicesRole(BaseModel):
+    role_id: str
+    role_name: str
+    hourly_rate: float
+    min_hours: Optional[float] = None
+    package_amount: float = 0
+    worked_hours: float = 0
+    hours_over_min: float = 0
+    additional_rate: Optional[float] = None
+    additional_amount: float = 0
+
+
+class InvoiceManagedServicesFee(BaseModel):
+    label: str
+    quantity: float
+    unit_price: float
+    total: float
+
+
+class InvoiceManagedServices(BaseModel):
+    roles: List[InvoiceManagedServicesRole] = []
+    package_total: float = 0
+    additional_total: float = 0
+    additional_fees: List[InvoiceManagedServicesFee] = []
+
+
 class InvoiceEditDataOut(BaseModel):
     invoice: InvoiceOut
     client: Optional[InvoiceEditClient] = None
@@ -143,6 +169,7 @@ class InvoiceEditDataOut(BaseModel):
     lines: List[InvoiceEditLine] = []
     expenses: List[InvoiceEditExpense] = []
     time_detail: List[InvoiceEditTimeDetail] = []
+    managed_services: Optional[InvoiceManagedServices] = None
 
 
 # ── PATCH payload ──

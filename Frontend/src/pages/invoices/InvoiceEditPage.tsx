@@ -795,6 +795,77 @@ export default function InvoiceEditPage() {
           </Card>
 
           {/* Professionals Table */}
+          {/* Managed Services — minimum-hours package vs. additional hours */}
+          {isManagedServices && data.managed_services && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Managed Services</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Each role bills a minimum-hours package at its rate. Hours worked beyond that minimum are billed
+                  separately at the role's additional-hours rate (roles without one just show the extra hours).
+                  Reflects the last saved hours.
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                {data.managed_services.roles.length === 0 ? (
+                  <p className="text-muted-foreground text-sm px-6 py-4">No roles with a minimum or logged hours on this invoice.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Role</TableHead>
+                          <TableHead className="text-xs text-right">Min. hours</TableHead>
+                          <TableHead className="text-xs text-right">Rate</TableHead>
+                          <TableHead className="text-xs text-right">Package</TableHead>
+                          <TableHead className="text-xs text-right">Worked</TableHead>
+                          <TableHead className="text-xs text-right">Over min.</TableHead>
+                          <TableHead className="text-xs text-right">Add'l rate</TableHead>
+                          <TableHead className="text-xs text-right">Additional</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {data.managed_services.roles.map(r => (
+                          <TableRow key={r.role_id}>
+                            <TableCell className="font-medium">{r.role_name}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.min_hours != null ? r.min_hours.toFixed(2) : '—'}</TableCell>
+                            <TableCell className="text-right tabular-nums">${r.hourly_rate.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">${r.package_amount.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.worked_hours.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.hours_over_min.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.additional_rate != null ? `$${r.additional_rate.toFixed(2)}` : '—'}</TableCell>
+                            <TableCell className="text-right tabular-nums font-medium">
+                              {r.additional_rate != null ? `$${r.additional_amount.toFixed(2)}` : '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="border-t-2 font-bold">
+                          <TableCell colSpan={3}>Total</TableCell>
+                          <TableCell className="text-right tabular-nums">${data.managed_services.package_total.toFixed(2)}</TableCell>
+                          <TableCell colSpan={3} />
+                          <TableCell className="text-right tabular-nums">${data.managed_services.additional_total.toFixed(2)}</TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+                {data.managed_services.additional_fees.length > 0 && (
+                  <div className="px-6 py-3 border-t text-sm space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Additional hours already billed on this invoice
+                    </p>
+                    {data.managed_services.additional_fees.map((f, i) => (
+                      <div key={i} className="flex justify-between">
+                        <span>{f.label} — {f.quantity.toFixed(2)}h × ${f.unit_price.toFixed(2)}</span>
+                        <span className="tabular-nums font-medium">${f.total.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">Professionals</CardTitle>

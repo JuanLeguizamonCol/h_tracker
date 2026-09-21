@@ -404,6 +404,17 @@ export interface InvoiceTimeDetailRow {
   total: number;
 }
 
+export interface InvoiceManagedServices {
+  roles: {
+    role_id: string; role_name: string; hourly_rate: number; min_hours: number | null;
+    package_amount: number; worked_hours: number; hours_over_min: number;
+    additional_rate: number | null; additional_amount: number;
+  }[];
+  package_total: number;
+  additional_total: number;
+  additional_fees: { label: string; quantity: number; unit_price: number; total: number }[];
+}
+
 export interface InvoiceEditData {
   invoice: Invoice;
   client: {
@@ -421,6 +432,7 @@ export interface InvoiceEditData {
   lines: InvoiceEditLine[];
   expenses: InvoiceExpense[];
   time_detail?: InvoiceTimeDetailRow[];
+  managed_services?: InvoiceManagedServices | null;
 }
 
 export interface InvoiceLinePatch {

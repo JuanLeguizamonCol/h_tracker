@@ -16,7 +16,7 @@ from services.export_excel import generate_invoice_xlsx, generate_invoices_repor
 from schemas.invoice import (
     InvoiceCreate, InvoiceUpdate, InvoiceOut,
     InvoiceEditDataOut, InvoiceEditClient, InvoiceEditProject, InvoiceEditLine, InvoiceEditExpense,
-    InvoiceEditTimeDetail,
+    InvoiceEditTimeDetail, InvoiceManagedServices,
     InvoicePatch,
 )
 from schemas.invoice_expenses import InvoiceExpenseCreate
@@ -32,6 +32,8 @@ from models.user_roles import UserRole
 from models.invoice_time_entries import InvoiceTimeEntry
 from services.invoice_hours_on_hold import upsert_on_hold_entry, delete_on_hold_entry
 from services.invoice_time_detail import build_time_detail
+from services.managed_services_breakdown import build_managed_services_breakdown
+from models.invoice_fees import InvoiceFee
 from sqlalchemy import func
 import uuid
 
@@ -298,6 +300,12 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
     ).filter(InvoiceTimeEntry.invoice_id == invoice.id).all()
     time_detail = build_time_detail(linked_entries, lines_out)
 
+    managed_services = None
+    if project and project.is_managed_services:
+        project_roles = db.query(ProjectRole).filter(ProjectRole.project_id == project.id).all()
+        invoice_fees = db.query(InvoiceFee).filter(InvoiceFee.invoice_id == invoice.id).all()
+        managed_services = build_managed_services_breakdown(project_roles, lines_out, invoice_fees)
+
     return {
         "invoice": {
             "id": invoice.id,
@@ -355,6 +363,7 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
         "lines": lines_out,
         "expenses": expenses_out,
         "time_detail": time_detail,
+        "managed_services": managed_services,
     }
 
 
@@ -413,6 +422,7 @@ def get_invoice_edit_data(
         lines=[_line(l) for l in data["lines"]],
         expenses=[_exp(e) for e in data["expenses"]],
         time_detail=[InvoiceEditTimeDetail(**d) for d in data["time_detail"]],
+        managed_services=InvoiceManagedServices(**data["managed_services"]) if data["managed_services"] else None,
     )
 
 
