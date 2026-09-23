@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { format, startOfWeek, addDays } from 'date-fns';
-import { CalendarIcon, ChevronLeft, ChevronRight, Save, Loader2, MessageSquare, Plus, X, Search, MapPin, Receipt } from 'lucide-react';
+import { CalendarIcon, ChevronLeft, ChevronRight, Save, Loader2, MessageSquare, Plus, X, Search, MapPin, Receipt, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useActiveProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
@@ -168,6 +168,18 @@ const HOURS_STEP = 0.25;
 function isOffHoursStep(hours: number): boolean {
   const steps = hours / HOURS_STEP;
   return hours > 0 && Math.abs(steps - Math.round(steps)) > 1e-6;
+}
+
+// Monthly close, no exceptions for any role — mirrors Backend/utils/time_entry_lock.py.
+// A month locks on the 6th of the following month. This is UX only (disables
+// the cell before the user even tries); the server enforces the same rule
+// independently and is the real boundary.
+function isDateLocked(dateStr: string): boolean {
+  const [y, m] = dateStr.split('-').map(Number);
+  const lockDate = m === 12 ? new Date(y + 1, 0, 6) : new Date(y, m, 6);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today >= lockDate;
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -512,6 +524,11 @@ export default function Timesheet() {
       // render (see note above the setRows call further down).
       type CellResult = { projectId: string; billable: boolean; dateStr: string; removed?: boolean; id?: string };
       const cellResults: CellResult[] = [];
+      // Normally nothing dirty ever lands on a locked day — the cell is
+      // disabled before the user can touch it. This only catches the edge
+      // case of a tab left open across the close boundary (e.g. midnight on
+      // the 6th): skip those instead of failing the whole save.
+      const skippedLockedDates = new Set<string>();
 
       for (const id of pendingDeletions) {
         promises.push(deleteTimeEntry.mutateAsync(id));
@@ -524,6 +541,7 @@ export default function Timesheet() {
           // any entry that already exists on that date.
           const locationDirty = dirtyLocationDays.has(dateStr) && !!dayEntry.id;
           if (!dayEntry.dirty && !locationDirty) continue;
+          if (isDateLocked(dateStr)) { skippedLockedDates.add(dateStr); continue; }
           const roleId = assignmentRoleMap.get(row.projectId) ?? null;
           const billable = row.isInternal ? false : row.billable;
           const location = dayLocations[dateStr] || null;
@@ -591,7 +609,11 @@ export default function Timesheet() {
 
       setPendingDeletions([]);
       setDirtyLocationDays(new Set());
-      toast.success("Saved — you're all set.");
+      if (skippedLockedDates.size > 0) {
+        toast.warning(`Saved everything else — ${skippedLockedDates.size} closed-period day${skippedLockedDates.size > 1 ? 's were' : ' was'} skipped.`);
+      } else {
+        toast.success("Saved — you're all set.");
+      }
     } catch (error) {
       toast.error('Something went wrong while saving. Please try again.');
       console.error(error);
@@ -837,20 +859,23 @@ export default function Timesheet() {
                       const hours = dayEntry?.hours ?? 0;
                       const notes = dayEntry?.notes ?? '';
                       const noteKey = `${row.projectId}:${row.billable}:${dateStr}`;
+                      const locked = isDateLocked(dateStr);
 
                       return (
                         <div
                           key={dayIdx}
-                          className={`px-1.5 py-2 border-r flex flex-col items-center gap-1 ${isToday ? 'bg-primary/5' : ''}`}
+                          className={`px-1.5 py-2 border-r flex flex-col items-center gap-1 ${locked ? 'bg-muted/40' : isToday ? 'bg-primary/5' : ''}`}
                         >
                           <Input
                             type="number"
                             min="0" max={MAX_HOURS_PER_DAY} step={HOURS_STEP}
                             value={hours === 0 ? '' : hours}
-                            placeholder="—"
+                            placeholder={locked ? '' : '—'}
+                            disabled={locked}
                             aria-invalid={hours > MAX_HOURS_PER_DAY || isOffHoursStep(hours)}
                             title={
-                              hours > MAX_HOURS_PER_DAY ? `Max ${MAX_HOURS_PER_DAY} hours per day`
+                              locked ? 'This period is closed — hours can no longer be logged or changed for this day.'
+                              : hours > MAX_HOURS_PER_DAY ? `Max ${MAX_HOURS_PER_DAY} hours per day`
                               : isOffHoursStep(hours) ? 'Hours must be in 15-minute increments (e.g. 0.25, 0.5, 0.75)'
                               : undefined
                             }
@@ -866,13 +891,21 @@ export default function Timesheet() {
                             }}
                             className={`w-full h-8 text-center text-sm px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
                               hours > MAX_HOURS_PER_DAY || isOffHoursStep(hours) ? 'border-destructive text-destructive focus-visible:ring-destructive' : ''
-                            }`}
+                            } ${locked ? 'disabled:opacity-100 disabled:text-muted-foreground' : ''}`}
                           />
-                          {hours > MAX_HOURS_PER_DAY && (
-                            <span className="text-[10px] leading-tight text-destructive">max {MAX_HOURS_PER_DAY}h</span>
-                          )}
-                          {hours <= MAX_HOURS_PER_DAY && isOffHoursStep(hours) && (
-                            <span className="text-[10px] leading-tight text-destructive">15-min steps</span>
+                          {locked ? (
+                            <span className="flex items-center gap-0.5 text-[10px] leading-tight text-muted-foreground">
+                              <Lock className="h-2.5 w-2.5" /> Closed
+                            </span>
+                          ) : (
+                            <>
+                              {hours > MAX_HOURS_PER_DAY && (
+                                <span className="text-[10px] leading-tight text-destructive">max {MAX_HOURS_PER_DAY}h</span>
+                              )}
+                              {hours <= MAX_HOURS_PER_DAY && isOffHoursStep(hours) && (
+                                <span className="text-[10px] leading-tight text-destructive">15-min steps</span>
+                              )}
+                            </>
                           )}
                           <Popover
                             open={openNoteKey === noteKey}
@@ -886,15 +919,16 @@ export default function Timesheet() {
                                     ? 'text-primary hover:text-primary/80'
                                     : 'text-muted-foreground/30 hover:text-muted-foreground'
                                 }`}
-                                title={notes || 'Add note'}
+                                title={notes || (locked ? undefined : 'Add note')}
                               >
                                 <MessageSquare className="h-3 w-3" />
                               </button>
                             </PopoverTrigger>
                             <PopoverContent className="w-60 p-2" side="bottom" align="center">
                               <Textarea
-                                placeholder="Notes for this day…"
+                                placeholder={locked ? 'No note for this day.' : 'Notes for this day…'}
                                 value={notes}
+                                disabled={locked}
                                 onChange={e => handleUpdateNotes(row.projectId, row.billable, dateStr, e.target.value)}
                                 rows={3}
                                 className="text-xs resize-none"
