@@ -266,18 +266,21 @@ export default function Timesheet() {
       };
     });
 
-    // Every non-internal project always gets both a billable and a non-billable
-    // row (even empty), so both types of hours can be logged for it at any time.
+    // Billable is the default lane — every non-internal project always gets a
+    // billable row (even empty), so hours typed in start out billable with no
+    // extra step. The non-billable row only shows up when there's already
+    // non-billable data for it (below); otherwise it stays hidden until the
+    // user explicitly activates it — see handleAddNonBillableRow.
     Array.from(rowMap.values()).forEach(row => {
       if (row.isInternal) return;
-      const counterKey = rowKey(row.projectId, !row.billable);
-      if (!rowMap.has(counterKey)) {
-        rowMap.set(counterKey, {
+      const billableKey = rowKey(row.projectId, true);
+      if (!rowMap.has(billableKey)) {
+        rowMap.set(billableKey, {
           projectId: row.projectId,
           projectName: row.projectName,
           clientName: row.clientName,
           isInternal: false,
-          billable: !row.billable,
+          billable: true,
           days: {},
         });
       }
@@ -324,6 +327,13 @@ export default function Timesheet() {
     return map;
   }, [rows]);
 
+  // Which projects currently have their non-billable lane activated — drives
+  // whether the billable row shows "+ Non-billable" or the lane itself.
+  const projectsWithNonBillable = useMemo(
+    () => new Set(rows.filter(r => !r.billable).map(r => r.projectId)),
+    [rows],
+  );
+
   const weeklyTotal = useMemo(
     () => rows.reduce((sum, row) => sum + Object.values(row.days).reduce((s, d) => s + d.hours, 0), 0),
     [rows],
@@ -365,12 +375,39 @@ export default function Timesheet() {
       }]);
       return;
     }
-    // Non-internal projects can carry both billable and non-billable hours, so
-    // add both lanes up front — no need to add the project twice or toggle.
+    // Billable is the default lane — the non-billable one only appears when
+    // activated via the "+ Non-billable" button on the row (handleAddNonBillableRow).
     setRows(prev => [...prev,
       { projectId: proj.id, projectName: proj.name, clientName: proj.clientName, isInternal: false, billable: true, days: {} },
-      { projectId: proj.id, projectName: proj.name, clientName: proj.clientName, isInternal: false, billable: false, days: {} },
     ]);
+  };
+
+  // Activates the non-billable lane for a project that only has its default
+  // billable row so far — inserted right under it so the two lanes stay
+  // grouped together instead of jumping to the bottom of the sheet.
+  const handleAddNonBillableRow = (projectId: string) => {
+    setRows(prev => {
+      if (prev.some(r => r.projectId === projectId && !r.billable)) return prev;
+      const idx = prev.findIndex(r => r.projectId === projectId && r.billable);
+      if (idx === -1) return prev;
+      const billableRow = prev[idx];
+      const next = [...prev];
+      next.splice(idx + 1, 0, {
+        projectId, projectName: billableRow.projectName, clientName: billableRow.clientName,
+        isInternal: false, billable: false, days: {},
+      });
+      return next;
+    });
+  };
+
+  // Un-activates just the non-billable lane (unlike handleRemoveRow, which
+  // drops the whole project) — queues any of its saved entries for deletion.
+  const handleRemoveNonBillableRow = (projectId: string) => {
+    const row = rows.find(r => r.projectId === projectId && !r.billable);
+    if (!row) return;
+    const idsToDelete = Object.values(row.days).filter(d => d.id).map(d => d.id!);
+    if (idsToDelete.length > 0) setPendingDeletions(prev => [...prev, ...idsToDelete]);
+    setRows(prev => prev.filter(r => !(r.projectId === projectId && !r.billable)));
   };
 
   const handleUpdateHours = (projectId: string, billable: boolean, dateStr: string, hours: number) => {
@@ -761,7 +798,7 @@ export default function Timesheet() {
                         </span>
                       )}
                       {!row.isInternal && (
-                        <div className="flex items-center gap-1.5 mt-1">
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                           <span className={`inline-flex items-center rounded-full px-1.5 py-0 text-[13px] font-semibold ${
                             row.billable
                               ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
@@ -769,6 +806,16 @@ export default function Timesheet() {
                           }`}>
                             {row.billable ? 'Billable' : 'Non-billable'}
                           </span>
+                          {row.billable && !projectsWithNonBillable.has(row.projectId) && (
+                            <button
+                              type="button"
+                              onClick={() => handleAddNonBillableRow(row.projectId)}
+                              className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50 hover:border-amber-500 transition-colors animate-in fade-in"
+                              title="Log non-billable hours for this project too"
+                            >
+                              <Plus className="h-3 w-3" /> Non-billable
+                            </button>
+                          )}
                         </div>
                       )}
                       {firstRowIdxByProject[row.projectId] === rowIdx && (
@@ -873,12 +920,14 @@ export default function Timesheet() {
                           <Button
                             variant="ghost" size="sm"
                             className="h-7 w-7 p-0 text-muted-foreground/40 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => handleRemoveRow(row.projectId)}
+                            onClick={() => row.billable || row.isInternal
+                              ? handleRemoveRow(row.projectId)
+                              : handleRemoveNonBillableRow(row.projectId)}
                           >
                             <X className="h-3.5 w-3.5" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>Remove project row</TooltipContent>
+                        <TooltipContent>{row.billable || row.isInternal ? 'Remove project' : 'Remove non-billable lane'}</TooltipContent>
                       </Tooltip>
                     </div>
                   </div>
