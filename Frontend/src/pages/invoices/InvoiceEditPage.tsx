@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums } from '@/hooks/useInvoices';
 import { useAuth } from '@/contexts/AuthContext';
-import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, MinHoursBasis, MIN_HOURS_BASIS_LABELS } from '@/types';
+import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, TimeDetailWeekPatch, InvoiceTimeDetailRow, MinHoursBasis, MIN_HOURS_BASIS_LABELS } from '@/types';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,6 +46,27 @@ type LocalExpense = Partial<InvoiceExpense> & {
   _tempId?: string;
 };
 
+// Time Detail rows are the source of truth for a line's hours/discount — the
+// Professionals table below only ever shows their sum (see syncLineFromWeeks).
+type LocalTimeDetailRow = InvoiceTimeDetailRow & {
+  _hours: number;
+  _hoursInput: string;
+  _discountType: 'amount' | 'percent';
+  _discountValue: number;
+  _discountInput: string;
+};
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function weekRowTotals(row: LocalTimeDetailRow, rate: number) {
+  const subtotal = row._hours * rate;
+  const discountDollars = row._discountType === 'percent' ? (subtotal * row._discountValue) / 100 : row._discountValue;
+  const total = Math.max(0, subtotal - discountDollars);
+  return { subtotal, discountDollars, total };
+}
+
 // Mirrors the backend's fallback (services/export_pdf.py) so the "Bill To"
 // fields start pre-filled with what the PDF would show today, not blank.
 function defaultBillTo(client: InvoiceEditData['client']) {
@@ -80,6 +101,7 @@ export default function InvoiceEditPage() {
 
   // Local editable state — initialized from server data
   const [lines, setLines] = useState<LocalLine[]>([]);
+  const [timeDetailRows, setTimeDetailRows] = useState<LocalTimeDetailRow[]>([]);
   const [expenses, setExpenses] = useState<LocalExpense[]>([]);
   const [status, setStatus] = useState('');
   const [capAmount, setCapAmount] = useState<string>('');
@@ -112,8 +134,8 @@ export default function InvoiceEditPage() {
   const [exportingXlsx, setExportingXlsx] = useState(false);
 
   const [isDirty, setIsDirty] = useState(false);
-  // Snapshot of lines before a save attempt — used for optimistic-revert on error
-  const saveSnapshot = useRef<LocalLine[]>([]);
+  // Snapshot of lines/time-detail before a save attempt — used for optimistic-revert on error
+  const saveSnapshot = useRef<{ lines: LocalLine[]; timeDetailRows: LocalTimeDetailRow[] }>({ lines: [], timeDetailRows: [] });
 
   // Signatories filtered by company (local config — no API call needed)
   const signatories = useMemo(() => getSignatoriesForCompany(ownerCompany), [ownerCompany]);
@@ -142,6 +164,16 @@ export default function InvoiceEditPage() {
         _rate: l.hourly_rate,
         _rateInput: String(l.hourly_rate),
         _originalHours: l.original_hours ?? l.hours,
+      }))
+    );
+    setTimeDetailRows(
+      (data.time_detail || []).map(r => ({
+        ...r,
+        _hours: r.hours,
+        _hoursInput: String(r.hours),
+        _discountType: r.discount_type || 'amount',
+        _discountValue: r.discount_value ?? 0,
+        _discountInput: String(r.discount_value ?? 0),
       }))
     );
     setExpenses(data.expenses.map(e => ({ ...e })));
@@ -178,10 +210,48 @@ export default function InvoiceEditPage() {
     setLines(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
   }, []);
 
-  const resetLine = useCallback((id: string) => {
-    setLines(prev => prev.map(l => l.id === id ? { ...l, _hours: l._originalHours, _hoursInput: String(l._originalHours) } : l));
+  // A line's hours/discount are now just the sum of its Time Detail weeks
+  // (see updateTimeDetailRow below) — this keeps the Professionals table's
+  // summary in sync after any weekly edit, without making it directly
+  // editable itself.
+  const syncLineFromWeeks = useCallback((lineId: string, weekRows: LocalTimeDetailRow[]) => {
+    const rate = lines.find(l => l.id === lineId)?._rate ?? weekRows[0]?.hourly_rate ?? 0;
+    const hours = round2(weekRows.reduce((s, r) => s + r._hours, 0));
+    const discountDollars = round2(weekRows.reduce((s, r) => s + weekRowTotals(r, rate).discountDollars, 0));
+    setLines(prev => prev.map(l => l.id === lineId
+      ? { ...l, _hours: hours, _hoursInput: String(hours), _discountType: 'amount', _discountValue: discountDollars, _discountInput: String(discountDollars) }
+      : l));
+  }, [lines]);
+
+  const updateTimeDetailRow = useCallback((lineId: string, weekStart: string, updates: Partial<LocalTimeDetailRow>) => {
     setIsDirty(true);
-  }, []);
+    setTimeDetailRows(prev => {
+      const next = prev.map(r => (r.line_id === lineId && r.week_start === weekStart) ? { ...r, ...updates } : r);
+      syncLineFromWeeks(lineId, next.filter(r => r.line_id === lineId));
+      return next;
+    });
+  }, [syncLineFromWeeks]);
+
+  // "Reset to original hours" — scales that line's weeks back up/down
+  // proportionally so their sum matches the originally-linked hours, keeping
+  // whatever relative split across weeks is currently shown.
+  const resetLine = useCallback((id: string) => {
+    setIsDirty(true);
+    setTimeDetailRows(prev => {
+      const lineRows = prev.filter(r => r.line_id === id);
+      if (lineRows.length === 0) return prev;
+      const target = lines.find(l => l.id === id)?._originalHours ?? 0;
+      const currentTotal = lineRows.reduce((s, r) => s + r._hours, 0);
+      const next = prev.map(r => {
+        if (r.line_id !== id) return r;
+        const share = currentTotal > 0 ? r._hours / currentTotal : 1 / lineRows.length;
+        const hours = round2(target * share);
+        return { ...r, _hours: hours, _hoursInput: String(hours) };
+      });
+      syncLineFromWeeks(id, next.filter(r => r.line_id === id));
+      return next;
+    });
+  }, [lines, syncLineFromWeeks]);
 
   // Group lines by role
   const groupedLines = useMemo(() => {
@@ -272,7 +342,7 @@ export default function InvoiceEditPage() {
   const handleSave = async () => {
     if (!invoiceId) return;
     // Take a snapshot for potential revert on error
-    saveSnapshot.current = lines;
+    saveSnapshot.current = { lines, timeDetailRows };
     try {
       const linePatches: InvoiceLinePatch[] = lines.map(l => ({
         id: l.id,
@@ -307,6 +377,14 @@ export default function InvoiceEditPage() {
           has_on_hold: l._hours < l._originalHours - 0.001,
         }));
 
+      const timeDetailWeekPatches: TimeDetailWeekPatch[] = timeDetailRows.map(r => ({
+        line_id: r.line_id,
+        week_start: r.week_start,
+        hours: r._hours,
+        discount_type: r._discountType,
+        discount_value: r._discountValue,
+      }));
+
       await patchInvoice.mutateAsync({
         id: invoiceId,
         patch: {
@@ -334,6 +412,7 @@ export default function InvoiceEditPage() {
           lines: linePatches,
           expenses: expensePatches,
           on_hold_entries: onHoldEntries,
+          time_detail_weeks: timeDetailWeekPatches,
         },
       });
       toast.success('Invoice saved.');
@@ -341,7 +420,8 @@ export default function InvoiceEditPage() {
       setInitialized(false); // reconcile state from server response
     } catch (err: any) {
       // Revert optimistic state
-      setLines(saveSnapshot.current);
+      setLines(saveSnapshot.current.lines);
+      setTimeDetailRows(saveSnapshot.current.timeDetailRows);
       toast.error(err?.message?.includes('422') ? 'Invalid data — check required fields.' : 'Error saving invoice.');
     }
   };
@@ -930,7 +1010,12 @@ export default function InvoiceEditPage() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">Professionals</CardTitle>
+              <div>
+                <CardTitle className="text-base">Professionals</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Hours and discounts are edited per week in Time Detail below — rate stays editable here.
+                </p>
+              </div>
               {isFixedFee && (
                 <Badge variant="outline" className="text-xs">
                   Fixed Fee — hours shown for reference only
@@ -982,27 +1067,9 @@ export default function InvoiceEditPage() {
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex flex-col items-end gap-0.5">
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    step="0.25"
-                                    value={line._hoursInput}
-                                    onFocus={e => e.target.select()}
-                                    onChange={e => {
-                                      const raw = e.target.value;
-                                      const num = parseFloat(raw);
-                                      updateLine(line.id, {
-                                        _hoursInput: raw,
-                                        ...(raw !== '' && !isNaN(num) ? { _hours: num } : {}),
-                                      });
-                                    }}
-                                    onBlur={e => {
-                                      const num = parseFloat(e.target.value);
-                                      const resolved = isNaN(num) ? 0 : num;
-                                      updateLine(line.id, { _hours: resolved, _hoursInput: String(resolved) });
-                                    }}
-                                    className="w-20 h-7 text-right text-sm"
-                                  />
+                                  <span className="text-sm tabular-nums" title="Sum of this professional's Time Detail weeks below — edit hours there.">
+                                    {line._hours.toFixed(2)}
+                                  </span>
                                   {line._hours < line._originalHours - 0.001 && (
                                     <div className="flex items-center gap-1">
                                       <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
@@ -1074,43 +1141,13 @@ export default function InvoiceEditPage() {
                                     ${subtotal.toFixed(2)}
                                   </TableCell>
                                   <TableCell>
-                                    <div className="space-y-1">
-                                      <div className="flex items-center gap-1">
-                                        <Input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          value={line._discountInput}
-                                          onFocus={e => e.target.select()}
-                                          onChange={e => {
-                                            const raw = e.target.value;
-                                            const num = parseFloat(raw);
-                                            updateLine(line.id, {
-                                              _discountInput: raw,
-                                              ...(raw !== '' && !isNaN(num) ? { _discountValue: num } : {}),
-                                            });
-                                          }}
-                                          onBlur={e => {
-                                            const num = parseFloat(e.target.value);
-                                            const resolved = isNaN(num) ? 0 : num;
-                                            updateLine(line.id, { _discountValue: resolved, _discountInput: String(resolved) });
-                                          }}
-                                          className="w-20 h-7 text-right text-sm"
-                                        />
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-7 px-2 text-xs font-mono"
-                                          onClick={() => updateLine(line.id, {
-                                            _discountType: line._discountType === 'amount' ? 'percent' : 'amount'
-                                          })}
-                                        >
-                                          {line._discountType === 'amount' ? '$' : '%'}
-                                        </Button>
-                                      </div>
+                                    <div className="space-y-0.5">
+                                      <span className="text-sm tabular-nums" title="Sum of this professional's Time Detail discounts below — edit discounts there.">
+                                        {discountDollars > 0 ? `$${discountDollars.toFixed(2)}` : '—'}
+                                      </span>
                                       {(discountDollars > 0) && (
                                         <div className="text-xs text-muted-foreground">
-                                          {discountHours.toFixed(2)} hrs / ${discountDollars.toFixed(2)}
+                                          {discountHours.toFixed(2)} hrs
                                         </div>
                                       )}
                                     </div>
@@ -1278,13 +1315,13 @@ export default function InvoiceEditPage() {
           </Card>
 
           {/* Time Detail — Attachment II (own page(s) of the PDF) */}
-          {(data.time_detail?.length ?? 0) > 0 && (
+          {timeDetailRows.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Time Detail (Attachment II)</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Hours per week per professional, from the time entries on this invoice. Printed on its own
-                  page(s) after the fees summary in the PDF. Reflects the last saved rates, hours and discounts.
+                  Hours and discount are edited per week per professional here — this drives that
+                  professional's totals above, and prints on its own page(s) after the fees summary in the PDF.
                 </p>
               </CardHeader>
               <CardContent className="p-0">
@@ -1295,33 +1332,103 @@ export default function InvoiceEditPage() {
                         <TableHead className="table-header">Week of</TableHead>
                         <TableHead className="table-header">Professional</TableHead>
                         <TableHead className="table-header text-right">Rate</TableHead>
-                        <TableHead className="table-header text-right">Hours</TableHead>
+                        <TableHead className="table-header text-right w-28">Hours</TableHead>
                         <TableHead className="table-header text-right">Subtotal</TableHead>
-                        <TableHead className="table-header text-right">Discount</TableHead>
+                        {!isFlatBilling && <TableHead className="table-header w-56">Discount</TableHead>}
                         <TableHead className="table-header text-right">Total</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.time_detail!.map(r => {
+                      {timeDetailRows.map(r => {
+                        const rate = lines.find(l => l.id === r.line_id)?._rate ?? r.hourly_rate;
+                        const { subtotal, discountDollars, total } = weekRowTotals(r, rate);
                         const [y, m, d] = r.week_start.split('-').map(Number);
                         return (
-                          <TableRow key={`${r.week_start}-${r.user_id}`}>
+                          <TableRow key={`${r.line_id}-${r.week_start}`}>
                             <TableCell className="tabular-nums">{`${m}/${d}/${String(y % 100).padStart(2, '0')}`}</TableCell>
                             <TableCell>{r.employee_name}{r.title ? `, ${r.title}` : ''}</TableCell>
-                            <TableCell className="text-right tabular-nums">${r.hourly_rate.toFixed(2)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{r.hours.toFixed(2)}</TableCell>
-                            <TableCell className="text-right tabular-nums">${r.subtotal.toFixed(2)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{r.discount > 0 ? `$${r.discount.toFixed(2)}` : '—'}</TableCell>
-                            <TableCell className="text-right tabular-nums font-medium">${r.total.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">${rate.toFixed(2)}</TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.25"
+                                value={r._hoursInput}
+                                onFocus={e => e.target.select()}
+                                onChange={e => {
+                                  const raw = e.target.value;
+                                  const num = parseFloat(raw);
+                                  updateTimeDetailRow(r.line_id, r.week_start, {
+                                    _hoursInput: raw,
+                                    ...(raw !== '' && !isNaN(num) ? { _hours: num } : {}),
+                                  });
+                                }}
+                                onBlur={e => {
+                                  const num = parseFloat(e.target.value);
+                                  const resolved = isNaN(num) ? 0 : num;
+                                  updateTimeDetailRow(r.line_id, r.week_start, { _hours: resolved, _hoursInput: String(resolved) });
+                                }}
+                                className="w-20 h-7 text-right text-sm ml-auto"
+                              />
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">${subtotal.toFixed(2)}</TableCell>
+                            {!isFlatBilling && (
+                              <TableCell>
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={r._discountInput}
+                                    onFocus={e => e.target.select()}
+                                    onChange={e => {
+                                      const raw = e.target.value;
+                                      const num = parseFloat(raw);
+                                      updateTimeDetailRow(r.line_id, r.week_start, {
+                                        _discountInput: raw,
+                                        ...(raw !== '' && !isNaN(num) ? { _discountValue: num } : {}),
+                                      });
+                                    }}
+                                    onBlur={e => {
+                                      const num = parseFloat(e.target.value);
+                                      const resolved = isNaN(num) ? 0 : num;
+                                      updateTimeDetailRow(r.line_id, r.week_start, { _discountValue: resolved, _discountInput: String(resolved) });
+                                    }}
+                                    className="w-20 h-7 text-right text-sm"
+                                  />
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs font-mono"
+                                    onClick={() => updateTimeDetailRow(r.line_id, r.week_start, {
+                                      _discountType: r._discountType === 'amount' ? 'percent' : 'amount',
+                                    })}
+                                  >
+                                    {r._discountType === 'amount' ? '$' : '%'}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            )}
+                            <TableCell className="text-right tabular-nums font-medium">${total.toFixed(2)}</TableCell>
                           </TableRow>
                         );
                       })}
                       <TableRow className="border-t-2 font-bold">
                         <TableCell colSpan={3}>Total</TableCell>
-                        <TableCell className="text-right tabular-nums">{data.time_detail!.reduce((s, r) => s + r.hours, 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right tabular-nums">${data.time_detail!.reduce((s, r) => s + r.subtotal, 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right tabular-nums">${data.time_detail!.reduce((s, r) => s + r.discount, 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right tabular-nums">${data.time_detail!.reduce((s, r) => s + r.total, 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {timeDetailRows.reduce((s, r) => s + r._hours, 0).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          ${timeDetailRows.reduce((s, r) => s + weekRowTotals(r, lines.find(l => l.id === r.line_id)?._rate ?? r.hourly_rate).subtotal, 0).toFixed(2)}
+                        </TableCell>
+                        {!isFlatBilling && (
+                          <TableCell className="text-right tabular-nums">
+                            ${timeDetailRows.reduce((s, r) => s + weekRowTotals(r, lines.find(l => l.id === r.line_id)?._rate ?? r.hourly_rate).discountDollars, 0).toFixed(2)}
+                          </TableCell>
+                        )}
+                        <TableCell className="text-right tabular-nums">
+                          ${timeDetailRows.reduce((s, r) => s + weekRowTotals(r, lines.find(l => l.id === r.line_id)?._rate ?? r.hourly_rate).total, 0).toFixed(2)}
+                        </TableCell>
                       </TableRow>
                     </TableBody>
                   </Table>

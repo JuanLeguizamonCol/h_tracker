@@ -1,5 +1,5 @@
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -31,7 +31,8 @@ from models.employees import Employee
 from models.user_roles import UserRole
 from models.invoice_time_entries import InvoiceTimeEntry
 from services.invoice_hours_on_hold import upsert_on_hold_entry, delete_on_hold_entry
-from services.invoice_time_detail import build_time_detail
+from services.invoice_time_detail import build_time_detail, week_start
+from models.invoice_line_weeks import InvoiceLineWeek
 from services.managed_services_breakdown import build_managed_services_breakdown, role_entries_by_role
 from models.invoice_role_minimums import InvoiceRoleMinimum
 from models.invoice_fees import InvoiceFee
@@ -299,7 +300,21 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
     linked_entries = db.query(TimeEntry.user_id, TimeEntry.date, TimeEntry.hours).join(
         InvoiceTimeEntry, InvoiceTimeEntry.time_entry_id == TimeEntry.id
     ).filter(InvoiceTimeEntry.invoice_id == invoice.id).all()
-    time_detail = build_time_detail(linked_entries, lines_out)
+
+    # Lines already edited per-week (see patch_invoice's time_detail_weeks) —
+    # those rows are that line's actual hours/discount, not just a display of
+    # them, so both the Time Detail panel and the Managed Services minimum-
+    # hours calc below use them instead of re-deriving a split.
+    line_ids = [ln["id"] for ln in lines_out]
+    saved_weeks_by_line: dict = {}
+    if line_ids:
+        for w in db.query(InvoiceLineWeek).filter(InvoiceLineWeek.invoice_line_id.in_(line_ids)).order_by(InvoiceLineWeek.week_start).all():
+            saved_weeks_by_line.setdefault(w.invoice_line_id, []).append({
+                "week_start": w.week_start, "hours": float(w.hours),
+                "discount_type": w.discount_type, "discount_value": float(w.discount_value),
+            })
+    fallback_week = week_start(invoice.period_end or invoice.period_start or date.today())
+    time_detail = build_time_detail(linked_entries, lines_out, saved_weeks_by_line, fallback_week)
 
     managed_services = None
     if project and project.is_managed_services:
@@ -311,7 +326,7 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
         }
         managed_services = build_managed_services_breakdown(
             project_roles, lines_out, invoice_fees,
-            role_entries_by_role(linked_entries, lines_out),
+            role_entries_by_role(linked_entries, lines_out, saved_weeks_by_line),
             invoice.period_start, invoice.period_end, overrides,
         )
 
@@ -572,6 +587,37 @@ def patch_invoice(
                     line.discount_value = line_patch.discount_value
                 # Recompute amount
                 line.amount = float(line.hours) * float(line.rate_snapshot)
+
+    # Update time detail (weekly hours/discount edits) — once a line has any
+    # saved weeks, they ARE its hours/discount from here on: the line's own
+    # hours/discount_type/discount_value become just their sum, overriding
+    # whatever the coarse `lines` patch above set for it. Runs after that
+    # loop specifically so it wins for lines present in both.
+    if patch_in.time_detail_weeks is not None:
+        weeks_by_line: dict = {}
+        for w in patch_in.time_detail_weeks:
+            weeks_by_line.setdefault(w.line_id, []).append(w)
+        lines_by_id = {ln.id: ln for ln in invoice.lines}
+        for line_id, weeks in weeks_by_line.items():
+            line = lines_by_id.get(line_id)
+            if not line:
+                raise HTTPException(status_code=400, detail="Line does not belong to this invoice")
+            db.query(InvoiceLineWeek).filter(InvoiceLineWeek.invoice_line_id == line_id).delete()
+            rate = float(line.rate_snapshot)
+            total_hours = 0.0
+            total_discount = 0.0
+            for w in weeks:
+                db.add(InvoiceLineWeek(
+                    invoice_line_id=line_id, week_start=w.week_start,
+                    hours=w.hours, discount_type=w.discount_type, discount_value=w.discount_value,
+                ))
+                total_hours += w.hours
+                subtotal = w.hours * rate
+                total_discount += (subtotal * w.discount_value / 100) if w.discount_type == "percent" else w.discount_value
+            line.hours = total_hours
+            line.discount_type = "amount"
+            line.discount_value = total_discount
+            line.amount = total_hours * rate
 
     # Recompute invoice subtotal/total from lines — unless this invoice bills a
     # single flat fee, in which case the fee amount IS the subtotal/total and

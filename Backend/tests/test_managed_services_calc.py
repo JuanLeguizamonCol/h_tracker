@@ -41,7 +41,7 @@ def test_breakdown_weekly_override():
     from services.managed_services_breakdown import build_managed_services_breakdown, role_entries_by_role
     role = N(id="r1", name="Dir", hourly_rate_usd=100, min_hours_enabled=True, min_hours=10,
              min_hours_basis="period", additional_hours_enabled=False, additional_hours_rate=None)
-    lines = [{"user_id": "u1", "role_id": "r1", "hours": 17, "original_hours": 17}]
+    lines = [{"id": "ln1", "user_id": "u1", "role_id": "r1", "hours": 17, "original_hours": 17}]
     entries = [("u1", date(2026, 8, 4), 15), ("u1", date(2026, 8, 12), 2)]
     by_role = role_entries_by_role(entries, lines)
     args = ([role], lines, [], by_role, date(2026, 8, 3), date(2026, 8, 16))

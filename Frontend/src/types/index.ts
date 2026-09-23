@@ -398,6 +398,7 @@ export interface InvoiceEditLine {
 }
 
 export interface InvoiceTimeDetailRow {
+  line_id: string;
   week_start: string;
   user_id: string;
   employee_name: string;
@@ -405,6 +406,8 @@ export interface InvoiceTimeDetailRow {
   hourly_rate: number;
   hours: number;
   subtotal: number;
+  discount_type: 'amount' | 'percent';
+  discount_value: number;
   discount: number;
   total: number;
 }
@@ -446,6 +449,14 @@ export interface InvoiceLinePatch {
   rate_snapshot?: number;
   discount_type?: 'amount' | 'percent' | null;
   discount_value?: number;
+}
+
+export interface TimeDetailWeekPatch {
+  line_id: string;
+  week_start: string;
+  hours: number;
+  discount_type: 'amount' | 'percent';
+  discount_value: number;
 }
 
 export interface InvoiceExpensePatch {
@@ -498,6 +509,7 @@ export interface InvoicePatch {
   lines?: InvoiceLinePatch[];
   expenses?: InvoiceExpensePatch[];
   on_hold_entries?: OnHoldEntryPatch[];
+  time_detail_weeks?: TimeDetailWeekPatch[];
 }
 
 export interface InvoiceHoursOnHold {

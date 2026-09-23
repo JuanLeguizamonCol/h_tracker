@@ -125,6 +125,7 @@ class InvoiceEditExpense(BaseModel):
 
 
 class InvoiceEditTimeDetail(BaseModel):
+    line_id: str
     week_start: date
     user_id: str
     employee_name: str
@@ -132,6 +133,8 @@ class InvoiceEditTimeDetail(BaseModel):
     hourly_rate: float
     hours: float
     subtotal: float
+    discount_type: str = "amount"
+    discount_value: float = 0
     discount: float
     total: float
 
@@ -201,6 +204,14 @@ class InvoiceExpensePatch(BaseModel):
     notes: Optional[str] = None
 
 
+class TimeDetailWeekPatch(BaseModel):
+    line_id: str
+    week_start: date
+    hours: float
+    discount_type: str = "amount"
+    discount_value: float = 0
+
+
 class OnHoldEntryPatch(BaseModel):
     line_id: str
     employee_name: str
@@ -241,6 +252,7 @@ class InvoicePatch(BaseModel):
     lines: Optional[List[InvoiceLinePatch]] = None
     expenses: Optional[List[InvoiceExpensePatch]] = None
     on_hold_entries: Optional[List[OnHoldEntryPatch]] = None
+    time_detail_weeks: Optional[List[TimeDetailWeekPatch]] = None
 
 
 class ManagedServicesRoleMinimum(BaseModel):

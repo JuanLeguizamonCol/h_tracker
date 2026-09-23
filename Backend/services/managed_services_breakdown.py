@@ -12,13 +12,30 @@ the one on the invoice itself.
 from services.managed_services_calc import compute_role_billing
 
 
-def role_entries_by_role(linked_entries, lines: list[dict]) -> dict[str, list]:
-    """Spread each employee's linked (date, hours) entries onto their line's
-    role, scaled so a role's total matches the hours actually billed on the
-    lines (hours on hold are already out of the line's hours)."""
-    line_by_user = {ln["user_id"]: ln for ln in lines if ln.get("user_id") and ln.get("role_id")}
+def role_entries_by_role(
+    linked_entries, lines: list[dict], saved_weeks_by_line: dict | None = None,
+) -> dict[str, list]:
+    """Spread each employee's hours onto their line's role, as dated
+    (date, hours) entries for services/managed_services_calc.py's weekly/
+    monthly bucketing. A line with saved weekly edits (see
+    services/invoice_time_detail.py) uses those directly — they're the exact
+    billed split. Every other line falls back to spreading its linked time
+    entries, scaled so the role's total matches the hours actually billed on
+    the line (hours on hold are already out of the line's hours)."""
+    saved_weeks_by_line = saved_weeks_by_line or {}
     out: dict[str, list] = {}
+
+    lines_with_saved_weeks = {ln["id"] for ln in lines if saved_weeks_by_line.get(ln["id"])}
+    for ln in lines:
+        if ln["id"] in lines_with_saved_weeks and ln.get("role_id"):
+            for w in saved_weeks_by_line[ln["id"]]:
+                out.setdefault(ln["role_id"], []).append((w["week_start"], float(w["hours"])))
+
+    users_covered = {ln["user_id"] for ln in lines if ln["id"] in lines_with_saved_weeks}
+    line_by_user = {ln["user_id"]: ln for ln in lines if ln.get("user_id") and ln.get("role_id")}
     for user_id, d, h in linked_entries:
+        if user_id in users_covered:
+            continue  # already covered by that line's saved weeks, above
         ln = line_by_user.get(user_id)
         if not ln:
             continue

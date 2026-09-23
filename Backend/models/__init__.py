@@ -9,6 +9,7 @@ from models.time_entries import TimeEntry
 from models.project_expenses import ProjectExpense
 from models.invoice import Invoice
 from models.invoice_lines import InvoiceLine
+from models.invoice_line_weeks import InvoiceLineWeek
 from models.invoice_manual_lines import InvoiceManualLine
 from models.invoice_fees import InvoiceFee
 from models.invoice_fee_attachments import InvoiceFeeAttachment
