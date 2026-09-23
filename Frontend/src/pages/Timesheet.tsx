@@ -798,7 +798,7 @@ export default function Timesheet() {
                         </span>
                       )}
                       {!row.isInternal && (
-                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <div className="flex items-center gap-1.5 mt-1">
                           <span className={`inline-flex items-center rounded-full px-1.5 py-0 text-[13px] font-semibold ${
                             row.billable
                               ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
@@ -806,17 +806,17 @@ export default function Timesheet() {
                           }`}>
                             {row.billable ? 'Billable' : 'Non-billable'}
                           </span>
-                          {row.billable && !projectsWithNonBillable.has(row.projectId) && (
-                            <button
-                              type="button"
-                              onClick={() => handleAddNonBillableRow(row.projectId)}
-                              className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50 hover:border-amber-500 transition-colors animate-in fade-in"
-                              title="Log non-billable hours for this project too"
-                            >
-                              <Plus className="h-3 w-3" /> Non-billable
-                            </button>
-                          )}
                         </div>
+                      )}
+                      {row.billable && !row.isInternal && !projectsWithNonBillable.has(row.projectId) && (
+                        <button
+                          type="button"
+                          onClick={() => handleAddNonBillableRow(row.projectId)}
+                          className="inline-flex items-center gap-1 self-start rounded-md bg-amber-500 hover:bg-amber-600 active:bg-amber-700 px-2.5 py-1 mt-1.5 text-xs font-bold text-white shadow-sm hover:shadow transition-colors animate-in fade-in"
+                          title="Log non-billable hours for this project too"
+                        >
+                          <Plus className="h-3.5 w-3.5 stroke-[3]" /> Non-billable
+                        </button>
                       )}
                       {firstRowIdxByProject[row.projectId] === rowIdx && (
                         <button
