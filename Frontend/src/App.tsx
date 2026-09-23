@@ -74,7 +74,7 @@ const App = () => (
               <Route path="/invoices/new/manual" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceManualPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices/:invoiceId/edit" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceEditPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
               <Route path="/invoices/:invoiceId" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceDetailPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/reports" element={<ProtectedRoute><MainLayout><Reports /></MainLayout></ProtectedRoute>} />
+              <Route path="/reports" element={<ProtectedRoute><MainLayout><AdminGuard><Reports /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><MainLayout><ProfilePage /></MainLayout></ProtectedRoute>} />
               {/* Legacy routes */}
               <Route path="/historial" element={<Navigate to="/history" replace />} />

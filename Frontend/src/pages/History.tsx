@@ -7,7 +7,7 @@ import { useProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useTimeEntriesByDateRange } from '@/hooks/useTimeEntries';
-import { useAllProjectRoles } from '@/hooks/useProjectRoles';
+import { useAllProjectRoleNames } from '@/hooks/useProjectRoles';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
@@ -47,7 +47,7 @@ export default function History() {
   const { data: projects = [] } = useProjects();
   const { data: clients = [] } = useClients();
   const { data: employees = [] } = useEmployees();
-  const { data: allRoles = [] } = useAllProjectRoles();
+  const { data: allRoles = [] } = useAllProjectRoleNames();
 
   // Fetched scope: everyone's entries for admins (multi-select employee/project
   // filtering happens client-side below, since /time-entries only takes a single

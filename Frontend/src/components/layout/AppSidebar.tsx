@@ -26,14 +26,15 @@ const adminNavigationItems = [
 const managerNavigationItems = adminNavigationItems.filter(item => item.title !== 'Invoices');
 
 // Staffing is visible read-only to everyone — only Admin/Manager can edit an
-// assignment inline (see StaffingPage's canManage gate).
+// assignment inline (see StaffingPage's canManage gate). Reports is Manager/
+// Admin only (see App.tsx's AdminGuard on /reports) — it surfaces everyone's
+// hours and staffing across the company, not just the viewer's own.
 const employeeNavigationItems = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboard },
   { title: 'Weekly Log', url: '/timesheet', icon: Clock },
   { title: 'History', url: '/history', icon: Calendar },
   { title: 'My Profile', url: '/profile', icon: UserCircle },
   { title: 'Staffing', url: '/staffing', icon: Users2 },
-  { title: 'Reports', url: '/reports', icon: BarChart3 },
 ];
 
 export function AppSidebar() {

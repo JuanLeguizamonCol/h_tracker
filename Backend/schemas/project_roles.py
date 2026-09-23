@@ -37,3 +37,15 @@ class ProjectRoleOut(ProjectRoleBase):
 
     id: str
     created_at: datetime
+
+
+class ProjectRoleNameOut(BaseModel):
+    """Id/name only — no rate or Managed Services fields. For non-admin
+    consumers that just need to label a role (e.g. History's role-name
+    lookup, Staffing's assignment dropdowns) without exposing billing rates,
+    which are Admin-only (see routers/project_roles.py)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    name: str

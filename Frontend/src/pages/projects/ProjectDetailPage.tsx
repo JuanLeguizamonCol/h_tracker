@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   useProject, useProjectAssignments,
 } from '@/hooks/useProjects';
-import { useProjectRoles, useCreateProjectRole, useUpdateProjectRole, useDeleteProjectRole } from '@/hooks/useProjectRoles';
+import { useProjectRoles, useProjectRoleNames, useCreateProjectRole, useUpdateProjectRole, useDeleteProjectRole } from '@/hooks/useProjectRoles';
 import { useSkillCatalog } from '@/hooks/useSkills';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
@@ -128,7 +128,12 @@ export default function ProjectDetailPage() {
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>
           <TabsTrigger value="overview" className="gap-1.5"><LayoutDashboard className="h-4 w-4" /> Overview</TabsTrigger>
-          <TabsTrigger value="roles" className="gap-1.5"><Tag className="h-4 w-4" /> Roles & Rates</TabsTrigger>
+          {/* Rates are Admin-only (see routers/project_roles.py) — hidden
+              from the tab bar entirely for everyone else, not just the
+              edit controls within it. */}
+          {isAdmin && (
+            <TabsTrigger value="roles" className="gap-1.5"><Tag className="h-4 w-4" /> Roles & Rates</TabsTrigger>
+          )}
           <TabsTrigger value="assignments" className="gap-1.5"><Users className="h-4 w-4" /> Assignments</TabsTrigger>
         </TabsList>
 
@@ -175,9 +180,11 @@ export default function ProjectDetailPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="roles" className="mt-4">
-          <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} canEdit={isAdmin} /></CardContent></Card>
-        </TabsContent>
+        {isAdmin && (
+          <TabsContent value="roles" className="mt-4">
+            <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} canEdit={isAdmin} /></CardContent></Card>
+          </TabsContent>
+        )}
 
         <TabsContent value="assignments" className="mt-4">
           <Card><CardContent className="pt-6"><ProjectAssignmentsPanel projectId={project.id} canEdit={isAdmin} /></CardContent></Card>
@@ -531,7 +538,11 @@ function ManageRequiredSkillsDialog({
 function ProjectAssignmentsPanel({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
   const queryClient = useQueryClient();
   const { data: assignments = [], isLoading } = useProjectAssignments(projectId);
-  const { data: roles = [] } = useProjectRoles(projectId);
+  // Name-only — safe for every viewer of this page (no route guard). Rates
+  // are Admin-only, fetched separately below just for the rate-editing
+  // dropdown, which itself only renders when canEdit (Admin) is true.
+  const { data: roles = [] } = useProjectRoleNames(projectId);
+  const { data: rolesWithRates = [] } = useProjectRoles(canEdit ? projectId : undefined);
 
   // ── Skill filter state ──
   type SkillChip = { id: string; name: string };
@@ -906,7 +917,7 @@ function ProjectAssignmentsPanel({ projectId, canEdit }: { projectId: string; ca
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__">No role</SelectItem>
-                        {roles.map(role => (
+                        {rolesWithRates.map(role => (
                           <SelectItem key={role.id} value={role.id}>
                             {role.name} — ${Number(role.hourly_rate_usd)}/h
                           </SelectItem>

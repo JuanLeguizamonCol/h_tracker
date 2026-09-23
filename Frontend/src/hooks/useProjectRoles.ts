@@ -1,7 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { ProjectRole } from '@/types';
+import { ProjectRole, ProjectRoleName } from '@/types';
 
+// Rates (hourly_rate_usd, additional_hours_rate) — Admin only, 403s for
+// everyone else. For a non-admin-safe id/name lookup, use
+// useProjectRoleNames / useAllProjectRoleNames below instead.
 export function useProjectRoles(projectId?: string) {
   return useQuery({
     queryKey: ['project-roles', projectId],
@@ -14,6 +17,24 @@ export function useAllProjectRoles() {
   return useQuery({
     queryKey: ['project-roles', 'all'],
     queryFn: () => api.get<ProjectRole[]>('/project-roles'),
+  });
+}
+
+// Id/name only, no rate — open to any authenticated employee (see
+// GET /project-roles/names). Use this to label a role (dropdowns, lookups)
+// anywhere the viewer might not be an Admin.
+export function useProjectRoleNames(projectId?: string) {
+  return useQuery({
+    queryKey: ['project-roles', 'names', projectId],
+    enabled: !!projectId,
+    queryFn: () => api.get<ProjectRoleName[]>(`/project-roles/names?project_id=${projectId}`),
+  });
+}
+
+export function useAllProjectRoleNames() {
+  return useQuery({
+    queryKey: ['project-roles', 'names', 'all'],
+    queryFn: () => api.get<ProjectRoleName[]>('/project-roles/names'),
   });
 }
 

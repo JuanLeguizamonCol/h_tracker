@@ -249,6 +249,14 @@ export interface ProjectRole {
   created_at: string;
 }
 
+// Id/name only, no rate — for non-admin consumers that just need to label a
+// role (rates are Admin-only, see GET /project-roles/names).
+export interface ProjectRoleName {
+  id: string;
+  project_id: string;
+  name: string;
+}
+
 export interface ProjectExpense {
   id: string;
   project_id: string;

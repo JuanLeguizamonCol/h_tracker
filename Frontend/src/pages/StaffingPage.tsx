@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useActiveProjects, useCreateProject } from '@/hooks/useProjects';
 import { useActiveClients, useCreateClient } from '@/hooks/useClients';
-import { useProjectRoles, useAllProjectRoles, useCreateProjectRole } from '@/hooks/useProjectRoles';
+import { useProjectRoleNames, useAllProjectRoleNames, useCreateProjectRole } from '@/hooks/useProjectRoles';
 import { useStaffing, useCreateAssignment, useUpdateAssignment, useDeleteAssignment } from '@/hooks/useAssignedProjects';
 import { StaffingAssignment } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -71,7 +71,7 @@ export default function StaffingPage() {
   const { data: employees = [], isLoading: employeesLoading } = useEmployees();
   const { data: allActiveProjects = [], isLoading: projectsLoading } = useActiveProjects();
   const { data: staffing = [], isLoading: staffingLoading } = useStaffing();
-  const { data: allProjectRoles = [] } = useAllProjectRoles();
+  const { data: allProjectRoles = [] } = useAllProjectRoleNames();
   const { data: activeClients = [] } = useActiveClients();
   const clientOptions = useMemo(
     () => activeClients.map(c => ({ id: c.id, label: c.name })),
@@ -191,7 +191,7 @@ export default function StaffingPage() {
     }
   }
 
-  const { data: projectRoles = [] } = useProjectRoles(form.projectId || undefined);
+  const { data: projectRoles = [] } = useProjectRoleNames(form.projectId || undefined);
 
   const activeEmployees = useMemo(() => employees.filter(e => e.is_active), [employees]);
   const employeeById = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees]);

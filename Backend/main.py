@@ -77,7 +77,7 @@ app.include_router(auth_router)  # public — login / register
 app.include_router(clients_router, dependencies=auth_deps)
 app.include_router(employees_router, dependencies=auth_deps)
 app.include_router(projects_router, dependencies=auth_deps)
-app.include_router(project_roles_router, dependencies=auth_deps)
+app.include_router(project_roles_router, dependencies=auth_deps)  # rates are Admin-only — see per-route dependencies in the router itself
 app.include_router(user_roles_router, dependencies=auth_deps)
 app.include_router(employee_projects_router, dependencies=auth_deps)
 app.include_router(time_entries_router, dependencies=auth_deps)
