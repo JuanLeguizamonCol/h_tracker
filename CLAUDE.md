@@ -397,7 +397,7 @@ endpoint de generación masiva): fue eliminada por completo, junto con los campo
 
 ### jobs/send_timesheet_reminders.py
 Entrypoint de una sola ejecución (`python -m jobs.send_timesheet_reminders`), corre
-como **Azure Container Apps Job** aparte (cron semanal — lunes 08:00 America/Bogota,
+como **Azure Container Apps Job** aparte (cron semanal — viernes 08:00 America/Bogota,
 `infra/main.bicep::timesheetReminderJob`). Llama a
 `services/timesheet_reminders.py::send_timesheet_reminders`, que le envía un correo
 a todo empleado activo sin ninguna hora registrada en los últimos 7 días (excluye a

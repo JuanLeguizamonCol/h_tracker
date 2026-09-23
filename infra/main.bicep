@@ -576,7 +576,12 @@ resource frontendApp 'Microsoft.App/containerApps@2024-03-01' = {
 // backend replicas are running; no DB-level idempotency guard is needed here
 // since it only sends email, never writes rows.
 //
-// cronExpression is UTC. '0 13 * * 1' = 13:00 UTC Monday = 08:00 America/Bogota.
+// cronExpression is UTC. '0 13 * * 5' = 13:00 UTC Friday = 08:00 America/Bogota.
+//
+// FRONTEND_URL is set directly (frontendApp and this Job are siblings in the
+// same deployment, so its FQDN is already known here — no placeholder/patch
+// step needed like backendApp's CORS_ORIGINS) so the "Log my hours" button in
+// the email (utils/email_html.py::action_button) actually renders a link.
 //
 // NOTE: like the backend app, this job only gets outbound email if SMTP_HOST /
 // SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_EMAIL (see utils/email.py) are
@@ -596,7 +601,7 @@ resource timesheetReminderJob 'Microsoft.App/jobs@2024-03-01' = {
       replicaTimeout: 900           // 15 min hard cap per run
       replicaRetryLimit: 1
       scheduleTriggerConfig: {
-        cronExpression: '0 13 * * 1'
+        cronExpression: '0 13 * * 5'
         parallelism: 1
         replicaCompletionCount: 1
       }
@@ -636,6 +641,10 @@ resource timesheetReminderJob 'Microsoft.App/jobs@2024-03-01' = {
             {
               name: 'DATABASE_URL'
               secretRef: 'database-url'
+            }
+            {
+              name: 'FRONTEND_URL'
+              value: 'https://${frontendApp.properties.configuration.ingress.fqdn}'
             }
           ]
         }
