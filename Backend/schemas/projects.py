@@ -1,7 +1,10 @@
 # schemas/projects.py
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import date, datetime
+
+# What a fixed-fee amount is per — see services/fixed_fee_calc.py.
+FixedFeePeriod = Literal["project", "week", "month"]
 
 
 class ProjectBase(BaseModel):
@@ -27,6 +30,7 @@ class ProjectBase(BaseModel):
     owner_company: str = "IPC"
     is_fixed_fee: bool = False
     fixed_fee_amount: Optional[float] = None
+    fixed_fee_period: FixedFeePeriod = "project"
     is_managed_services: bool = False
     managed_services_min_hours: Optional[float] = None
 
@@ -56,6 +60,7 @@ class ProjectUpdate(BaseModel):
     owner_company: Optional[str] = None
     is_fixed_fee: Optional[bool] = None
     fixed_fee_amount: Optional[float] = None
+    fixed_fee_period: Optional[FixedFeePeriod] = None
     is_managed_services: Optional[bool] = None
     managed_services_min_hours: Optional[float] = None
 
@@ -87,6 +92,7 @@ class ProjectOut(BaseModel):
     owner_company: str = "IPC"
     is_fixed_fee: bool = False
     fixed_fee_amount: Optional[float] = None
+    fixed_fee_period: FixedFeePeriod = "project"
     is_managed_services: bool = False
     managed_services_min_hours: Optional[float] = None
 

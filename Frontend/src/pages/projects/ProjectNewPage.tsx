@@ -7,7 +7,8 @@ import { useActiveClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Employee, ProjectRole, MinHoursBasis, MIN_HOURS_BASIS_LABELS } from '@/types';
+import { Employee, ProjectRole, MinHoursBasis, MIN_HOURS_BASIS_LABELS, FixedFeePeriod } from '@/types';
+import { FixedFeePeriodPicker, fixedFeeAmountLabel } from '@/components/FixedFeePeriodPicker';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -45,6 +46,7 @@ interface Step1Form {
   owner_company: string;
   is_fixed_fee: boolean;
   fixed_fee_amount: string;
+  fixed_fee_period: FixedFeePeriod;
   is_managed_services: boolean;
   managed_services_min_hours: string;
 }
@@ -110,6 +112,7 @@ export default function ProjectNewPage() {
     owner_company: 'IPC',
     is_fixed_fee: false,
     fixed_fee_amount: '',
+    fixed_fee_period: 'project',
     is_managed_services: false,
     managed_services_min_hours: '',
   });
@@ -225,6 +228,7 @@ export default function ProjectNewPage() {
         owner_company: form.owner_company,
         is_fixed_fee: form.is_fixed_fee,
         fixed_fee_amount: form.is_fixed_fee && form.fixed_fee_amount ? parseFloat(form.fixed_fee_amount) : undefined,
+        fixed_fee_period: form.is_fixed_fee ? form.fixed_fee_period : 'project',
         is_managed_services: form.is_managed_services,
       } as any);
 
@@ -528,21 +532,25 @@ export default function ProjectNewPage() {
                 <div>
                   <Label>Fixed fee project</Label>
                   <p className="text-xs text-muted-foreground">
-                    Bills a single flat fee regardless of hours worked. Invoices for this project will only show hours for reference.
+                    Bills a flat fee regardless of hours worked — for the whole project, or a fixed rate per week or per month.
+                    Invoices for this project will only show hours for reference.
                   </p>
                 </div>
               </div>
               {form.is_fixed_fee && (
-                <div className="space-y-1 max-w-xs">
-                  <Label>Fixed Fee Amount ($) *</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.fixed_fee_amount}
-                    onChange={e => set('fixed_fee_amount', e.target.value)}
-                    placeholder="0.00"
-                  />
+                <div className="space-y-3">
+                  <FixedFeePeriodPicker value={form.fixed_fee_period} onChange={v => set('fixed_fee_period', v)} />
+                  <div className="space-y-1 max-w-xs">
+                    <Label>{fixedFeeAmountLabel(form.fixed_fee_period)} *</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.fixed_fee_amount}
+                      onChange={e => set('fixed_fee_amount', e.target.value)}
+                      placeholder="0.00"
+                    />
+                  </div>
                 </div>
               )}
 

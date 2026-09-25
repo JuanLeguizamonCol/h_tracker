@@ -13,6 +13,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { FixedFeePeriod } from '@/types';
+import {
+  FixedFeePeriodPicker, fixedFeeAmountLabel, formatFeeUnits, fixedFeeErrorMessage,
+} from '@/components/FixedFeePeriodPicker';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
 type CheckResult = {
@@ -42,6 +47,13 @@ export default function InvoiceNewPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
+  // Fixed fee is chosen per invoice (pre-filled from the project): whole
+  // project, or a weekly / monthly rate applied to the days picked below.
+  const [feeOn, setFeeOn] = useState(false);
+  const [feePeriod, setFeePeriod] = useState<FixedFeePeriod>('project');
+  const [feeAmount, setFeeAmount] = useState('');
+  const [feePreview, setFeePreview] = useState<{ units: number; total: number } | null>(null);
+  const [feeError, setFeeError] = useState('');
 
   // Only projects the current user is allowed to invoice: super admins see
   // every project; everyone else sees the ones they own, plus legacy
@@ -72,6 +84,32 @@ export default function InvoiceNewPage() {
     [activeProjects, selectedProjectId]
   );
 
+  // A project's own fixed-fee setup is just the starting point for this invoice.
+  useEffect(() => {
+    if (!selectedProject) return;
+    setFeeOn(!!selectedProject.is_fixed_fee && !selectedProject.is_managed_services);
+    setFeePeriod(selectedProject.fixed_fee_period || 'project');
+    setFeeAmount(selectedProject.fixed_fee_amount != null ? String(selectedProject.fixed_fee_amount) : '');
+  }, [selectedProject?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // What the fee comes to for the days selected — computed by the backend so the
+  // date math lives in one place.
+  useEffect(() => {
+    setFeePreview(null);
+    setFeeError('');
+    const amount = parseFloat(feeAmount);
+    if (!feeOn || !(amount > 0)) return;
+    if (feePeriod !== 'project' && (!periodStart || !periodEnd)) return;
+    let cancelled = false;
+    const params = new URLSearchParams({ period: feePeriod, unit_amount: String(amount) });
+    if (periodStart) params.set('period_start', periodStart);
+    if (periodEnd) params.set('period_end', periodEnd);
+    api.get<{ units: number; total: number }>(`/invoices/fixed-fee-preview?${params.toString()}`)
+      .then(res => { if (!cancelled) setFeePreview(res); })
+      .catch(err => { if (!cancelled) setFeeError(fixedFeeErrorMessage(err)); });
+    return () => { cancelled = true; };
+  }, [feeOn, feePeriod, feeAmount, periodStart, periodEnd]);
+
   // Auto-check hours whenever the project or the chosen period changes
   useEffect(() => {
     if (!selectedProjectId) {
@@ -91,13 +129,37 @@ export default function InvoiceNewPage() {
     return () => { cancelled = true; };
   }, [selectedProjectId, periodStart, periodEnd]);
 
+  const isManagedServices = !!selectedProject?.is_managed_services;
+
+  const applyFixedFee = async (invoiceId: string) => {
+    if (!feePreview) return;
+    await updateInvoice.mutateAsync({
+      id: invoiceId,
+      updates: {
+        fixed_fee_period: feePeriod,
+        fixed_fee_unit_amount: parseFloat(feeAmount),
+        fixed_fee_amount: feePreview.total,
+        subtotal: feePreview.total,
+        total: feePreview.total,
+      },
+    });
+  };
+
+  // Weekly / monthly fees are priced from the days picked, so those are required.
+  const needsDays = feeOn && feePeriod !== 'project';
+  const feeBlocked = feeOn && !feePreview;
+
   const doCreateInvoice = async () => {
     if (selectedProject?.status === 'on_hold') {
       toast.error('This project is on hold — reactivate it before invoicing.');
       return;
     }
-    if (selectedProject?.is_fixed_fee && !selectedProject.fixed_fee_amount) {
-      toast.error('This project is marked fixed-fee but has no fee amount set. Add one on the project before invoicing.');
+    if (feeOn && !(parseFloat(feeAmount) > 0)) {
+      toast.error('Enter the fixed fee amount.');
+      return;
+    }
+    if (feeOn && !feePreview) {
+      toast.error(feeError || 'Select the first and last day to bill.');
       return;
     }
     if (periodStart && periodEnd && periodStart > periodEnd) {
@@ -148,9 +210,7 @@ export default function InvoiceNewPage() {
           employeeHours[entry.user_id].entryIds.push(entry.id);
         });
 
-        const isFixedFee = !!selectedProject?.is_fixed_fee;
-        const isManagedServices = !!selectedProject?.is_managed_services;
-        const isFlatBilling = isFixedFee || isManagedServices;
+        const isFlatBilling = feeOn || isManagedServices;
 
         const lineData = Object.values(employeeHours).map(eh => {
           const roleId = assignmentMap.get(eh.userId);
@@ -172,12 +232,8 @@ export default function InvoiceNewPage() {
         const timeEntryIds = Object.values(employeeHours).flatMap(eh => eh.entryIds);
         await linkTimeEntries.mutateAsync({ invoice_id: invoice.id, time_entry_ids: timeEntryIds });
 
-        if (isFixedFee && selectedProject?.fixed_fee_amount) {
-          const feeVal = Number(selectedProject.fixed_fee_amount);
-          await updateInvoice.mutateAsync({
-            id: invoice.id,
-            updates: { fixed_fee_amount: feeVal, subtotal: feeVal, total: feeVal },
-          });
+        if (feeOn) {
+          await applyFixedFee(invoice.id);
         } else if (isManagedServices) {
           // Per-role minimums (weekly / monthly / per period) are priced by the
           // backend — see services/managed_services_calc.py. It runs after the
@@ -237,6 +293,9 @@ export default function InvoiceNewPage() {
           const subtotalVal = lineData.reduce((sum, l) => sum + l.amount, 0);
           await updateInvoice.mutateAsync({ id: invoice.id, updates: { subtotal: subtotalVal, total: subtotalVal } });
         }
+      } else if (feeOn) {
+        // No hours in the period — the fee still bills.
+        await applyFixedFee(invoice.id);
       }
 
       toast.success('Invoice created.');
@@ -307,9 +366,51 @@ export default function InvoiceNewPage() {
             />
           </div>
 
+          {selectedProject && selectedProject.status !== 'on_hold' && !isManagedServices && (
+            <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+              <div className="flex items-center gap-3">
+                <Switch checked={feeOn} onCheckedChange={setFeeOn} />
+                <div>
+                  <Label>Fixed fee</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Bill a flat fee instead of hours × rate — for the whole project, or per week / per month.
+                    Hours are still listed for reference.
+                  </p>
+                </div>
+              </div>
+              {feeOn && (
+                <div className="space-y-3">
+                  <FixedFeePeriodPicker value={feePeriod} onChange={setFeePeriod} />
+                  <div className="space-y-1 max-w-xs">
+                    <Label>{fixedFeeAmountLabel(feePeriod)} *</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={feeAmount}
+                      onChange={e => setFeeAmount(e.target.value)}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  {feePreview ? (
+                    <p className="text-sm font-semibold">
+                      {feePeriod === 'project'
+                        ? `Flat fee: $${feePreview.total.toFixed(2)}`
+                        : `${formatFeeUnits(feePreview.units, feePeriod)} × $${parseFloat(feeAmount).toFixed(2)} = $${feePreview.total.toFixed(2)}`}
+                    </p>
+                  ) : feeError ? (
+                    <p className="text-xs text-destructive">{feeError}</p>
+                  ) : needsDays ? (
+                    <p className="text-xs text-muted-foreground">Select the first and last day to bill below.</p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          )}
+
           {selectedProject?.status !== 'on_hold' && (
             <div className="space-y-2">
-              <Label>Period (optional)</Label>
+              <Label>{needsDays ? 'Days to bill *' : 'Period (optional)'}</Label>
               <div className="grid grid-cols-2 gap-3">
                 <Input
                   type="date"
@@ -325,8 +426,12 @@ export default function InvoiceNewPage() {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Leave blank to pull every pending billable hour regardless of date. Set a range when
-                this invoice doesn't cover a full calendar month.
+                {needsDays
+                  ? feePeriod === 'week'
+                    ? 'The fee bills once for every Monday–Sunday week these days touch. Only hours logged on these days are included.'
+                    : 'The fee is prorated by the days of each month included. Only hours logged on these days are included.'
+                  : `Leave blank to pull every pending billable hour regardless of date. Set a range when
+                this invoice doesn't cover a full calendar month.`}
               </p>
             </div>
           )}
@@ -375,7 +480,25 @@ export default function InvoiceNewPage() {
                 <Button variant="outline" onClick={() => navigate('/invoices')} className="flex-1">
                   Cancel
                 </Button>
-                <Button onClick={doCreateInvoice} disabled={isCreating} className="flex-1">
+                <Button onClick={doCreateInvoice} disabled={isCreating || feeBlocked} className="flex-1">
+                  {isCreating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Create Invoice
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Fixed fee with no hours in the period — the fee still bills */}
+          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult && !checkResult.has_entries && feeOn && (
+            <div className="rounded-lg border p-4 space-y-3">
+              <p className="text-sm text-muted-foreground">
+                No unbilled hours were found for these days. The invoice will carry just the fixed fee.
+              </p>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" onClick={() => navigate('/invoices')} className="flex-1">
+                  Cancel
+                </Button>
+                <Button onClick={doCreateInvoice} disabled={isCreating || feeBlocked} className="flex-1">
                   {isCreating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   Create Invoice
                 </Button>
@@ -384,7 +507,7 @@ export default function InvoiceNewPage() {
           )}
 
           {/* No hours — inline warning */}
-          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult && !checkResult.has_entries && (
+          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult && !checkResult.has_entries && !feeOn && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 p-4 space-y-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />

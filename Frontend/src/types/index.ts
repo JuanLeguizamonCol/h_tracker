@@ -211,9 +211,19 @@ export interface Project {
   owner_company: string;
   is_fixed_fee: boolean;
   fixed_fee_amount: number | null;
+  fixed_fee_period: FixedFeePeriod;
   is_managed_services: boolean;
   managed_services_min_hours: number | null;
 }
+
+/** What a fixed-fee amount is per: one flat fee, a weekly rate or a monthly rate. */
+export type FixedFeePeriod = 'project' | 'week' | 'month';
+
+export const FIXED_FEE_PERIOD_LABELS: Record<FixedFeePeriod, string> = {
+  project: 'Whole project',
+  week: 'Per week',
+  month: 'Per month',
+};
 
 export interface ProjectCategory {
   id: string;
@@ -348,6 +358,10 @@ export interface Invoice {
   total: number;
   cap_amount: number | null;
   fixed_fee_amount: number | null;
+  /** Set on invoices created as a fixed fee; null on Managed Services and older invoices. */
+  fixed_fee_period?: FixedFeePeriod | null;
+  /** The per-week / per-month rate; fixed_fee_amount is the total for the period. */
+  fixed_fee_unit_amount?: number | null;
   managed_services_min_hours: number | null;
   notes: string | null;
   invoice_number: string | null;

@@ -40,6 +40,9 @@ class Project(Base):
     owner_company = Column(String(10), nullable=False, default='IPC')
     is_fixed_fee = Column(Boolean, nullable=False, default=False)
     fixed_fee_amount = Column(Numeric(10, 2), nullable=True)
+    # What fixed_fee_amount is per: 'project' (one flat fee), 'week' or 'month'.
+    # Only the default New Invoice pre-fills — the invoice keeps its own copy.
+    fixed_fee_period = Column(String(10), nullable=False, default="project")
     # Managed Services: bills a minimum hours package (at the project's
     # blended employee rate) — hours below the minimum still bill the
     # minimum; hours above it bill the actual hours worked.

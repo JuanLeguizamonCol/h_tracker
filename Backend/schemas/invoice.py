@@ -3,6 +3,8 @@ from pydantic import BaseModel, ConfigDict
 from typing import Literal, Optional, List
 from datetime import date, datetime
 
+from schemas.projects import FixedFeePeriod
+
 
 class InvoiceBase(BaseModel):
     project_id: str
@@ -23,6 +25,8 @@ class InvoiceUpdate(BaseModel):
     total: Optional[float] = None
     cap_amount: Optional[float] = None
     fixed_fee_amount: Optional[float] = None
+    fixed_fee_period: Optional[FixedFeePeriod] = None
+    fixed_fee_unit_amount: Optional[float] = None
     managed_services_min_hours: Optional[float] = None
     issue_date: Optional[date] = None
     due_date: Optional[date] = None
@@ -45,6 +49,8 @@ class InvoiceOut(BaseModel):
     total: float
     cap_amount: Optional[float] = None
     fixed_fee_amount: Optional[float] = None
+    fixed_fee_period: Optional[FixedFeePeriod] = None
+    fixed_fee_unit_amount: Optional[float] = None
     managed_services_min_hours: Optional[float] = None
     notes: Optional[str] = None
     invoice_number: Optional[str] = None
@@ -253,6 +259,13 @@ class InvoicePatch(BaseModel):
     expenses: Optional[List[InvoiceExpensePatch]] = None
     on_hold_entries: Optional[List[OnHoldEntryPatch]] = None
     time_detail_weeks: Optional[List[TimeDetailWeekPatch]] = None
+
+
+class FixedFeePreviewOut(BaseModel):
+    period: FixedFeePeriod
+    unit_amount: float
+    units: float
+    total: float
 
 
 class ManagedServicesRoleMinimum(BaseModel):

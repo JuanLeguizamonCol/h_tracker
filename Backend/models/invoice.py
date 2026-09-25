@@ -33,6 +33,12 @@ class Invoice(Base):
     # Used both by Fixed Fee projects and Managed Services projects (where the
     # amount is computed from a minimum-hours package instead of typed in).
     fixed_fee_amount = Column(Numeric(12, 2), nullable=True)
+    # Set on invoices created as a fixed fee: 'project' | 'week' | 'month', and
+    # the rate that period is billed at (fixed_fee_amount is the resulting total
+    # for period_start..period_end). NULL on Managed Services invoices and on
+    # fixed-fee invoices created before this existed (those are 'project').
+    fixed_fee_period = Column(String(10), nullable=True)
+    fixed_fee_unit_amount = Column(Numeric(12, 2), nullable=True)
     # Managed Services snapshot — the package minimum in effect for this invoice.
     managed_services_min_hours = Column(Numeric(10, 2), nullable=True)
     notes = Column(String, nullable=True)

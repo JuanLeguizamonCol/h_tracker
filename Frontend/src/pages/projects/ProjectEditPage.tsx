@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react';
+import { FixedFeePeriod } from '@/types';
+import { FixedFeePeriodPicker, fixedFeeAmountLabel } from '@/components/FixedFeePeriodPicker';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -55,6 +57,7 @@ export default function ProjectEditPage() {
   const [ownerCompany, setOwnerCompany] = useState('IPC');
   const [isFixedFee, setIsFixedFee] = useState(false);
   const [fixedFeeAmount, setFixedFeeAmount] = useState('');
+  const [fixedFeePeriod, setFixedFeePeriod] = useState<FixedFeePeriod>('project');
   const [isManagedServices, setIsManagedServices] = useState(false);
 
   // Initialize from server data once
@@ -78,6 +81,7 @@ export default function ProjectEditPage() {
     setOwnerCompany(project.owner_company || 'IPC');
     setIsFixedFee(project.is_fixed_fee || false);
     setFixedFeeAmount(project.fixed_fee_amount != null ? String(project.fixed_fee_amount) : '');
+    setFixedFeePeriod(project.fixed_fee_period || 'project');
     setIsManagedServices(project.is_managed_services || false);
     setInitialized(true);
   }
@@ -113,6 +117,7 @@ export default function ProjectEditPage() {
           owner_company: ownerCompany,
           is_fixed_fee: isFixedFee,
           fixed_fee_amount: isFixedFee && fixedFeeAmount ? parseFloat(fixedFeeAmount) : null,
+          fixed_fee_period: isFixedFee ? fixedFeePeriod : 'project',
           is_managed_services: isManagedServices,
         },
       });
@@ -341,21 +346,25 @@ export default function ProjectEditPage() {
               <div>
                 <Label>Fixed fee project</Label>
                 <p className="text-xs text-muted-foreground">
-                  Bills a single flat fee regardless of hours worked. Invoices for this project will only show hours for reference.
+                  Bills a flat fee regardless of hours worked — for the whole project, or a fixed rate per week or per month.
+                  Invoices for this project will only show hours for reference.
                 </p>
               </div>
             </div>
             {isFixedFee && (
-              <div className="space-y-1 max-w-xs">
-                <Label>Fixed Fee Amount ($) *</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={fixedFeeAmount}
-                  onChange={e => setFixedFeeAmount(e.target.value)}
-                  placeholder="0.00"
-                />
+              <div className="space-y-3">
+                <FixedFeePeriodPicker value={fixedFeePeriod} onChange={setFixedFeePeriod} />
+                <div className="space-y-1 max-w-xs">
+                  <Label>{fixedFeeAmountLabel(fixedFeePeriod)} *</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={fixedFeeAmount}
+                    onChange={e => setFixedFeeAmount(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
               </div>
             )}
 

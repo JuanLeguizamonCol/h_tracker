@@ -17,8 +17,10 @@ from schemas.invoice import (
     InvoiceCreate, InvoiceUpdate, InvoiceOut,
     InvoiceEditDataOut, InvoiceEditClient, InvoiceEditProject, InvoiceEditLine, InvoiceEditExpense,
     InvoiceEditTimeDetail, InvoiceManagedServices,
-    InvoicePatch, ManagedServicesMinimumsUpdate,
+    InvoicePatch, ManagedServicesMinimumsUpdate, FixedFeePreviewOut,
 )
+from schemas.projects import FixedFeePeriod
+from services.fixed_fee_calc import compute_fixed_fee
 from schemas.invoice_expenses import InvoiceExpenseCreate
 from schemas.invoice_lines import InvoiceLineUpdate
 from models.invoice_lines import InvoiceLine
@@ -119,6 +121,24 @@ def preview_invoice_number(project_id: str, db: Session = Depends(get_db)):
         "client_number": client.client_number,
         "client_name": client.name,
     }
+
+
+@invoice_router.get("/fixed-fee-preview", response_model=FixedFeePreviewOut)
+def preview_fixed_fee(
+    period: FixedFeePeriod,
+    unit_amount: float,
+    period_start: Optional[date] = None,
+    period_end: Optional[date] = None,
+):
+    """What a fixed fee comes to for the days selected — used live by New Invoice
+    and by the editor's Recalculate. Declared before the /{invoice_id} routes."""
+    if unit_amount < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Fixed fee amount cannot be negative.")
+    try:
+        result = compute_fixed_fee(unit_amount, period, period_start, period_end)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return {"period": period, "unit_amount": unit_amount, **result}
 
 
 @invoice_router.post("/", response_model=InvoiceOut, status_code=status.HTTP_201_CREATED)
@@ -340,6 +360,8 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "total": float(invoice.total),
             "cap_amount": float(invoice.cap_amount) if invoice.cap_amount is not None else None,
             "fixed_fee_amount": float(invoice.fixed_fee_amount) if invoice.fixed_fee_amount is not None else None,
+            "fixed_fee_period": invoice.fixed_fee_period,
+            "fixed_fee_unit_amount": float(invoice.fixed_fee_unit_amount) if invoice.fixed_fee_unit_amount is not None else None,
             "managed_services_min_hours": float(invoice.managed_services_min_hours) if invoice.managed_services_min_hours is not None else None,
             "notes": invoice.notes,
             "invoice_number": invoice.invoice_number,

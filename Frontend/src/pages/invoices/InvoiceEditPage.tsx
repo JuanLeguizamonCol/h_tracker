@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums } from '@/hooks/useInvoices';
 import { useAuth } from '@/contexts/AuthContext';
-import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, TimeDetailWeekPatch, InvoiceTimeDetailRow, MinHoursBasis, MIN_HOURS_BASIS_LABELS } from '@/types';
+import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, TimeDetailWeekPatch, InvoiceTimeDetailRow, MinHoursBasis, MIN_HOURS_BASIS_LABELS, FIXED_FEE_PERIOD_LABELS } from '@/types';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,7 +18,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
+import { formatFeeUnits, fixedFeeErrorMessage } from '@/components/FixedFeePeriodPicker';
 import { getSignatoriesForCompany, getCompanyProfile, type CompanyCode } from '@/lib/invoice/signatories';
+
+// An invoice bills a flat fee when it was created as one (fixed_fee_period), or —
+// for invoices from before that existed — when its project is fixed-fee and the
+// invoice actually carries a fee amount.
+const invoiceIsFixedFee = (d?: InvoiceEditData | null): boolean =>
+  !!d && (!!d.invoice.fixed_fee_period || (!!d.project?.is_fixed_fee && d.invoice.fixed_fee_amount != null));
 
 const EXPENSE_CATEGORIES = ['Airfare', 'Hotel', 'Parking / Transportation', 'Meals', 'Other'];
 
@@ -115,6 +122,7 @@ export default function InvoiceEditPage() {
   const [signatoryTitle, setSignatoryTitle] = useState('');
   const [ownerCompany, setOwnerCompany] = useState<CompanyCode>('IPC');
   const [fixedFeeAmount, setFixedFeeAmount] = useState<string>('');
+  const [isRecalcFee, setIsRecalcFee] = useState(false);
   // Managed Services panel: unsaved per-role minimum edits (role_id -> draft).
   const [msDraft, setMsDraft] = useState<Record<string, { min: string; basis: MinHoursBasis }>>({});
   const updateMinimums = useUpdateManagedServicesMinimums();
@@ -266,7 +274,7 @@ export default function InvoiceEditPage() {
 
   // Summary computations
   const summary = useMemo(() => {
-    const isFlatBillingProject = !!data?.project?.is_fixed_fee || !!data?.project?.is_managed_services;
+    const isFlatBillingProject = invoiceIsFixedFee(data) || !!data?.project?.is_managed_services;
     let totalFees = 0;
     let totalDiscounts = 0;
     if (isFlatBillingProject) {
@@ -283,7 +291,7 @@ export default function InvoiceEditPage() {
     const subtotalFees = totalFees;
     const totalDue = (cap != null ? Math.min(subtotalFees, cap) : subtotalFees) + totalExpenses;
     return { totalFees, totalDiscounts, totalExpenses, subtotalFees, totalDue, cap };
-  }, [lines, expenses, capAmount, fixedFeeAmount, data?.project?.is_fixed_fee, data?.project?.is_managed_services]);
+  }, [lines, expenses, capAmount, fixedFeeAmount, data]);
 
   // On-hold summary (hours reduced below original)
   const onHoldSummary = useMemo(() => {
@@ -498,6 +506,25 @@ export default function InvoiceEditPage() {
     }
   };
 
+  const handleRecalcFixedFee = async () => {
+    const inv = data?.invoice;
+    if (!inv?.fixed_fee_period || inv.fixed_fee_unit_amount == null) return;
+    setIsRecalcFee(true);
+    try {
+      const params = new URLSearchParams({ period: inv.fixed_fee_period, unit_amount: String(inv.fixed_fee_unit_amount) });
+      if (periodStart) params.set('period_start', periodStart);
+      if (periodEnd) params.set('period_end', periodEnd);
+      const res = await api.get<{ units: number; total: number }>(`/invoices/fixed-fee-preview?${params.toString()}`);
+      setFixedFeeAmount(String(res.total));
+      setIsDirty(true);
+      toast.success(`${formatFeeUnits(res.units, inv.fixed_fee_period)} × $${inv.fixed_fee_unit_amount.toFixed(2)} = $${res.total.toFixed(2)}. Save to keep it.`);
+    } catch (err) {
+      toast.error(fixedFeeErrorMessage(err));
+    } finally {
+      setIsRecalcFee(false);
+    }
+  };
+
   if (isLoading || !data) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -511,7 +538,8 @@ export default function InvoiceEditPage() {
     : `#${data.invoice.id.slice(0, 8)}`;
 
   const isNonBillable = !['approved'].includes(status.toLowerCase());
-  const isFixedFee = !!data.project?.is_fixed_fee;
+  const isFixedFee = invoiceIsFixedFee(data);
+  const fixedFeePeriod = data.invoice.fixed_fee_period ?? 'project';
   const isManagedServices = !!data.project?.is_managed_services;
   const isFlatBilling = isFixedFee || isManagedServices;
   const workedHours = lines.reduce((sum, l) => sum + l._hours, 0);
@@ -1018,7 +1046,7 @@ export default function InvoiceEditPage() {
               </div>
               {isFixedFee && (
                 <Badge variant="outline" className="text-xs">
-                  Fixed Fee — hours shown for reference only
+                  Fixed Fee{fixedFeePeriod !== 'project' ? ` — ${FIXED_FEE_PERIOD_LABELS[fixedFeePeriod].toLowerCase()}` : ''} — hours shown for reference only
                 </Badge>
               )}
               {isManagedServices && (
@@ -1479,6 +1507,25 @@ export default function InvoiceEditPage() {
                         placeholder="0.00"
                       />
                     </div>
+                    {fixedFeePeriod !== 'project' && data.invoice.fixed_fee_unit_amount != null && (
+                      <div className="space-y-1.5 pt-1">
+                        <p className="text-xs text-muted-foreground">
+                          Billed at ${data.invoice.fixed_fee_unit_amount.toFixed(2)} per {fixedFeePeriod} for the
+                          days in Period From / To.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          disabled={isRecalcFee}
+                          onClick={handleRecalcFixedFee}
+                        >
+                          {isRecalcFee ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                          Recalculate from period
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ) : isManagedServices ? (
                   <div className="space-y-2">

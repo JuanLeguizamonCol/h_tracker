@@ -26,6 +26,7 @@ from services.invoice_config import (
     ASSETS_DIR, SIGNATURES_DIR, LOGOS_DIR, LOGO_FILE,
     SIGNATURE_FILES, COMPANY_INFO, BANK_INFO, COMPANY_PROFILES,
 )
+from services.fixed_fee_calc import compute_fixed_fee
 from utils import blob_storage
 
 logger = logging.getLogger(__name__)
@@ -488,6 +489,51 @@ def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
     return "".join(rows_html), total_subtotal, total_discount, total_net
 
 
+_FEE_PERIOD_ADJECTIVES = {"week": "weekly", "month": "monthly"}
+
+
+def _flat_fee_label(edit_data: dict, fee: float) -> str:
+    """Name cell of the single fee line on a flat-fee invoice. Spells out the
+    "3 weeks x $2,500.00" arithmetic underneath only when it still adds up to
+    the fee actually being billed (i.e. it was not overridden by hand)."""
+    invoice = edit_data.get("invoice", {})
+    if (edit_data.get("project") or {}).get("is_managed_services"):
+        return "Managed Services"
+    period = invoice.get("fixed_fee_period") or "project"
+    if period == "project":
+        return "Fixed fee"
+    label = f"Fixed fee — {_FEE_PERIOD_ADJECTIVES[period]} rate"
+    unit = invoice.get("fixed_fee_unit_amount")
+    if unit is None:
+        return label
+    try:
+        calc = compute_fixed_fee(float(unit), period, invoice.get("period_start"), invoice.get("period_end"))
+    except (TypeError, ValueError):
+        return label
+    if abs(calc["total"] - fee) >= 0.005:
+        return label
+    units = f"{calc['units']:.2f}".rstrip("0").rstrip(".")
+    detail = f"{units} {period}{'' if units == '1' else 's'} × {_format_currency(float(unit))}"
+    return f"{label}<br/><small style='color:#555'>{detail}</small>"
+
+
+def _build_flat_fee_rows(edit_data: dict, fee: float) -> tuple[str, float, float, float]:
+    """A flat-fee invoice (Fixed Fee or Managed Services) bills invoice.fixed_fee_amount,
+    not hours x rate — its lines carry a 0 rate and are only a record of hours worked
+    (they still print in Attachment II). Same return shape as _build_professional_rows."""
+    row = (
+        "<tr>"
+        f"<td width='32%'>{_flat_fee_label(edit_data, fee)}</td>"
+        "<td width='12%' align='center'>—</td>"
+        "<td width='10%' align='center'>—</td>"
+        f"<td width='15%' align='right'>{_format_currency(fee)}</td>"
+        "<td width='15%' align='right'>—</td>"
+        f"<td width='16%' align='right'><b>{_format_currency(fee)}</b></td>"
+        "</tr>"
+    )
+    return row, fee, 0.0, fee
+
+
 def _format_week_of(d) -> str:
     """Format as '4/27/26' (Week of column)."""
     if isinstance(d, str):
@@ -684,7 +730,11 @@ def generate_invoice_html(edit_data: dict) -> str:
             "discount_value": 0,
         })
 
-    professional_rows, total_fees, total_discount, total_net = _build_professional_rows(all_lines)
+    flat_fee = invoice.get("fixed_fee_amount")
+    if flat_fee is not None:
+        professional_rows, total_fees, total_discount, total_net = _build_flat_fee_rows(edit_data, float(flat_fee))
+    else:
+        professional_rows, total_fees, total_discount, total_net = _build_professional_rows(all_lines)
     if not professional_rows:
         professional_rows = "<tr><td colspan='6' style='text-align:center;color:#999'>No line items</td></tr>"
 
