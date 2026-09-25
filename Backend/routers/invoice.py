@@ -299,6 +299,8 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "discount_value": float(line.discount_value) if line.discount_value is not None else 0.0,
             "amount": float(line.amount),
             "original_hours": original_hours,
+            "fee_period": line.fee_period,
+            "fee_unit_amount": float(line.fee_unit_amount) if line.fee_unit_amount is not None else None,
         })
 
     expenses_out = [
@@ -589,7 +591,18 @@ def patch_invoice(
                 InvoiceLine.id == line_patch.id,
                 InvoiceLine.invoice_id == invoice_id,
             ).first()
-            if line:
+            if line and line.fee_period:
+                # Fixed-fee line: its amount IS the fee (editable), not hours x
+                # rate. Hours are reference only; a discount doesn't apply.
+                if line_patch.hours is not None:
+                    line.hours = line_patch.hours
+                if line_patch.amount is not None:
+                    if line_patch.amount < 0:
+                        raise HTTPException(status_code=400, detail="A fixed fee cannot be negative")
+                    line.amount = line_patch.amount
+                line.discount_type = "amount"
+                line.discount_value = 0
+            elif line:
                 if line_patch.hours is not None:
                     line.hours = line_patch.hours
                 if line_patch.rate_snapshot is not None:
@@ -629,17 +642,21 @@ def patch_invoice(
             total_hours = 0.0
             total_discount = 0.0
             for w in weeks:
+                # A fixed-fee line bills its fee, so weekly hours are reference
+                # only and never carry a discount.
+                week_discount = 0 if line.fee_period else w.discount_value
                 db.add(InvoiceLineWeek(
                     invoice_line_id=line_id, week_start=w.week_start,
-                    hours=w.hours, discount_type=w.discount_type, discount_value=w.discount_value,
+                    hours=w.hours, discount_type=w.discount_type, discount_value=week_discount,
                 ))
                 total_hours += w.hours
                 subtotal = w.hours * rate
-                total_discount += (subtotal * w.discount_value / 100) if w.discount_type == "percent" else w.discount_value
+                total_discount += (subtotal * week_discount / 100) if w.discount_type == "percent" else week_discount
             line.hours = total_hours
-            line.discount_type = "amount"
-            line.discount_value = total_discount
-            line.amount = total_hours * rate
+            if not line.fee_period:
+                line.discount_type = "amount"
+                line.discount_value = total_discount
+                line.amount = total_hours * rate
 
     # Recompute invoice subtotal/total from lines — unless this invoice bills a
     # single flat fee, in which case the fee amount IS the subtotal/total and

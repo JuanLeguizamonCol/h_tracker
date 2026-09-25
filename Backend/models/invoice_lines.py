@@ -22,6 +22,11 @@ class InvoiceLine(Base):
     amount = Column(Numeric(12, 2), nullable=False)
     discount_type = Column(String, nullable=True)
     discount_value = Column(Numeric(10, 2), nullable=False, default=0)
+    # A fixed-fee line (its role bills a flat 'week' / 'month' / 'project' fee):
+    # `amount` IS the fee, `rate_snapshot` is 0 and `hours` are for reference,
+    # and fee_unit_amount is the per-period rate the amount was priced from.
+    fee_period = Column(String(10), nullable=True)
+    fee_unit_amount = Column(Numeric(10, 2), nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     invoice = relationship("Invoice", back_populates="lines")

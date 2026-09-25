@@ -115,6 +115,9 @@ class InvoiceEditLine(BaseModel):
     discount_value: float = 0
     amount: float
     original_hours: Optional[float] = None
+    # Set on fixed-fee lines: amount is the fee, hourly_rate is 0 — see models/invoice_lines.py.
+    fee_period: Optional[FixedFeePeriod] = None
+    fee_unit_amount: Optional[float] = None
 
 
 class InvoiceEditExpense(BaseModel):
@@ -194,6 +197,8 @@ class InvoiceLinePatch(BaseModel):
     rate_snapshot: Optional[float] = None
     discount_type: Optional[str] = None
     discount_value: Optional[float] = None
+    # Only honoured on fixed-fee lines (whose amount is the fee, not hours x rate).
+    amount: Optional[float] = None
 
 
 class InvoiceExpensePatch(BaseModel):

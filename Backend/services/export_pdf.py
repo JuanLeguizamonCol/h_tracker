@@ -459,6 +459,31 @@ def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
         hours = float(line.get("hours", 0) or 0)
         rate = float(line.get("hourly_rate", 0) or line.get("rate_snapshot", 0) or 0)
         subtotal = hours * rate
+        fee_period = line.get("fee_period")
+        if fee_period:
+            # Fixed-fee line: bills its flat fee (line amount), not hours x rate.
+            fee = float(line.get("amount", 0) or 0)
+            unit = line.get("fee_unit_amount")
+            rate_label = (
+                f"{_format_currency(float(unit))}<br/><small style='color:#555'>per {fee_period}</small>"
+                if unit is not None and fee_period != "project" else "Fixed"
+            )
+            name = line.get("employee_name") or line.get("person_name") or "—"
+            role = line.get("title") or line.get("role_name") or ""
+            name_cell = f"{name}" + (f"<br/><small style='color:#555'>{role}</small>" if role else "")
+            total_subtotal += fee
+            total_net += fee
+            rows_html.append(
+                f"<tr>"
+                f"<td width='32%'>{name_cell}</td>"
+                f"<td width='12%' align='center'>{rate_label}</td>"
+                f"<td width='10%' align='center'>{hours:.2f}</td>"
+                f"<td width='15%' align='right'>{_format_currency(fee)}</td>"
+                f"<td width='15%' align='right'>—</td>"
+                f"<td width='16%' align='right'><b>{_format_currency(fee)}</b></td>"
+                f"</tr>"
+            )
+            continue
 
         disc_type = line.get("discount_type") or "amount"
         disc_val = float(line.get("discount_value", 0) or 0)

@@ -46,6 +46,9 @@ type LocalLine = InvoiceEditLine & {
   _rate: number;
   _rateInput: string;
   _originalHours: number;
+  // Fixed-fee lines only: the fee itself (editable), since amount is not hours x rate there.
+  _amount: number;
+  _amountInput: string;
 };
 
 type LocalExpense = Partial<InvoiceExpense> & {
@@ -88,6 +91,10 @@ function defaultBillTo(client: InvoiceEditData['client']) {
 }
 
 function computeLineTotals(line: LocalLine) {
+  // A fixed-fee line bills its fee, with no discount; hours are reference only.
+  if (line.fee_period) {
+    return { subtotal: line._amount, discountDollars: 0, discountHours: 0, total: line._amount };
+  }
   const subtotal = line._hours * line._rate;
   const discountDollars =
     line._discountType === 'percent'
@@ -123,6 +130,7 @@ export default function InvoiceEditPage() {
   const [ownerCompany, setOwnerCompany] = useState<CompanyCode>('IPC');
   const [fixedFeeAmount, setFixedFeeAmount] = useState<string>('');
   const [isRecalcFee, setIsRecalcFee] = useState(false);
+  const [recalcLineId, setRecalcLineId] = useState<string | null>(null);
   // Managed Services panel: unsaved per-role minimum edits (role_id -> draft).
   const [msDraft, setMsDraft] = useState<Record<string, { min: string; basis: MinHoursBasis }>>({});
   const updateMinimums = useUpdateManagedServicesMinimums();
@@ -172,6 +180,8 @@ export default function InvoiceEditPage() {
         _rate: l.hourly_rate,
         _rateInput: String(l.hourly_rate),
         _originalHours: l.original_hours ?? l.hours,
+        _amount: l.amount,
+        _amountInput: String(l.amount),
       }))
     );
     setTimeDetailRows(
@@ -358,6 +368,7 @@ export default function InvoiceEditPage() {
         rate_snapshot: l._rate,
         discount_type: l._discountType,
         discount_value: l._discountValue,
+        ...(l.fee_period ? { amount: l._amount } : {}),
       }));
 
       const expensePatches: InvoiceExpensePatch[] = expenses.map(e => ({
@@ -522,6 +533,24 @@ export default function InvoiceEditPage() {
       toast.error(fixedFeeErrorMessage(err));
     } finally {
       setIsRecalcFee(false);
+    }
+  };
+
+  // Re-prices one fixed-fee line for the days currently in Period From / To.
+  const handleRecalcLine = async (line: LocalLine) => {
+    if (!line.fee_period || line.fee_unit_amount == null) return;
+    setRecalcLineId(line.id);
+    try {
+      const params = new URLSearchParams({ period: line.fee_period, unit_amount: String(line.fee_unit_amount) });
+      if (periodStart) params.set('period_start', periodStart);
+      if (periodEnd) params.set('period_end', periodEnd);
+      const res = await api.get<{ units: number; total: number }>(`/invoices/fixed-fee-preview?${params.toString()}`);
+      updateLine(line.id, { _amount: res.total, _amountInput: String(res.total) });
+      toast.success(`${line.employee_name}: ${formatFeeUnits(res.units, line.fee_period)} × $${line.fee_unit_amount.toFixed(2)} = $${res.total.toFixed(2)}. Save to keep it.`);
+    } catch (err) {
+      toast.error(fixedFeeErrorMessage(err));
+    } finally {
+      setRecalcLineId(null);
     }
   };
 
@@ -1130,7 +1159,66 @@ export default function InvoiceEditPage() {
                                   )}
                                 </div>
                               </TableCell>
-                              {!isFlatBilling && (
+                              {!isFlatBilling && (line.fee_period ? (
+                                <>
+                                  <TableCell className="text-right">
+                                    <div className="text-sm font-medium">Fixed</div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {line.fee_period === 'project' || line.fee_unit_amount == null
+                                        ? 'per project'
+                                        : `$${line.fee_unit_amount.toFixed(2)} / ${line.fee_period}`}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="flex flex-col items-end gap-1">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <span className="text-xs text-muted-foreground">$</span>
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={line._amountInput}
+                                          onFocus={e => e.target.select()}
+                                          onChange={e => {
+                                            const raw = e.target.value;
+                                            const num = parseFloat(raw);
+                                            updateLine(line.id, {
+                                              _amountInput: raw,
+                                              ...(raw !== '' && !isNaN(num) ? { _amount: num } : {}),
+                                            });
+                                          }}
+                                          onBlur={e => {
+                                            const num = parseFloat(e.target.value);
+                                            const resolved = isNaN(num) ? 0 : num;
+                                            updateLine(line.id, { _amount: resolved, _amountInput: String(resolved) });
+                                          }}
+                                          className="w-24 h-7 text-right text-sm"
+                                        />
+                                      </div>
+                                      {line.fee_period !== 'project' && line.fee_unit_amount != null && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRecalcLine(line)}
+                                          disabled={recalcLineId === line.id}
+                                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+                                          title="Re-price this fixed fee for the days in Period From / To"
+                                        >
+                                          {recalcLineId === line.id
+                                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                                            : <RefreshCw className="h-3 w-3" />}
+                                          Recalculate
+                                        </button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-sm text-muted-foreground" title="Fixed fees take no discount.">—</span>
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold text-sm">
+                                    ${total.toFixed(2)}
+                                  </TableCell>
+                                </>
+                              ) : (
                                 <>
                                   <TableCell className="text-right">
                                     <div className="flex flex-col items-end gap-0.5">
@@ -1184,7 +1272,7 @@ export default function InvoiceEditPage() {
                                     ${total.toFixed(2)}
                                   </TableCell>
                                 </>
-                              )}
+                              ))}
                             </TableRow>
                           );
                         })}
@@ -1369,13 +1457,14 @@ export default function InvoiceEditPage() {
                     <TableBody>
                       {timeDetailRows.map(r => {
                         const rate = lines.find(l => l.id === r.line_id)?._rate ?? r.hourly_rate;
+                        const rowFlat = !!lines.find(l => l.id === r.line_id)?.fee_period;
                         const { subtotal, discountDollars, total } = weekRowTotals(r, rate);
                         const [y, m, d] = r.week_start.split('-').map(Number);
                         return (
                           <TableRow key={`${r.line_id}-${r.week_start}`}>
                             <TableCell className="tabular-nums">{`${m}/${d}/${String(y % 100).padStart(2, '0')}`}</TableCell>
                             <TableCell>{r.employee_name}{r.title ? `, ${r.title}` : ''}</TableCell>
-                            <TableCell className="text-right tabular-nums">${rate.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{rowFlat ? 'Fixed' : `$${rate.toFixed(2)}`}</TableCell>
                             <TableCell className="text-right">
                               <Input
                                 type="number"
@@ -1408,6 +1497,7 @@ export default function InvoiceEditPage() {
                                     min="0"
                                     step="0.01"
                                     value={r._discountInput}
+                                    disabled={rowFlat}
                                     onFocus={e => e.target.select()}
                                     onChange={e => {
                                       const raw = e.target.value;
@@ -1428,6 +1518,7 @@ export default function InvoiceEditPage() {
                                     variant="outline"
                                     size="sm"
                                     className="h-7 px-2 text-xs font-mono"
+                                    disabled={rowFlat}
                                     onClick={() => updateTimeDetailRow(r.line_id, r.week_start, {
                                       _discountType: r._discountType === 'amount' ? 'percent' : 'amount',
                                     })}

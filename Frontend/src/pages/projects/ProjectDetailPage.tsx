@@ -10,7 +10,8 @@ import { useProjectRoles, useProjectRoleNames, useCreateProjectRole, useUpdatePr
 import { useSkillCatalog } from '@/hooks/useSkills';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
-import { ProjectRole, MinHoursBasis, MIN_HOURS_BASIS_LABELS, AssignableEmployee, ProjectRequiredSkill, SkillCoverage } from '@/types';
+import { ProjectRole, MinHoursBasis, FixedFeePeriod, MIN_HOURS_BASIS_LABELS, AssignableEmployee, ProjectRequiredSkill, SkillCoverage } from '@/types';
+import { RoleBillingInput, roleBillingLabel } from '@/components/RoleBillingInput';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -182,7 +183,7 @@ export default function ProjectDetailPage() {
 
         {isAdmin && (
           <TabsContent value="roles" className="mt-4">
-            <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} canEdit={isAdmin} /></CardContent></Card>
+            <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} isFixedFee={!!project.is_fixed_fee} canEdit={isAdmin} /></CardContent></Card>
           </TabsContent>
         )}
 
@@ -204,7 +205,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 // ── Roles & Rates Panel ──────────────────────────────────────────────────────
-function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectId: string; isManagedServices: boolean; canEdit: boolean }) {
+function ProjectRolesPanel({ projectId, isManagedServices, isFixedFee, canEdit }: { projectId: string; isManagedServices: boolean; isFixedFee: boolean; canEdit: boolean }) {
   const { data: roles = [], isLoading } = useProjectRoles(projectId);
   const createRole = useCreateProjectRole();
   const updateRole = useUpdateProjectRole();
@@ -212,7 +213,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<ProjectRole | null>(null);
-  const emptyForm = { name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '', min_hours_basis: 'week' as MinHoursBasis, additional_hours_enabled: false, additional_hours_rate: '' };
+  const emptyForm = { name: '', hourly_rate_usd: 0, fixed_fee_period: null as FixedFeePeriod | null, min_hours_enabled: false, min_hours: '', min_hours_basis: 'week' as MinHoursBasis, additional_hours_enabled: false, additional_hours_rate: '' };
   const [form, setForm] = useState(emptyForm);
 
   const minPayload = () => ({
@@ -223,10 +224,23 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
     additional_hours_rate: isManagedServices && form.additional_hours_enabled && form.additional_hours_rate ? parseFloat(form.additional_hours_rate) : null,
   });
 
+  // A project-wide fixed fee / Managed Services already owns the billing, so a role there is always hourly.
+  const allowFixed = !isFixedFee && !isManagedServices;
+  const ratePayload = () => {
+    const fixed = allowFixed ? form.fixed_fee_period : null;
+    return {
+      hourly_rate_usd: fixed ? 0 : form.hourly_rate_usd,
+      fixed_fee_period: fixed,
+      fixed_fee_amount: fixed ? form.hourly_rate_usd : null,
+    };
+  };
+  const feeMissing = allowFixed && !!form.fixed_fee_period && !(form.hourly_rate_usd > 0);
+
   const handleAdd = async () => {
     if (!form.name) { toast.error('Please enter a role name.'); return; }
+    if (feeMissing) { toast.error('Enter the fixed fee amount.'); return; }
     try {
-      await createRole.mutateAsync({ project_id: projectId, name: form.name, hourly_rate_usd: form.hourly_rate_usd, ...minPayload() });
+      await createRole.mutateAsync({ project_id: projectId, name: form.name, ...ratePayload(), ...minPayload() });
       toast.success('Role added.');
       setForm(emptyForm);
       setIsAddOpen(false);
@@ -235,8 +249,9 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
 
   const handleUpdate = async () => {
     if (!editingRole || !form.name) return;
+    if (feeMissing) { toast.error('Enter the fixed fee amount.'); return; }
     try {
-      await updateRole.mutateAsync({ id: editingRole.id, updates: { name: form.name, hourly_rate_usd: form.hourly_rate_usd, ...minPayload() } });
+      await updateRole.mutateAsync({ id: editingRole.id, updates: { name: form.name, ...ratePayload(), ...minPayload() } });
       toast.success('Role saved.');
       setEditingRole(null);
     } catch { toast.error('Something went wrong.'); }
@@ -255,7 +270,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Define roles and hourly rates (USD) for this project.
+          Define roles and how each bills (USD) for this project: hourly, or a fixed fee per week, month or project for each person on the role.
           {isManagedServices && ' Managed Services: enable a minimum per role to bill max(actual, minimum), and optionally bill hours over that minimum quarterly.'}
         </p>
         {canEdit && (
@@ -271,7 +286,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
           <TableHeader>
             <TableRow>
               <TableHead>Role Name</TableHead>
-              <TableHead className="text-right">Rate (USD/h)</TableHead>
+              <TableHead className="text-right">Billing (USD)</TableHead>
               {isManagedServices && <TableHead className="text-right">Min Hours</TableHead>}
               {isManagedServices && <TableHead className="text-right">Additional Hours</TableHead>}
               {canEdit && <TableHead className="text-right w-24">Actions</TableHead>}
@@ -281,7 +296,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
             {roles.map(role => (
               <TableRow key={role.id}>
                 <TableCell className="font-medium">{role.name}</TableCell>
-                <TableCell className="text-right font-semibold text-primary">${Number(role.hourly_rate_usd)}/h</TableCell>
+                <TableCell className="text-right font-semibold text-primary">{roleBillingLabel(role)}</TableCell>
                 {isManagedServices && (
                   <TableCell className="text-right text-sm">
                     {role.min_hours_enabled && role.min_hours != null
@@ -299,7 +314,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
                 {canEdit && (
                   <TableCell className="text-right">
                     <div className="flex gap-1 justify-end">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: Number(role.hourly_rate_usd), min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', min_hours_basis: (role.min_hours_basis ?? 'period') as MinHoursBasis, additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: role.fixed_fee_period ? Number(role.fixed_fee_amount ?? 0) : Number(role.hourly_rate_usd), fixed_fee_period: role.fixed_fee_period ?? null, min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', min_hours_basis: (role.min_hours_basis ?? 'period') as MinHoursBasis, additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
                         <Edit className="h-4 w-4" />
                       </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(role.id)}>
@@ -322,8 +337,18 @@ function ProjectRolesPanel({ projectId, isManagedServices, canEdit }: { projectI
               <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Senior Developer" />
             </div>
             <div className="space-y-1">
-              <Label>Hourly rate (USD)</Label>
-              <Input type="number" min="0" step="0.5" value={form.hourly_rate_usd || ''} onChange={e => setForm({ ...form, hourly_rate_usd: parseFloat(e.target.value) || 0 })} />
+              <Label>{allowFixed ? 'Billing (USD)' : 'Hourly rate (USD)'}</Label>
+              <RoleBillingInput
+                period={form.fixed_fee_period}
+                amount={form.hourly_rate_usd}
+                allowFixed={allowFixed}
+                onChange={(period, amount) => setForm({ ...form, fixed_fee_period: period, hourly_rate_usd: amount })}
+              />
+              {allowFixed && form.fixed_fee_period && (
+                <p className="text-xs text-muted-foreground">
+                  Each person on this role is billed this fee {form.fixed_fee_period === 'project' ? 'on every invoice' : `per ${form.fixed_fee_period}`} for the days on the invoice, regardless of hours.
+                </p>
+              )}
             </div>
             {isManagedServices && (
               <div className="rounded-md border p-3 bg-muted/20 space-y-3">
@@ -919,7 +944,7 @@ function ProjectAssignmentsPanel({ projectId, canEdit }: { projectId: string; ca
                         <SelectItem value="__none__">No role</SelectItem>
                         {rolesWithRates.map(role => (
                           <SelectItem key={role.id} value={role.id}>
-                            {role.name} — ${Number(role.hourly_rate_usd)}/h
+                            {role.name} — {roleBillingLabel(role)}
                           </SelectItem>
                         ))}
                       </SelectContent>

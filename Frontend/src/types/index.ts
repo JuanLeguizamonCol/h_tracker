@@ -256,6 +256,9 @@ export interface ProjectRole {
   min_hours: number | null;
   additional_hours_enabled: boolean;
   additional_hours_rate: number | null;
+  /** Fixed-fee role: each person on it bills fixed_fee_amount per week / month / project instead of hours x rate. null = hourly. */
+  fixed_fee_period?: FixedFeePeriod | null;
+  fixed_fee_amount?: number | null;
   created_at: string;
 }
 
@@ -417,6 +420,9 @@ export interface InvoiceEditLine {
   discount_value: number;
   amount: number;
   original_hours?: number;
+  /** Set on fixed-fee lines: amount is the fee itself (hourly_rate is 0), fee_unit_amount the per-period rate. */
+  fee_period?: FixedFeePeriod | null;
+  fee_unit_amount?: number | null;
 }
 
 export interface InvoiceTimeDetailRow {
@@ -471,6 +477,8 @@ export interface InvoiceLinePatch {
   rate_snapshot?: number;
   discount_type?: 'amount' | 'percent' | null;
   discount_value?: number;
+  /** Only honoured on fixed-fee lines. */
+  amount?: number;
 }
 
 export interface TimeDetailWeekPatch {
@@ -592,6 +600,8 @@ export interface InvoiceLine {
   amount: number;
   discount_type: string | null;
   discount_value: number;
+  fee_period?: FixedFeePeriod | null;
+  fee_unit_amount?: number | null;
   created_at: string;
 }
 

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useProjects } from '@/hooks/useProjects';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useClients } from '@/hooks/useClients';
+import { useProjectRoles } from '@/hooks/useProjectRoles';
 import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCreateInvoice, useCreateInvoiceLines, useLinkTimeEntries, useUpdateInvoice } from '@/hooks/useInvoices';
@@ -131,6 +132,13 @@ export default function InvoiceNewPage() {
 
   const isManagedServices = !!selectedProject?.is_managed_services;
 
+  // Roles with their own fixed fee (per person) — only when the invoice is not
+  // already billed as one flat fee / Managed Services.
+  const { data: projectRolesForUi = [] } = useProjectRoles(selectedProjectId || undefined);
+  const hasFixedRoles = !feeOn && !isManagedServices && projectRolesForUi.some(r => r.fixed_fee_period);
+  const rolesNeedDays = !feeOn && !isManagedServices
+    && projectRolesForUi.some(r => r.fixed_fee_period && r.fixed_fee_period !== 'project');
+
   const applyFixedFee = async (invoiceId: string) => {
     if (!feePreview) return;
     await updateInvoice.mutateAsync({
@@ -146,8 +154,8 @@ export default function InvoiceNewPage() {
   };
 
   // Weekly / monthly fees are priced from the days picked, so those are required.
-  const needsDays = feeOn && feePeriod !== 'project';
-  const feeBlocked = feeOn && !feePreview;
+  const needsDays = (feeOn && feePeriod !== 'project') || rolesNeedDays;
+  const feeBlocked = (feeOn && !feePreview) || (rolesNeedDays && !(periodStart && periodEnd));
 
   const doCreateInvoice = async () => {
     if (selectedProject?.status === 'on_hold') {
@@ -168,6 +176,33 @@ export default function InvoiceNewPage() {
     }
     setIsCreating(true);
     try {
+      // Roles and assignments first, so a problem here never leaves a half-made invoice behind.
+      const projectRoles = await api.get<{ id: string; name: string; hourly_rate_usd: number; min_hours_enabled: boolean; min_hours: number | null; min_hours_basis: 'week' | 'month' | 'period'; additional_hours_enabled: boolean; additional_hours_rate: number | null; fixed_fee_period: FixedFeePeriod | null; fixed_fee_amount: number | null }[]>(
+        `/project-roles?project_id=${selectedProjectId}`
+      );
+      const assignments = await api.get<{ user_id: string; role_id: string | null; start_date: string | null; end_date: string | null }[]>(
+        `/employee-projects?project_id=${selectedProjectId}`
+      );
+      const assignmentMap = new Map(assignments.map(a => [a.user_id, a.role_id]));
+      const rolesMap = new Map(projectRoles.map(r => [r.id, r]));
+
+      // Fixed-fee roles: price each one for the days picked (the backend owns the date math).
+      const isFlatBilling = feeOn || isManagedServices;
+      const flatRoles = isFlatBilling ? [] : projectRoles.filter(r => r.fixed_fee_period && r.fixed_fee_amount);
+      if (flatRoles.some(r => r.fixed_fee_period !== 'project') && !(periodStart && periodEnd)) {
+        toast.error('This project has weekly / monthly fixed-fee roles — select the first and last day to bill.');
+        setIsCreating(false);
+        return;
+      }
+      const flatPrice = new Map<string, number>();
+      for (const r of flatRoles) {
+        const params = new URLSearchParams({ period: r.fixed_fee_period as string, unit_amount: String(r.fixed_fee_amount) });
+        if (periodStart) params.set('period_start', periodStart);
+        if (periodEnd) params.set('period_end', periodEnd);
+        const res = await api.get<{ total: number }>(`/invoices/fixed-fee-preview?${params.toString()}`);
+        flatPrice.set(r.id, res.total);
+      }
+
       const invoice = await createInvoice.mutateAsync({ project_id: selectedProjectId });
       // Record the chosen period on the invoice itself so the edit panel,
       // PDF, and any later reporting reflect what was actually billed —
@@ -190,16 +225,19 @@ export default function InvoiceNewPage() {
       );
       const availableEntries = entries.filter(e => !linkedIds.has(e.id));
 
-      if (availableEntries.length > 0) {
-        const projectRoles = await api.get<{ id: string; name: string; hourly_rate_usd: number; min_hours_enabled: boolean; min_hours: number | null; min_hours_basis: 'week' | 'month' | 'period'; additional_hours_enabled: boolean; additional_hours_rate: number | null }[]>(
-          `/project-roles?project_id=${selectedProjectId}`
-        );
-        const assignments = await api.get<{ user_id: string; role_id: string | null }[]>(
-          `/employee-projects?project_id=${selectedProjectId}`
-        );
-        const assignmentMap = new Map(assignments.map(a => [a.user_id, a.role_id]));
-        const rolesMap = new Map(projectRoles.map(r => [r.id, r]));
+      // Everyone assigned to a fixed-fee role bills that fee for the period, even with no hours —
+      // unless they are inactive or their assignment window does not touch these days.
+      const assigneesWithoutHours = flatRoles.length === 0 ? [] : assignments.filter(a => {
+        const role = a.role_id ? rolesMap.get(a.role_id) : undefined;
+        if (!role || !flatPrice.has(role.id)) return false;
+        if (availableEntries.some(e => e.user_id === a.user_id)) return false;
+        if (employees.find(e => e.id === a.user_id)?.is_active === false) return false;
+        if (periodStart && a.end_date && a.end_date < periodStart) return false;
+        if (periodEnd && a.start_date && a.start_date > periodEnd) return false;
+        return true;
+      });
 
+      if (availableEntries.length > 0 || assigneesWithoutHours.length > 0) {
         const employeeHours: Record<string, { hours: number; userId: string; name: string; entryIds: string[] }> = {};
         availableEntries.forEach(entry => {
           const emp = employees.find(e => e.id === entry.user_id);
@@ -210,27 +248,35 @@ export default function InvoiceNewPage() {
           employeeHours[entry.user_id].entryIds.push(entry.id);
         });
 
-        const isFlatBilling = feeOn || isManagedServices;
-
-        const lineData = Object.values(employeeHours).map(eh => {
-          const roleId = assignmentMap.get(eh.userId);
+        const buildLine = (userId: string, name: string, hours: number) => {
+          const roleId = assignmentMap.get(userId);
           const role = roleId ? rolesMap.get(roleId) : null;
-          const rate = isFlatBilling ? 0 : (role ? Number(role.hourly_rate_usd) : 0);
+          const fee = role ? flatPrice.get(role.id) : undefined;
+          // A fixed-fee role bills its fee, not hours x rate: rate 0, amount = the fee for the period.
+          const rate = isFlatBilling || fee !== undefined ? 0 : (role ? Number(role.hourly_rate_usd) : 0);
           return {
             invoice_id: invoice.id,
-            user_id: eh.userId,
-            employee_name: eh.name,
+            user_id: userId,
+            employee_name: name,
             role_name: role?.name || null,
             role_id: role?.id || null,
-            hours: eh.hours,
+            hours,
             rate_snapshot: rate,
-            amount: eh.hours * rate,
+            amount: fee !== undefined ? fee : hours * rate,
+            ...(fee !== undefined && role ? { fee_period: role.fixed_fee_period, fee_unit_amount: role.fixed_fee_amount } : {}),
           };
-        });
+        };
+
+        const lineData = [
+          ...Object.values(employeeHours).map(eh => buildLine(eh.userId, eh.name, eh.hours)),
+          ...assigneesWithoutHours.map(a => buildLine(a.user_id, employees.find(e => e.id === a.user_id)?.name || 'Unknown', 0)),
+        ];
 
         await createLines.mutateAsync(lineData);
         const timeEntryIds = Object.values(employeeHours).flatMap(eh => eh.entryIds);
-        await linkTimeEntries.mutateAsync({ invoice_id: invoice.id, time_entry_ids: timeEntryIds });
+        if (timeEntryIds.length > 0) {
+          await linkTimeEntries.mutateAsync({ invoice_id: invoice.id, time_entry_ids: timeEntryIds });
+        }
 
         if (feeOn) {
           await applyFixedFee(invoice.id);
@@ -476,6 +522,11 @@ export default function InvoiceNewPage() {
                   <p className="font-semibold">{checkResult.total_hours.toFixed(2)} h</p>
                 </div>
               </div>
+              {hasFixedRoles && (
+                <p className="text-xs text-muted-foreground">
+                  Fixed-fee roles on this project bill their fee for each person on the role, for the days selected.
+                </p>
+              )}
               <div className="flex gap-2 pt-1">
                 <Button variant="outline" onClick={() => navigate('/invoices')} className="flex-1">
                   Cancel
@@ -489,10 +540,12 @@ export default function InvoiceNewPage() {
           )}
 
           {/* Fixed fee with no hours in the period — the fee still bills */}
-          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult && !checkResult.has_entries && feeOn && (
+          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult && !checkResult.has_entries && (feeOn || hasFixedRoles) && (
             <div className="rounded-lg border p-4 space-y-3">
               <p className="text-sm text-muted-foreground">
-                No unbilled hours were found for these days. The invoice will carry just the fixed fee.
+                {feeOn
+                  ? 'No unbilled hours were found for these days. The invoice will carry just the fixed fee.'
+                  : 'No unbilled hours were found for these days. The invoice will carry the fixed fee of each person on a fixed-fee role.'}
               </p>
               <div className="flex gap-2 pt-1">
                 <Button variant="outline" onClick={() => navigate('/invoices')} className="flex-1">
@@ -507,7 +560,7 @@ export default function InvoiceNewPage() {
           )}
 
           {/* No hours — inline warning */}
-          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult && !checkResult.has_entries && !feeOn && (
+          {selectedProject?.status !== 'on_hold' && !isChecking && checkResult && !checkResult.has_entries && !feeOn && !hasFixedRoles && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 p-4 space-y-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />

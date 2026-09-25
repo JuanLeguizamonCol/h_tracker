@@ -9,6 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Employee, ProjectRole, MinHoursBasis, MIN_HOURS_BASIS_LABELS, FixedFeePeriod } from '@/types';
 import { FixedFeePeriodPicker, fixedFeeAmountLabel } from '@/components/FixedFeePeriodPicker';
+import { RoleBillingInput, roleBillingLabel } from '@/components/RoleBillingInput';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -55,7 +56,9 @@ interface Step1Form {
 interface RoleRow {
   _tempId: string;
   name: string;
+  // The role's single billing number: $/hour, or the fixed fee when fixed_fee_period is set.
   hourly_rate_usd: number;
+  fixed_fee_period: FixedFeePeriod | null;
   min_hours_enabled: boolean;
   min_hours: string;
   min_hours_basis: MinHoursBasis;
@@ -144,7 +147,7 @@ export default function ProjectNewPage() {
   const [roles, setRoles] = useState<RoleRow[]>([]);
 
   const addRole = () =>
-    setRoles(r => [...r, { _tempId: crypto.randomUUID(), name: '', hourly_rate_usd: 0, min_hours_enabled: false, min_hours: '', min_hours_basis: 'week', additional_hours_enabled: false, additional_hours_rate: '' }]);
+    setRoles(r => [...r, { _tempId: crypto.randomUUID(), name: '', hourly_rate_usd: 0, fixed_fee_period: null, min_hours_enabled: false, min_hours: '', min_hours_basis: 'week', additional_hours_enabled: false, additional_hours_rate: '' }]);
 
   const updateRole = (id: string, field: keyof Omit<RoleRow, '_tempId'>, val: any) =>
     setRoles(r => r.map(row => row._tempId === id ? { ...row, [field]: val } : row));
@@ -199,6 +202,14 @@ export default function ProjectNewPage() {
   const validateStep2 = () => {
     for (const r of roles) {
       if (!r.name.trim()) { toast.error('All roles must have a name.'); return false; }
+      if (r.fixed_fee_period && !(r.hourly_rate_usd > 0)) {
+        toast.error(`Enter the fixed fee amount for "${r.name}".`);
+        return false;
+      }
+      if (r.fixed_fee_period && form.is_managed_services) {
+        toast.error(`"${r.name}": Managed Services roles bill hourly - switch it back to Hourly.`);
+        return false;
+      }
     }
     return true;
   };
@@ -235,10 +246,14 @@ export default function ProjectNewPage() {
       // 2. Create roles (collect created role IDs by temp ID)
       const roleIdMap: Record<string, string> = {};
       for (const role of roles) {
+        // A project-wide fixed fee already bills everything flat, so per-role fees do not apply.
+        const roleFixed = !form.is_fixed_fee && !form.is_managed_services ? role.fixed_fee_period : null;
         const created = await api.post<ProjectRole>('/project-roles', {
           project_id: project.id,
           name: role.name,
-          hourly_rate_usd: role.hourly_rate_usd,
+          hourly_rate_usd: roleFixed ? 0 : role.hourly_rate_usd,
+          fixed_fee_period: roleFixed,
+          fixed_fee_amount: roleFixed ? role.hourly_rate_usd : null,
           min_hours_enabled: form.is_managed_services && role.min_hours_enabled,
           min_hours: form.is_managed_services && role.min_hours_enabled && role.min_hours ? parseFloat(role.min_hours) : null,
           min_hours_basis: role.min_hours_basis,
@@ -596,7 +611,7 @@ export default function ProjectNewPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Role Name</TableHead>
-                    <TableHead className="text-right w-36">Rate (USD/h)</TableHead>
+                    <TableHead className="w-72">Billing (USD)</TableHead>
                     {form.is_managed_services && <TableHead className="w-56">Minimum hours</TableHead>}
                     {form.is_managed_services && <TableHead className="w-56">Additional hours (quarterly)</TableHead>}
                     <TableHead className="w-10" />
@@ -614,13 +629,12 @@ export default function ProjectNewPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={row.hourly_rate_usd || ''}
-                          onChange={e => updateRole(row._tempId, 'hourly_rate_usd', parseFloat(e.target.value) || 0)}
-                          className="h-8 text-right"
+                        <RoleBillingInput
+                          period={row.fixed_fee_period}
+                          amount={row.hourly_rate_usd}
+                          allowFixed={!form.is_fixed_fee && !form.is_managed_services}
+                          onChange={(period, amount) => setRoles(rs => rs.map(r =>
+                            r._tempId === row._tempId ? { ...r, fixed_fee_period: period, hourly_rate_usd: amount } : r))}
                         />
                       </TableCell>
                       {form.is_managed_services && (
@@ -751,7 +765,7 @@ export default function ProjectNewPage() {
                             <SelectItem value="__none__">No role</SelectItem>
                             {roles.map(r => (
                               <SelectItem key={r._tempId} value={r._tempId}>
-                                {r.name}{r.hourly_rate_usd > 0 ? ` — $${r.hourly_rate_usd}/h` : ''}
+                                {r.name}{r.hourly_rate_usd > 0 ? ` — ${roleBillingLabel({ hourly_rate_usd: r.hourly_rate_usd, fixed_fee_period: r.fixed_fee_period, fixed_fee_amount: r.hourly_rate_usd })}` : ''}
                               </SelectItem>
                             ))}
                           </SelectContent>

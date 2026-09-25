@@ -3,6 +3,8 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 
+from schemas.projects import FixedFeePeriod
+
 
 class InvoiceLineBase(BaseModel):
     invoice_id: str
@@ -13,6 +15,8 @@ class InvoiceLineBase(BaseModel):
     hours: float
     rate_snapshot: float
     amount: float
+    fee_period: Optional[FixedFeePeriod] = None
+    fee_unit_amount: Optional[float] = None
 
 
 class InvoiceLineCreate(InvoiceLineBase):
@@ -30,6 +34,8 @@ class InvoiceLineUpdate(BaseModel):
     amount: Optional[float] = None
     discount_type: Optional[str] = None
     discount_value: Optional[float] = None
+    fee_period: Optional[FixedFeePeriod] = None
+    fee_unit_amount: Optional[float] = None
 
 
 class InvoiceLineOut(InvoiceLineBase):

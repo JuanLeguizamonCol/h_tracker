@@ -28,6 +28,11 @@ class ProjectRole(Base):
     # `additional_hours_rate` per hour.
     additional_hours_enabled = Column(Boolean, nullable=False, default=False)
     additional_hours_rate = Column(Numeric(10, 2), nullable=True)
+    # Fixed-fee role: instead of hours x hourly_rate_usd, each person on this
+    # role is billed fixed_fee_amount per 'week' / 'month' (or once, 'project').
+    # NULL fixed_fee_period = a normal hourly role. See services/fixed_fee_calc.py.
+    fixed_fee_period = Column(String(10), nullable=True)
+    fixed_fee_amount = Column(Numeric(10, 2), nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     project = relationship("Project", back_populates="roles")

@@ -76,6 +76,13 @@ def _data_row(ws, row: int, values: list[Any], stripe: bool = False):
             cell.alignment = RIGHT
 
 
+def _line_subtotal(line: dict, hours: float, rate: float) -> float:
+    """hours x rate — except a fixed-fee line, whose amount IS the fee (rate is 0)."""
+    if line.get("fee_period"):
+        return _money(line.get("amount", 0))
+    return hours * rate
+
+
 def _money(val) -> float:
     return round(float(val or 0), 2)
 
@@ -157,7 +164,7 @@ def generate_invoice_xlsx(edit_data: dict) -> bytes:
     for i, line in enumerate(lines, 2):
         hours = _money(line.get("hours", 0))
         rate = _money(line.get("hourly_rate", 0))
-        subtotal = hours * rate
+        subtotal = _line_subtotal(line, hours, rate)
         disc_type = line.get("discount_type") or "amount"
         disc_val = _money(line.get("discount_value", 0))
         disc_dollars = (subtotal * disc_val / 100) if disc_type == "percent" else disc_val
@@ -335,7 +342,7 @@ def generate_invoice_xlsx(edit_data: dict) -> bytes:
         seen[uid]["hours"] += _money(line.get("hours", 0))
         hours = _money(line.get("hours", 0))
         rate = _money(line.get("hourly_rate", 0))
-        subtotal = hours * rate
+        subtotal = _line_subtotal(line, hours, rate)
         disc_type = line.get("discount_type") or "amount"
         disc_val = _money(line.get("discount_value", 0))
         disc_dollars = (subtotal * disc_val / 100) if disc_type == "percent" else disc_val
@@ -755,7 +762,7 @@ def generate_invoices_report_xlsx(invoices_data: list) -> bytes:
         for line in lines:
             hours     = _money(line.get("hours", 0))
             rate      = _money(line.get("hourly_rate", 0))
-            subtotal  = hours * rate
+            subtotal  = _line_subtotal(line, hours, rate)
             disc_type = line.get("discount_type") or "amount"
             disc_val  = _money(line.get("discount_value", 0))
             disc_dol  = (subtotal * disc_val / 100) if disc_type == "percent" else disc_val
@@ -898,7 +905,7 @@ def generate_invoices_report_xlsx(invoices_data: list) -> bytes:
         for line in data.get("lines", []):
             hours     = _money(line.get("hours", 0))
             rate      = _money(line.get("hourly_rate", 0))
-            subtotal  = hours * rate
+            subtotal  = _line_subtotal(line, hours, rate)
             disc_type = line.get("discount_type") or "amount"
             disc_val  = _money(line.get("discount_value", 0))
             disc_dol  = (subtotal * disc_val / 100) if disc_type == "percent" else disc_val
