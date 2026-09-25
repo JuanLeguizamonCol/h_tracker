@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UserCircle, Search, MoreHorizontal, Edit, Shield, Loader2, FolderKanban, UserPlus, Eye, Lock } from 'lucide-react';
-import { useEmployees, useCreateEmployee } from '@/hooks/useEmployees';
+import { UserCircle, Search, MoreHorizontal, Edit, Shield, Loader2, FolderKanban, UserPlus, Eye, Lock, Trash2 } from 'lucide-react';
+import { useEmployees, useCreateEmployee, useDeleteEmployee } from '@/hooks/useEmployees';
 import { useAssignedProjects } from '@/hooks/useAssignedProjects';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppRole, Employee } from '@/types';
@@ -14,7 +14,11 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
   Tooltip, TooltipContent, TooltipTrigger,
@@ -124,6 +128,7 @@ export default function Employees() {
   const { employee: currentUser, isAdmin } = useAuth();
   const updateRole = useUpdateRole();
   const createEmployee = useCreateEmployee();
+  const deleteEmployee = useDeleteEmployee();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -133,6 +138,7 @@ export default function Employees() {
   const [roleChangeTarget, setRoleChangeTarget] = useState<
     { emp: Employee; currentRole: AppRole; newRole: AppRole } | null
   >(null);
+  const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
 
   const getRole = (employeeId: string): AppRole => roles.find(r => r.user_id === employeeId)?.role || 'employee';
   const adminCount = roles.filter(r => r.role === 'admin').length;
@@ -166,6 +172,28 @@ export default function Employees() {
     setQuickEmail('');
     setQuickError('');
     setQuickAddOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      const { hard_deleted } = await deleteEmployee.mutateAsync(deleteTarget.id);
+      toast.success(
+        hard_deleted
+          ? `${deleteTarget.name} was deleted.`
+          : `${deleteTarget.name} has hours, invoices, or assignments on record, so they were deactivated instead — hidden from active lists, but their history stays intact.`,
+      );
+      setDeleteTarget(null);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : '';
+      toast.error(
+        detail.includes('At least one admin')
+          ? 'At least one admin is required. Promote someone else before removing this account.'
+          : detail.includes('protected')
+          ? 'This account is protected and cannot be deleted.'
+          : 'Failed to delete employee. Please try again.',
+      );
+    }
   };
 
   const handleQuickAdd = async () => {
@@ -297,6 +325,17 @@ export default function Employees() {
                           <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}/edit`)}>
                             <Edit className="h-4 w-4 mr-2" />Edit
                           </DropdownMenuItem>
+                          {!isCurrentUser && !isProtected && !isLastAdmin && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setDeleteTarget(emp)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />Delete
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -388,6 +427,30 @@ export default function Employees() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete employee?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove <strong>{deleteTarget?.name}</strong> from the team. If they have no hours, invoices,
+              or project assignments on record, they'll be permanently deleted. Otherwise they'll be
+              deactivated instead — hidden from active lists everywhere, but their history stays intact.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteEmployee.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteEmployee.isPending ? 'Removing…' : 'Remove'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

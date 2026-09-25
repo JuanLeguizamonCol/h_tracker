@@ -42,7 +42,10 @@ export function useCreateEmployee() {
 export function useDeleteEmployee() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.delete<void>(`/employees/${id}`),
+    // hard_deleted: true = actually removed; false = had history (hours,
+    // invoices, assignments, ...) so it was deactivated instead — see
+    // Backend/services/employees.py::delete_employee.
+    mutationFn: (id: string) => api.delete<{ hard_deleted: boolean }>(`/employees/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
     },

@@ -1,5 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import uuid
 
 from models.employees import Employee
@@ -81,10 +82,27 @@ def update_employee(db: Session, employee_id: str, employee_in: EmployeeUpdate) 
     return db_employee
 
 
-def delete_employee(db: Session, employee_id: str) -> bool:
+def delete_employee(db: Session, employee_id: str) -> Optional[bool]:
+    """Deletes the employee outright when nothing references them. Most FKs to
+    employees.id (time entries, assignments, PTO, invoice signatory, project
+    manager/owner, ...) have no ON DELETE CASCADE by design, so a departed
+    employee who has any real history can't be hard-deleted without dropping
+    that history — in that case we fall back to deactivating them instead.
+    The app role (UserRole) isn't "history" in that sense — every employee has
+    one — so it's removed along with the employee rather than being treated as
+    a reason to fall back. Returns None if not found, True if hard-deleted,
+    False if deactivated."""
     db_employee = get_employee(db, employee_id)
     if not db_employee:
+        return None
+    try:
+        db.query(UserRole).filter(UserRole.user_id == employee_id).delete()
+        db.delete(db_employee)
+        db.commit()
+        return True
+    except IntegrityError:
+        db.rollback()
+        db_employee = get_employee(db, employee_id)
+        db_employee.is_active = False
+        db.commit()
         return False
-    db.delete(db_employee)
-    db.commit()
-    return True

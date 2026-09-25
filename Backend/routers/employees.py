@@ -22,10 +22,14 @@ from models.user_roles import UserRole
 from models.projects import Project
 from models.employee_projects import EmployeeProject
 from utils.auth_jwt import get_current_employee
-from utils.roles import require_manager_or_admin, VALID_ROLES
+from utils.roles import require_manager_or_admin, get_role, VALID_ROLES
 import uuid
 
 employees_router = APIRouter(prefix="/employees", tags=["employees"])
+
+# Mirrors PROTECTED_EMAIL in routers/user_roles.py — this account can't be
+# demoted there, and can't be deleted here either.
+PROTECTED_EMAIL = "jleguizamon@impactpoint.com"
 
 
 def _auto_assign_internal_projects(db: Session, employee_id: str) -> None:
@@ -133,12 +137,29 @@ def update_employee_detail(employee_id: str, employee_in: EmployeeUpdate, db: Se
 
 @employees_router.delete(
     "/{employee_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_manager_or_admin)],
 )
-def delete_employee_detail(employee_id: str, db: Session = Depends(get_db)):
-    if not delete_employee(db, employee_id):
+def delete_employee_detail(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    target = get_employee(db, employee_id)
+    if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+    if employee_id == current_employee.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot delete your own account")
+    if target.email.lower() == PROTECTED_EMAIL:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account is protected and cannot be deleted")
+    if get_role(db, employee_id) == "admin":
+        admin_count = db.query(UserRole).filter(UserRole.role == "admin").count()
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="At least one admin is required — promote someone else first",
+            )
+    hard_deleted = delete_employee(db, employee_id)
+    return {"hard_deleted": hard_deleted}
 
 
 # ── Internal Cost (admin-only) ────────────────────────────────────────────────
