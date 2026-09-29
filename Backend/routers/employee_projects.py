@@ -35,7 +35,7 @@ class UpdateEpBody(BaseModel):
 
 
 @employee_projects_router.post("/", response_model=EmployeeProjectOut, status_code=status.HTTP_201_CREATED,
-                                dependencies=[Depends(require_admin)])
+                                dependencies=[Depends(require_manager_or_admin)])
 def create_new_employee_project(ep_in: EmployeeProjectCreate, db: Session = Depends(get_db)):
     return create_employee_project(db, ep_in)
 
@@ -76,7 +76,7 @@ def update_employee_project_detail(ep_id: str, body: UpdateEpBody, db: Session =
 
 
 @employee_projects_router.delete("/{ep_id}", status_code=status.HTTP_204_NO_CONTENT,
-                                  dependencies=[Depends(require_admin)])
+                                  dependencies=[Depends(require_manager_or_admin)])
 def delete_employee_project_detail(ep_id: str, db: Session = Depends(get_db)):
     if not delete_employee_project(db, ep_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee project not found")

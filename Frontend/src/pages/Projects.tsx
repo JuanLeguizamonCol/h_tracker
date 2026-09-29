@@ -28,7 +28,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function Projects() {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, canManage } = useAuth();
   const { data: projects = [], isLoading } = useProjects();
   const { data: clients = [] } = useActiveClients();
   const deleteProject = useDeleteProject();
@@ -80,7 +80,7 @@ export default function Projects() {
           <h1 className="text-2xl font-bold text-foreground">Projects</h1>
           <p className="text-muted-foreground">Manage projects, roles & rates, and employee assignments</p>
         </div>
-        {isAdmin && (
+        {canManage && (
           <Button className="gap-2" onClick={() => navigate('/projects/new')}>
             <Plus className="h-4 w-4" /> New Project
           </Button>

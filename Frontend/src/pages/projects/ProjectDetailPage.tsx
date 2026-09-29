@@ -57,7 +57,7 @@ function ProficiencyStars({ level }: { level: number }) {
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, canManage } = useAuth();
   const { data: project, isLoading } = useProject(projectId);
 
   if (isLoading || !project) {
@@ -129,11 +129,11 @@ export default function ProjectDetailPage() {
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>
           <TabsTrigger value="overview" className="gap-1.5"><LayoutDashboard className="h-4 w-4" /> Overview</TabsTrigger>
-          {/* Rates are Admin-only (see routers/project_roles.py) — hidden
-              from the tab bar entirely for everyone else, not just the
-              edit controls within it. */}
-          {isAdmin && (
-            <TabsTrigger value="roles" className="gap-1.5"><Tag className="h-4 w-4" /> Roles & Rates</TabsTrigger>
+          {/* Roles are Manager+Admin — hidden from the tab bar entirely for a
+              plain Employee. Rates within it stay Admin-only (see
+              ProjectRolesPanel and routers/project_roles.py). */}
+          {canManage && (
+            <TabsTrigger value="roles" className="gap-1.5"><Tag className="h-4 w-4" /> {isAdmin ? 'Roles & Rates' : 'Roles'}</TabsTrigger>
           )}
           <TabsTrigger value="assignments" className="gap-1.5"><Users className="h-4 w-4" /> Assignments</TabsTrigger>
         </TabsList>
@@ -181,14 +181,14 @@ export default function ProjectDetailPage() {
           </div>
         </TabsContent>
 
-        {isAdmin && (
+        {canManage && (
           <TabsContent value="roles" className="mt-4">
-            <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} isFixedFee={!!project.is_fixed_fee} canEdit={isAdmin} /></CardContent></Card>
+            <Card><CardContent className="pt-6"><ProjectRolesPanel projectId={project.id} isManagedServices={!!project.is_managed_services} isFixedFee={!!project.is_fixed_fee} canEdit={isAdmin} canCreate={canManage} /></CardContent></Card>
           </TabsContent>
         )}
 
         <TabsContent value="assignments" className="mt-4">
-          <Card><CardContent className="pt-6"><ProjectAssignmentsPanel projectId={project.id} canEdit={isAdmin} /></CardContent></Card>
+          <Card><CardContent className="pt-6"><ProjectAssignmentsPanel projectId={project.id} canEdit={canManage} /></CardContent></Card>
         </TabsContent>
       </Tabs>
     </div>
@@ -205,8 +205,16 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 // ── Roles & Rates Panel ──────────────────────────────────────────────────────
-function ProjectRolesPanel({ projectId, isManagedServices, isFixedFee, canEdit }: { projectId: string; isManagedServices: boolean; isFixedFee: boolean; canEdit: boolean }) {
-  const { data: roles = [], isLoading } = useProjectRoles(projectId);
+function ProjectRolesPanel({ projectId, isManagedServices, isFixedFee, canEdit, canCreate }: { projectId: string; isManagedServices: boolean; isFixedFee: boolean; canEdit: boolean; canCreate: boolean }) {
+  // canEdit (Admin) sees rates and can edit/delete a role — fetched from the
+  // Admin-only, rate-bearing endpoint. A Manager (canCreate but not canEdit)
+  // only ever sees role names — same name-only endpoint used elsewhere for
+  // non-admin viewers — and can create a role, never its rate (the backend
+  // zeroes any rate fields a non-admin request carries regardless; see
+  // routers/project_roles.py).
+  const { data: rolesWithRates = [], isLoading: loadingRates } = useProjectRoles(canEdit ? projectId : undefined);
+  const { data: roleNames = [], isLoading: loadingNames } = useProjectRoleNames(!canEdit ? projectId : undefined);
+  const isLoading = canEdit ? loadingRates : loadingNames;
   const createRole = useCreateProjectRole();
   const updateRole = useUpdateProjectRole();
   const deleteRole = useDeleteProjectRole();
@@ -270,18 +278,21 @@ function ProjectRolesPanel({ projectId, isManagedServices, isFixedFee, canEdit }
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Define roles and how each bills (USD) for this project: hourly, or a fixed fee per week, month or project for each person on the role.
-          {isManagedServices && ' Managed Services: enable a minimum per role to bill max(actual, minimum), and optionally bill hours over that minimum quarterly.'}
+          {canEdit
+            ? <>Define roles and how each bills (USD) for this project: hourly, or a fixed fee per week, month or project for each person on the role.
+                {isManagedServices && ' Managed Services: enable a minimum per role to bill max(actual, minimum), and optionally bill hours over that minimum quarterly.'}</>
+            : 'Roles defined for this project. Billing rates are set by an Admin.'}
         </p>
-        {canEdit && (
+        {canCreate && (
           <Button size="sm" className="gap-1.5" onClick={() => { setForm(emptyForm); setIsAddOpen(true); }}>
             <Plus className="h-4 w-4" /> Add Role
           </Button>
         )}
       </div>
-      {roles.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-6 text-center">No roles defined.</p>
-      ) : (
+      {canEdit ? (
+        rolesWithRates.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">No roles defined.</p>
+        ) : (
         <Table>
           <TableHeader>
             <TableRow>
@@ -289,11 +300,11 @@ function ProjectRolesPanel({ projectId, isManagedServices, isFixedFee, canEdit }
               <TableHead className="text-right">Billing (USD)</TableHead>
               {isManagedServices && <TableHead className="text-right">Min Hours</TableHead>}
               {isManagedServices && <TableHead className="text-right">Additional Hours</TableHead>}
-              {canEdit && <TableHead className="text-right w-24">Actions</TableHead>}
+              <TableHead className="text-right w-24">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {roles.map(role => (
+            {rolesWithRates.map(role => (
               <TableRow key={role.id}>
                 <TableCell className="font-medium">{role.name}</TableCell>
                 <TableCell className="text-right font-semibold text-primary">{roleBillingLabel(role)}</TableCell>
@@ -311,18 +322,32 @@ function ProjectRolesPanel({ projectId, isManagedServices, isFixedFee, canEdit }
                       : <span className="text-muted-foreground">Off</span>}
                   </TableCell>
                 )}
-                {canEdit && (
-                  <TableCell className="text-right">
-                    <div className="flex gap-1 justify-end">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: role.fixed_fee_period ? Number(role.fixed_fee_amount ?? 0) : Number(role.hourly_rate_usd), fixed_fee_period: role.fixed_fee_period ?? null, min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', min_hours_basis: (role.min_hours_basis ?? 'period') as MinHoursBasis, additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(role.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                )}
+                <TableCell className="text-right">
+                  <div className="flex gap-1 justify-end">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setForm({ name: role.name, hourly_rate_usd: role.fixed_fee_period ? Number(role.fixed_fee_amount ?? 0) : Number(role.hourly_rate_usd), fixed_fee_period: role.fixed_fee_period ?? null, min_hours_enabled: !!role.min_hours_enabled, min_hours: role.min_hours != null ? String(role.min_hours) : '', min_hours_basis: (role.min_hours_basis ?? 'period') as MinHoursBasis, additional_hours_enabled: !!role.additional_hours_enabled, additional_hours_rate: role.additional_hours_rate != null ? String(role.additional_hours_rate) : '' }); setEditingRole(role); }}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(role.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        )
+      ) : roleNames.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-6 text-center">No roles defined.</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow><TableHead>Role Name</TableHead></TableRow>
+          </TableHeader>
+          <TableBody>
+            {roleNames.map(role => (
+              <TableRow key={role.id}>
+                <TableCell className="font-medium">{role.name}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -336,21 +361,27 @@ function ProjectRolesPanel({ projectId, isManagedServices, isFixedFee, canEdit }
               <Label>Role name</Label>
               <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Senior Developer" />
             </div>
-            <div className="space-y-1">
-              <Label>{allowFixed ? 'Billing (USD)' : 'Hourly rate (USD)'}</Label>
-              <RoleBillingInput
-                period={form.fixed_fee_period}
-                amount={form.hourly_rate_usd}
-                allowFixed={allowFixed}
-                onChange={(period, amount) => setForm({ ...form, fixed_fee_period: period, hourly_rate_usd: amount })}
-              />
-              {allowFixed && form.fixed_fee_period && (
-                <p className="text-xs text-muted-foreground">
-                  Each person on this role is billed this fee {form.fixed_fee_period === 'project' ? 'on every invoice' : `per ${form.fixed_fee_period}`} for the days on the invoice, regardless of hours.
-                </p>
-              )}
-            </div>
-            {isManagedServices && (
+            {canEdit ? (
+              <div className="space-y-1">
+                <Label>{allowFixed ? 'Billing (USD)' : 'Hourly rate (USD)'}</Label>
+                <RoleBillingInput
+                  period={form.fixed_fee_period}
+                  amount={form.hourly_rate_usd}
+                  allowFixed={allowFixed}
+                  onChange={(period, amount) => setForm({ ...form, fixed_fee_period: period, hourly_rate_usd: amount })}
+                />
+                {allowFixed && form.fixed_fee_period && (
+                  <p className="text-xs text-muted-foreground">
+                    Each person on this role is billed this fee {form.fixed_fee_period === 'project' ? 'on every invoice' : `per ${form.fixed_fee_period}`} for the days on the invoice, regardless of hours.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                The billing rate isn't set here — an Admin will add it afterward.
+              </p>
+            )}
+            {canEdit && isManagedServices && (
               <div className="rounded-md border p-3 bg-muted/20 space-y-3">
                 <div className="flex items-center gap-3">
                   <Switch checked={form.min_hours_enabled} onCheckedChange={v => setForm({ ...form, min_hours_enabled: v })} />
@@ -378,7 +409,7 @@ function ProjectRolesPanel({ projectId, isManagedServices, isFixedFee, canEdit }
                 )}
               </div>
             )}
-            {isManagedServices && (
+            {canEdit && isManagedServices && (
               <div className="rounded-md border p-3 bg-muted/20 space-y-3">
                 <div className="flex items-center gap-3">
                   <Switch checked={form.additional_hours_enabled} onCheckedChange={v => setForm({ ...form, additional_hours_enabled: v })} />
@@ -561,13 +592,16 @@ function ManageRequiredSkillsDialog({
 
 // ── Assignments Panel ─────────────────────────────────────────────────────────
 function ProjectAssignmentsPanel({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
+  // canEdit = Manager or Admin (can assign/unassign people and change a
+  // role). Rates are Admin-only regardless: isAdmin alone decides whether the
+  // role-change dropdown shows a billing label, and only Admin ever triggers
+  // the rate-bearing fetch below — a Manager always sees plain role names.
+  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const { data: assignments = [], isLoading } = useProjectAssignments(projectId);
-  // Name-only — safe for every viewer of this page (no route guard). Rates
-  // are Admin-only, fetched separately below just for the rate-editing
-  // dropdown, which itself only renders when canEdit (Admin) is true.
+  // Name-only — safe for every viewer of this page (no route guard).
   const { data: roles = [] } = useProjectRoleNames(projectId);
-  const { data: rolesWithRates = [] } = useProjectRoles(canEdit ? projectId : undefined);
+  const { data: rolesWithRates = [] } = useProjectRoles(isAdmin ? projectId : undefined);
 
   // ── Skill filter state ──
   type SkillChip = { id: string; name: string };
@@ -706,7 +740,7 @@ function ProjectAssignmentsPanel({ projectId, canEdit }: { projectId: string; ca
         <SkillGapSection projectId={projectId} onManageSkills={() => setManageOpen(true)} />
       )}
 
-      {/* ── Add Employee (Admin only — see canEdit) ── */}
+      {/* ── Add Employee (Manager or Admin — see canEdit) ── */}
       {canEdit && (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
@@ -935,7 +969,7 @@ function ProjectAssignmentsPanel({ projectId, canEdit }: { projectId: string; ca
               <TableRow key={a.id}>
                 <TableCell className="font-medium">{a.employee_name}</TableCell>
                 <TableCell>
-                  {canEdit ? (
+                  {isAdmin ? (
                     <Select value={a.role_id || '__none__'} onValueChange={v => handleChangeRole(a.id, v)}>
                       <SelectTrigger className="w-52 h-8">
                         <SelectValue placeholder="Select role" />
@@ -946,6 +980,18 @@ function ProjectAssignmentsPanel({ projectId, canEdit }: { projectId: string; ca
                           <SelectItem key={role.id} value={role.id}>
                             {role.name} — {roleBillingLabel(role)}
                           </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : canEdit ? (
+                    <Select value={a.role_id || '__none__'} onValueChange={v => handleChangeRole(a.id, v)}>
+                      <SelectTrigger className="w-52 h-8">
+                        <SelectValue placeholder="Select role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No role</SelectItem>
+                        {roles.map(role => (
+                          <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

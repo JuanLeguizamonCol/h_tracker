@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, Plus, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCreateProject, useProjectCategories, useAdminEmployees, useManagerEmployees } from '@/hooks/useProjects';
+import { useAuth } from '@/contexts/AuthContext';
 import { useActiveClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useQueryClient } from '@tanstack/react-query';
@@ -78,6 +79,11 @@ export default function ProjectNewPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
+  // Managers can reach this wizard and create roles, but never set a rate or
+  // Managed Services billing config — that stays Admin-only (see
+  // routers/project_roles.py, which silently zeroes those fields anyway if
+  // a Manager's request somehow carried them).
+  const { isAdmin } = useAuth();
 
   const { data: clients = [] } = useActiveClients();
   const { data: areaCategories = [] } = useProjectCategories('area_category');
@@ -535,59 +541,65 @@ export default function ProjectNewPage() {
               </div>
             </div>
 
-            {/* Billing Configuration */}
-            <div className="space-y-3 border rounded-md p-3 bg-muted/20">
-              <Label className="text-sm font-semibold">Billing Configuration</Label>
+            {/* Billing Configuration — Admin only (see routers/projects.py,
+                which zeroes these fields anyway if a non-admin's request
+                somehow carried them). A Manager's project is always plain
+                hourly billing; an Admin sets fixed fee / Managed Services
+                afterward from the project's Edit page. */}
+            {isAdmin && (
+              <div className="space-y-3 border rounded-md p-3 bg-muted/20">
+                <Label className="text-sm font-semibold">Billing Configuration</Label>
 
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={form.is_fixed_fee}
-                  onCheckedChange={v => { set('is_fixed_fee', v); if (v) set('is_managed_services', false); }}
-                />
-                <div>
-                  <Label>Fixed fee project</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Bills a flat fee regardless of hours worked — for the whole project, or a fixed rate per week or per month.
-                    Invoices for this project will only show hours for reference.
-                  </p>
-                </div>
-              </div>
-              {form.is_fixed_fee && (
-                <div className="space-y-3">
-                  <FixedFeePeriodPicker value={form.fixed_fee_period} onChange={v => set('fixed_fee_period', v)} />
-                  <div className="space-y-1 max-w-xs">
-                    <Label>{fixedFeeAmountLabel(form.fixed_fee_period)} *</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.fixed_fee_amount}
-                      onChange={e => set('fixed_fee_amount', e.target.value)}
-                      placeholder="0.00"
-                    />
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={form.is_fixed_fee}
+                    onCheckedChange={v => { set('is_fixed_fee', v); if (v) set('is_managed_services', false); }}
+                  />
+                  <div>
+                    <Label>Fixed fee project</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Bills a flat fee regardless of hours worked — for the whole project, or a fixed rate per week or per month.
+                      Invoices for this project will only show hours for reference.
+                    </p>
                   </div>
                 </div>
-              )}
+                {form.is_fixed_fee && (
+                  <div className="space-y-3">
+                    <FixedFeePeriodPicker value={form.fixed_fee_period} onChange={v => set('fixed_fee_period', v)} />
+                    <div className="space-y-1 max-w-xs">
+                      <Label>{fixedFeeAmountLabel(form.fixed_fee_period)} *</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.fixed_fee_amount}
+                        onChange={e => set('fixed_fee_amount', e.target.value)}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                )}
 
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={form.is_managed_services}
-                  onCheckedChange={v => { set('is_managed_services', v); if (v) set('is_fixed_fee', false); }}
-                />
-                <div>
-                  <Label>Managed Services project</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Bills a minimum hours package. If actual hours fall short, the minimum is still charged; hours above it bill normally.
-                  </p>
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={form.is_managed_services}
+                    onCheckedChange={v => { set('is_managed_services', v); if (v) set('is_fixed_fee', false); }}
+                  />
+                  <div>
+                    <Label>Managed Services project</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Bills a minimum hours package. If actual hours fall short, the minimum is still charged; hours above it bill normally.
+                    </p>
+                  </div>
                 </div>
+                {form.is_managed_services && (
+                  <p className="text-xs text-muted-foreground rounded-md border border-dashed p-2">
+                    Set the minimum hours <strong>per role</strong> in the next step (Roles &amp; Rates).
+                    Each position can have its minimum turned on or off.
+                  </p>
+                )}
               </div>
-              {form.is_managed_services && (
-                <p className="text-xs text-muted-foreground rounded-md border border-dashed p-2">
-                  Set the minimum hours <strong>per role</strong> in the next step (Roles &amp; Rates).
-                  Each position can have its minimum turned on or off.
-                </p>
-              )}
-            </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -611,9 +623,13 @@ export default function ProjectNewPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Role Name</TableHead>
-                    <TableHead className="w-72">Billing (USD)</TableHead>
-                    {form.is_managed_services && <TableHead className="w-56">Minimum hours</TableHead>}
-                    {form.is_managed_services && <TableHead className="w-56">Additional hours (quarterly)</TableHead>}
+                    {isAdmin ? (
+                      <TableHead className="w-72">Billing (USD)</TableHead>
+                    ) : (
+                      <TableHead className="w-56">Billing</TableHead>
+                    )}
+                    {isAdmin && form.is_managed_services && <TableHead className="w-56">Minimum hours</TableHead>}
+                    {isAdmin && form.is_managed_services && <TableHead className="w-56">Additional hours (quarterly)</TableHead>}
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -629,15 +645,19 @@ export default function ProjectNewPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        <RoleBillingInput
-                          period={row.fixed_fee_period}
-                          amount={row.hourly_rate_usd}
-                          allowFixed={!form.is_fixed_fee && !form.is_managed_services}
-                          onChange={(period, amount) => setRoles(rs => rs.map(r =>
-                            r._tempId === row._tempId ? { ...r, fixed_fee_period: period, hourly_rate_usd: amount } : r))}
-                        />
+                        {isAdmin ? (
+                          <RoleBillingInput
+                            period={row.fixed_fee_period}
+                            amount={row.hourly_rate_usd}
+                            allowFixed={!form.is_fixed_fee && !form.is_managed_services}
+                            onChange={(period, amount) => setRoles(rs => rs.map(r =>
+                              r._tempId === row._tempId ? { ...r, fixed_fee_period: period, hourly_rate_usd: amount } : r))}
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Set by an Admin</span>
+                        )}
                       </TableCell>
-                      {form.is_managed_services && (
+                      {isAdmin && form.is_managed_services && (
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Switch
@@ -668,7 +688,7 @@ export default function ProjectNewPage() {
                           </div>
                         </TableCell>
                       )}
-                      {form.is_managed_services && (
+                      {isAdmin && form.is_managed_services && (
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Switch

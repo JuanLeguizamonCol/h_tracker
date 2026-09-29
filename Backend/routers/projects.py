@@ -4,7 +4,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config.database import get_db
-from utils.auth_jwt import require_admin
+from utils.auth_jwt import require_admin, get_current_employee
+from utils.roles import require_manager_or_admin, get_role
 from services.projects import create_project, get_projects, get_project, update_project, delete_project
 from schemas.projects import ProjectCreate, ProjectUpdate, ProjectOut, ProjectCategoryOut, ProjectAssignmentOut
 from schemas.project_required_skill import (
@@ -116,9 +117,27 @@ def preview_project_code_endpoint(client_id: str, db: Session = Depends(get_db))
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
+
+# A Manager can create a project — but never its billing config (fixed fee /
+# Managed Services), which stays Admin-only, same as a role's rate (see
+# routers/project_roles.py). Silently zeroing those fields here (rather than
+# 403ing) means the frontend's wizard — which already hides this section from
+# non-admins — needs no special-casing of the request it sends.
 @projects_router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED,
-                       dependencies=[Depends(require_admin)])
-def create_new_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
+                       dependencies=[Depends(require_manager_or_admin)])
+def create_new_project(
+    project_in: ProjectCreate,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    if get_role(db, current_employee.id) != "admin":
+        project_in = project_in.model_copy(update={
+            "is_fixed_fee": False,
+            "fixed_fee_amount": None,
+            "fixed_fee_period": "project",
+            "is_managed_services": False,
+            "managed_services_min_hours": None,
+        })
     project = create_project(db, project_in)
     if project.is_internal:
         _auto_assign_all_employees(db, project.id)

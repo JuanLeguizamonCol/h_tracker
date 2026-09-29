@@ -58,7 +58,7 @@ const App = () => (
               <Route path="/timesheet" element={<ProtectedRoute><MainLayout><Timesheet /></MainLayout></ProtectedRoute>} />
               <Route path="/history" element={<ProtectedRoute><MainLayout><History /></MainLayout></ProtectedRoute>} />
               <Route path="/projects" element={<ProtectedRoute><MainLayout><Projects /></MainLayout></ProtectedRoute>} />
-              <Route path="/projects/new" element={<ProtectedRoute><MainLayout><AdminGuard adminOnly><ProjectNewPage /></AdminGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/projects/new" element={<ProtectedRoute><MainLayout><AdminGuard><ProjectNewPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/projects/:projectId/edit" element={<ProtectedRoute><MainLayout><AdminGuard adminOnly><ProjectEditPage /></AdminGuard></MainLayout></ProtectedRoute>} />
               <Route path="/projects/:projectId" element={<ProtectedRoute><MainLayout><ProjectDetailPage /></MainLayout></ProtectedRoute>} />
               <Route path="/clients" element={<ProtectedRoute><MainLayout><Clients /></MainLayout></ProtectedRoute>} />

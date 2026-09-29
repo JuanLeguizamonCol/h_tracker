@@ -195,3 +195,7 @@ graphify-out/
 # Blob Storage in prod; this only fills up with test files from local dev.
 # The attachment routers os.makedirs() it at runtime as needed.
 Backend/uploads/
+
+# Candidate technical-assessment materials (interviewer-only: rubrics, answer keys,
+# and data derived from real client/employee names) — never part of the app itself.
+assessment/

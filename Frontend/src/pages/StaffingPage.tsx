@@ -113,17 +113,20 @@ export default function StaffingPage() {
     if (!createRoleFor || !newRoleName.trim()) { toast.error('Enter a role name.'); return; }
     setIsCreatingRole(true);
     try {
+      // A Manager never sets the rate here — the input isn't even shown to
+      // them (see the dialog below); the backend also zeroes it regardless
+      // of role (see routers/project_roles.py).
       const role = await createProjectRole.mutateAsync({
         project_id: createRoleFor.projectId,
         name: newRoleName.trim(),
-        hourly_rate_usd: newRoleRate ? parseFloat(newRoleRate) : 0,
+        hourly_rate_usd: isAdmin && newRoleRate ? parseFloat(newRoleRate) : 0,
       });
       if (createRoleFor.targetRow) {
         await commitRole(createRoleFor.targetRow, role.id);
       } else {
         setForm(f => ({ ...f, roleId: role.id }));
       }
-      toast.success(`Role "${role.name}" created${newRoleRate ? '' : ' — remember to set its rate'}.`);
+      toast.success(`Role "${role.name}" created${isAdmin && newRoleRate ? '' : isAdmin ? ' — remember to set its rate' : ''}.`);
       setCreateRoleFor(null);
       setNewRoleName('');
       setNewRoleRate('');
@@ -537,7 +540,7 @@ export default function StaffingPage() {
               : "Who's staffed on which project, and how much of their time it takes. Ask an Admin or Manager to make changes here."}
           </p>
         </div>
-        {isAdmin && (
+        {canManage && (
           <Button className="gap-2" onClick={openAdd}>
             <Plus className="h-4 w-4" /> New Assignment
           </Button>
@@ -576,7 +579,7 @@ export default function StaffingPage() {
                       </Badge>
                     )}
                   </CardTitle>
-                  {isAdmin && (
+                  {canManage && (
                     <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAddFor(group.userId)}>
                       <Plus className="h-3.5 w-3.5" /> Add Project
                     </Button>
@@ -626,7 +629,7 @@ export default function StaffingPage() {
                                   {(rolesByProject.get(row.project_id) ?? []).map(r => (
                                     <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                                   ))}
-                                  {isAdmin && (
+                                  {canManage && (
                                     <SelectItem value="_create_new" className="text-primary">
                                       <span className="flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" /> Create new role…</span>
                                     </SelectItem>
@@ -717,7 +720,7 @@ export default function StaffingPage() {
                           </TableCell>
 
                           <TableCell className="text-right">
-                            {isAdmin && (
+                            {canManage && (
                               <div className="flex gap-1 justify-end">
                                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(row)} title="Full edit (incl. project dates)">
                                   <Pencil className="h-4 w-4" />
@@ -926,21 +929,27 @@ export default function StaffingPage() {
                 placeholder="e.g. Associate"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Hourly Rate (optional)</Label>
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-muted-foreground">$</span>
-                <Input
-                  type="number" min="0" step="0.01"
-                  value={newRoleRate}
-                  onChange={e => setNewRoleRate(e.target.value)}
-                  placeholder="0.00"
-                />
+            {isAdmin ? (
+              <div className="space-y-1.5">
+                <Label>Hourly Rate (optional)</Label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground">$</span>
+                  <Input
+                    type="number" min="0" step="0.01"
+                    value={newRoleRate}
+                    onChange={e => setNewRoleRate(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave blank to set it later — invoicing will flag $0 lines for this role until it's set.
+                </p>
               </div>
+            ) : (
               <p className="text-xs text-muted-foreground">
-                Leave blank to set it later — invoicing will flag $0 lines for this role until it's set.
+                The billing rate isn't set here — an Admin will add it afterward.
               </p>
-            </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateRoleFor(null)}>Cancel</Button>
