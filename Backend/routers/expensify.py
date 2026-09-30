@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from config.database import get_db
+from utils.section_access import require_section_edit
 from services.expensify_service import fetch_expense_reports, filter_approved_only, _credentials_configured
 from models.invoice_expenses import InvoiceExpense
 from models.invoice import Invoice
@@ -65,7 +66,7 @@ async def preview_reports(
     }
 
 
-@expensify_router.post("/sync")
+@expensify_router.post("/sync", dependencies=[Depends(require_section_edit('invoices'))])
 async def sync_to_invoice(
     invoice_id: str,
     project_code: Optional[str] = None,

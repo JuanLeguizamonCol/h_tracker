@@ -6,7 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { AdminGuard } from "@/components/AdminGuard";
-import { InvoiceGuard } from "@/components/InvoiceGuard";
+import { SectionGuard } from "@/components/SectionGuard";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { lazy, Suspense } from "react";
 
@@ -54,28 +54,28 @@ const App = () => (
           <Suspense fallback={null}>
             <Routes>
               <Route path="/auth" element={<Auth />} />
-              <Route path="/" element={<ProtectedRoute><MainLayout><Dashboard /></MainLayout></ProtectedRoute>} />
-              <Route path="/timesheet" element={<ProtectedRoute><MainLayout><Timesheet /></MainLayout></ProtectedRoute>} />
-              <Route path="/history" element={<ProtectedRoute><MainLayout><History /></MainLayout></ProtectedRoute>} />
-              <Route path="/projects" element={<ProtectedRoute><MainLayout><Projects /></MainLayout></ProtectedRoute>} />
-              <Route path="/projects/new" element={<ProtectedRoute><MainLayout><AdminGuard><ProjectNewPage /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/projects/:projectId/edit" element={<ProtectedRoute><MainLayout><AdminGuard adminOnly><ProjectEditPage /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/projects/:projectId" element={<ProtectedRoute><MainLayout><ProjectDetailPage /></MainLayout></ProtectedRoute>} />
-              <Route path="/clients" element={<ProtectedRoute><MainLayout><Clients /></MainLayout></ProtectedRoute>} />
-              <Route path="/clients/new" element={<ProtectedRoute><MainLayout><ClientFormPage /></MainLayout></ProtectedRoute>} />
-              <Route path="/clients/:clientId/edit" element={<ProtectedRoute><MainLayout><ClientFormPage /></MainLayout></ProtectedRoute>} />
-              <Route path="/employees" element={<ProtectedRoute><MainLayout><AdminGuard><Employees /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/employees/new" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/employees/:employeeId" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeProfilePage /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/employees/:employeeId/edit" element={<ProtectedRoute><MainLayout><AdminGuard><EmployeeFormPage /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/staffing" element={<ProtectedRoute><MainLayout><StaffingPage /></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices" element={<ProtectedRoute><MainLayout><InvoiceGuard><Invoices /></InvoiceGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices/new" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceNewPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices/new/manual" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceManualPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices/:invoiceId/edit" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceEditPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/invoices/:invoiceId" element={<ProtectedRoute><MainLayout><InvoiceGuard><InvoiceDetailPage /></InvoiceGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/reports" element={<ProtectedRoute><MainLayout><AdminGuard><Reports /></AdminGuard></MainLayout></ProtectedRoute>} />
-              <Route path="/profile" element={<ProtectedRoute><MainLayout><ProfilePage /></MainLayout></ProtectedRoute>} />
+              <Route path="/" element={<ProtectedRoute><MainLayout><SectionGuard section="dashboard"><Dashboard /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/timesheet" element={<ProtectedRoute><MainLayout><SectionGuard section="timesheet"><Timesheet /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/history" element={<ProtectedRoute><MainLayout><SectionGuard section="history"><History /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/projects" element={<ProtectedRoute><MainLayout><SectionGuard section="projects"><Projects /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/projects/new" element={<ProtectedRoute><MainLayout><SectionGuard section="projects" level="edit"><ProjectNewPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/projects/:projectId/edit" element={<ProtectedRoute><MainLayout><AdminGuard><ProjectEditPage /></AdminGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/projects/:projectId" element={<ProtectedRoute><MainLayout><SectionGuard section="projects"><ProjectDetailPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/clients" element={<ProtectedRoute><MainLayout><SectionGuard section="clients"><Clients /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/clients/new" element={<ProtectedRoute><MainLayout><SectionGuard section="clients" level="edit"><ClientFormPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/clients/:clientId/edit" element={<ProtectedRoute><MainLayout><SectionGuard section="clients" level="edit"><ClientFormPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/employees" element={<ProtectedRoute><MainLayout><SectionGuard section="employees"><Employees /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/employees/new" element={<ProtectedRoute><MainLayout><SectionGuard section="employees" level="edit"><EmployeeFormPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/employees/:employeeId" element={<ProtectedRoute><MainLayout><SectionGuard section="employees"><EmployeeProfilePage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/employees/:employeeId/edit" element={<ProtectedRoute><MainLayout><SectionGuard section="employees" level="edit"><EmployeeFormPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/staffing" element={<ProtectedRoute><MainLayout><SectionGuard section="staffing"><StaffingPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices" element={<ProtectedRoute><MainLayout><SectionGuard section="invoices"><Invoices /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices/new" element={<ProtectedRoute><MainLayout><SectionGuard section="invoices" level="edit"><InvoiceNewPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices/new/manual" element={<ProtectedRoute><MainLayout><SectionGuard section="invoices" level="edit"><InvoiceManualPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices/:invoiceId/edit" element={<ProtectedRoute><MainLayout><SectionGuard section="invoices" level="edit"><InvoiceEditPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/invoices/:invoiceId" element={<ProtectedRoute><MainLayout><SectionGuard section="invoices"><InvoiceDetailPage /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/reports" element={<ProtectedRoute><MainLayout><SectionGuard section="reports"><Reports /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/profile" element={<ProtectedRoute><MainLayout><SectionGuard section="profile"><ProfilePage /></SectionGuard></MainLayout></ProtectedRoute>} />
               {/* Legacy routes */}
               <Route path="/historial" element={<Navigate to="/history" replace />} />
               <Route path="/proyectos" element={<Navigate to="/projects" replace />} />

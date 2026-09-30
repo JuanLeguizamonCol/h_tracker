@@ -20,6 +20,7 @@ from models.clients import Client
 from models.project_roles import ProjectRole
 from utils.auth_jwt import get_current_employee
 from utils.roles import get_role
+from utils.section_access import require_section_view
 from services.export_excel import generate_time_entries_report_xlsx
 
 reports_router = APIRouter(prefix="/reports", tags=["reports"])
@@ -32,7 +33,7 @@ def _is_manager_or_admin(emp: Employee, db: Session) -> bool:
     return get_role(db, emp.id) in ("admin", "manager")
 
 
-@reports_router.get("/time-entries/export/xlsx")
+@reports_router.get("/time-entries/export/xlsx", dependencies=[Depends(require_section_view('reports'))])
 def export_time_entries_xlsx(
     date_gte: Optional[date] = None,
     date_lte: Optional[date] = None,

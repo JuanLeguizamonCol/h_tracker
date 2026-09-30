@@ -35,7 +35,8 @@ const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string }> = {
 
 export default function Invoices() {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { hasEdit } = useAuth();
+  const canEditInvoices = hasEdit('invoices');
   const { data: invoices = [], isLoading, refetch, isRefetching } = useInvoices();
   const { data: projects = [] } = useProjects();
   const { data: clients = [] } = useClients();
@@ -188,9 +189,11 @@ export default function Invoices() {
             {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Excel Report
           </Button>
-          <Button className="gap-2" onClick={() => navigate('/invoices/new')}>
-            <Plus className="h-4 w-4" />New Invoice
-          </Button>
+          {canEditInvoices && (
+            <Button className="gap-2" onClick={() => navigate('/invoices/new')}>
+              <Plus className="h-4 w-4" />New Invoice
+            </Button>
+          )}
         </div>
       </div>
 
@@ -362,7 +365,7 @@ export default function Invoices() {
                       >
                         <ChevronRight className="h-4 w-4" />
                       </Button>
-                      {isAdmin && (
+                      {canEditInvoices && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon">

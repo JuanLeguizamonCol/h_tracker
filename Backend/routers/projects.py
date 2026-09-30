@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from utils.auth_jwt import require_admin, get_current_employee
-from utils.roles import require_manager_or_admin, get_role
+from utils.roles import get_role
+from utils.section_access import require_section_view, require_section_edit
 from services.projects import create_project, get_projects, get_project, update_project, delete_project
 from schemas.projects import ProjectCreate, ProjectUpdate, ProjectOut, ProjectCategoryOut, ProjectAssignmentOut
 from schemas.project_required_skill import (
@@ -124,7 +125,7 @@ def preview_project_code_endpoint(client_id: str, db: Session = Depends(get_db))
 # 403ing) means the frontend's wizard — which already hides this section from
 # non-admins — needs no special-casing of the request it sends.
 @projects_router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED,
-                       dependencies=[Depends(require_manager_or_admin)])
+                       dependencies=[Depends(require_section_edit('projects'))])
 def create_new_project(
     project_in: ProjectCreate,
     db: Session = Depends(get_db),
@@ -144,7 +145,7 @@ def create_new_project(
     return _with_manager_name(project, db)
 
 
-@projects_router.get("/", response_model=List[ProjectOut])
+@projects_router.get("/", response_model=List[ProjectOut], dependencies=[Depends(require_section_view('projects'))])
 def list_projects(
     active: Optional[bool] = None,
     client_id: Optional[str] = None,
@@ -169,7 +170,8 @@ def list_projects(
 
 # ── Project sub-resources (before /{project_id} catch-all) ───────────────────
 
-@projects_router.get("/{project_id}/assignments", response_model=List[ProjectAssignmentOut])
+@projects_router.get("/{project_id}/assignments", response_model=List[ProjectAssignmentOut],
+                     dependencies=[Depends(require_section_view('projects'))])
 def get_project_assignments(project_id: str, db: Session = Depends(get_db)):
     assignments = db.query(EmployeeProject).filter(EmployeeProject.project_id == project_id).all()
     # Batch employee + role lookups instead of querying per assignment (N+1).
@@ -197,7 +199,8 @@ def get_project_assignments(project_id: str, db: Session = Depends(get_db)):
     return result
 
 
-@projects_router.get("/{project_id}/assignable-employees", response_model=List[AssignableEmployeeOut])
+@projects_router.get("/{project_id}/assignable-employees", response_model=List[AssignableEmployeeOut],
+                     dependencies=[Depends(require_section_view('projects'))])
 def get_assignable_employees(
     project_id: str,
     name: Optional[str] = None,
@@ -282,7 +285,8 @@ def get_assignable_employees(
     return result
 
 
-@projects_router.get("/{project_id}/required-skills", response_model=List[ProjectRequiredSkillOut])
+@projects_router.get("/{project_id}/required-skills", response_model=List[ProjectRequiredSkillOut],
+                     dependencies=[Depends(require_section_view('projects'))])
 def get_required_skills(project_id: str, db: Session = Depends(get_db)):
     records = db.query(ProjectRequiredSkill).filter(ProjectRequiredSkill.project_id == project_id).all()
     result = []
@@ -299,7 +303,8 @@ def get_required_skills(project_id: str, db: Session = Depends(get_db)):
     return result
 
 
-@projects_router.post("/{project_id}/required-skills", response_model=ProjectRequiredSkillOut, status_code=status.HTTP_201_CREATED)
+@projects_router.post("/{project_id}/required-skills", response_model=ProjectRequiredSkillOut, status_code=status.HTTP_201_CREATED,
+                      dependencies=[Depends(require_section_edit('projects'))])
 def add_required_skill(project_id: str, body: ProjectRequiredSkillCreate, db: Session = Depends(get_db)):
     if not get_project(db, project_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -332,7 +337,8 @@ def add_required_skill(project_id: str, body: ProjectRequiredSkillCreate, db: Se
     )
 
 
-@projects_router.delete("/{project_id}/required-skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+@projects_router.delete("/{project_id}/required-skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT,
+                        dependencies=[Depends(require_section_edit('projects'))])
 def remove_required_skill(project_id: str, skill_id: str, db: Session = Depends(get_db)):
     record = (
         db.query(ProjectRequiredSkill)
@@ -345,7 +351,8 @@ def remove_required_skill(project_id: str, skill_id: str, db: Session = Depends(
     db.commit()
 
 
-@projects_router.get("/{project_id}/skill-coverage", response_model=List[SkillCoverageOut])
+@projects_router.get("/{project_id}/skill-coverage", response_model=List[SkillCoverageOut],
+                     dependencies=[Depends(require_section_view('projects'))])
 def get_skill_coverage(project_id: str, db: Session = Depends(get_db)):
     required = db.query(ProjectRequiredSkill).filter(ProjectRequiredSkill.project_id == project_id).all()
     if not required:
@@ -383,7 +390,7 @@ def get_skill_coverage(project_id: str, db: Session = Depends(get_db)):
 
 # ── Project CRUD (catch-all /{project_id}) ────────────────────────────────────
 
-@projects_router.get("/{project_id}", response_model=ProjectOut)
+@projects_router.get("/{project_id}", response_model=ProjectOut, dependencies=[Depends(require_section_view('projects'))])
 def get_project_detail(project_id: str, db: Session = Depends(get_db)):
     project = get_project(db, project_id)
     if not project:

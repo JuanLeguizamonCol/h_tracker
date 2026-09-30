@@ -21,6 +21,7 @@ from schemas.employees import EmployeeOut
 from schemas.skills import EmployeeSkillCreate, EmployeeSkillUpdate, EmployeeSkillOut
 from utils.auth_jwt import get_current_employee
 from utils.roles import get_role
+from utils.section_access import require_section_view, require_section_edit
 from utils import blob_storage
 from services.skills import (
     get_employee_skills,
@@ -62,13 +63,13 @@ _SELF_EDITABLE = set(ProfilePatch.model_fields.keys())
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@profile_router.get("/", response_model=EmployeeOut)
+@profile_router.get("/", response_model=EmployeeOut, dependencies=[Depends(require_section_view('profile'))])
 def get_profile(current_employee: Employee = Depends(get_current_employee)):
     """Return the logged-in employee's full record."""
     return current_employee
 
 
-@profile_router.patch("/", response_model=EmployeeOut)
+@profile_router.patch("/", response_model=EmployeeOut, dependencies=[Depends(require_section_edit('profile'))])
 def patch_profile(
     patch: ProfilePatch,
     db: Session = Depends(get_db),
@@ -85,7 +86,7 @@ def patch_profile(
 
 # ── Skills ────────────────────────────────────────────────────────────────────
 
-@profile_router.get("/skills", response_model=List[EmployeeSkillOut])
+@profile_router.get("/skills", response_model=List[EmployeeSkillOut], dependencies=[Depends(require_section_view('profile'))])
 def list_my_skills(
     db: Session = Depends(get_db),
     current_employee: Employee = Depends(get_current_employee),
@@ -103,7 +104,8 @@ _SELF_EDITABLE_SKILL_FIELDS = {
 }
 
 
-@profile_router.post("/skills", response_model=EmployeeSkillOut, status_code=status.HTTP_201_CREATED)
+@profile_router.post("/skills", response_model=EmployeeSkillOut, status_code=status.HTTP_201_CREATED,
+                     dependencies=[Depends(require_section_edit('profile'))])
 def add_skill(
     skill_in: EmployeeSkillCreate,
     db: Session = Depends(get_db),
@@ -126,7 +128,8 @@ def add_skill(
     return skill
 
 
-@profile_router.patch("/skills/{skill_id}", response_model=EmployeeSkillOut)
+@profile_router.patch("/skills/{skill_id}", response_model=EmployeeSkillOut,
+                      dependencies=[Depends(require_section_edit('profile'))])
 def edit_skill(
     skill_id: str,
     skill_in: EmployeeSkillUpdate,
@@ -150,7 +153,8 @@ def edit_skill(
     return update_employee_skill(db, skill_id, filtered)
 
 
-@profile_router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+@profile_router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT,
+                       dependencies=[Depends(require_section_edit('profile'))])
 def remove_skill(
     skill_id: str,
     db: Session = Depends(get_db),

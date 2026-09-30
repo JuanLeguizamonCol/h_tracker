@@ -16,7 +16,8 @@ from schemas.employee_projects import (
     EmployeeProjectWithDetails as EmployeeProjectWithDetailsOut,
     StaffingAssignmentOut,
 )
-from utils.roles import require_admin, require_manager_or_admin
+from utils.roles import require_admin
+from utils.section_access import require_section_view, require_section_edit
 
 employee_projects_router = APIRouter(prefix="/employee-projects", tags=["employee-projects"])
 
@@ -35,7 +36,7 @@ class UpdateEpBody(BaseModel):
 
 
 @employee_projects_router.post("/", response_model=EmployeeProjectOut, status_code=status.HTTP_201_CREATED,
-                                dependencies=[Depends(require_manager_or_admin)])
+                                dependencies=[Depends(require_section_edit('staffing'))])
 def create_new_employee_project(ep_in: EmployeeProjectCreate, db: Session = Depends(get_db)):
     return create_employee_project(db, ep_in)
 
@@ -49,7 +50,8 @@ def list_employee_projects(
     return get_employee_projects(db, user_id=user_id, project_id=project_id)
 
 
-@employee_projects_router.get("/staffing", response_model=List[StaffingAssignmentOut])
+@employee_projects_router.get("/staffing", response_model=List[StaffingAssignmentOut],
+                               dependencies=[Depends(require_section_view('staffing'))])
 def list_staffing(db: Session = Depends(get_db)):
     """Every assignment across every employee — feeds the Staffing panel."""
     return get_all_assignments_with_details(db)
@@ -67,7 +69,7 @@ def bulk_replace_assignments_route(user_id: str, body: BulkAssignBody, db: Sessi
 
 
 @employee_projects_router.put("/{ep_id}", response_model=EmployeeProjectOut,
-                               dependencies=[Depends(require_manager_or_admin)])
+                               dependencies=[Depends(require_section_edit('staffing'))])
 def update_employee_project_detail(ep_id: str, body: UpdateEpBody, db: Session = Depends(get_db)):
     ep = update_employee_project(db, ep_id, body.model_dump(exclude_unset=True))
     if not ep:
@@ -76,7 +78,7 @@ def update_employee_project_detail(ep_id: str, body: UpdateEpBody, db: Session =
 
 
 @employee_projects_router.delete("/{ep_id}", status_code=status.HTTP_204_NO_CONTENT,
-                                  dependencies=[Depends(require_manager_or_admin)])
+                                  dependencies=[Depends(require_section_edit('staffing'))])
 def delete_employee_project_detail(ep_id: str, db: Session = Depends(get_db)):
     if not delete_employee_project(db, ep_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee project not found")

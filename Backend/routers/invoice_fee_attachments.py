@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from sqlalchemy.orm import Session
 
 from config.database import get_db
+from utils.section_access import require_section_edit
 from services.invoice_fee_attachments import (
     create_invoice_fee_attachment, get_invoice_fee_attachments,
     get_invoice_fee_attachment, delete_invoice_fee_attachment,
@@ -25,7 +26,8 @@ def _serialize(att) -> InvoiceFeeAttachmentOut:
     return out
 
 
-@invoice_fee_attachments_router.post("/upload", response_model=InvoiceFeeAttachmentOut, status_code=status.HTTP_201_CREATED)
+@invoice_fee_attachments_router.post("/upload", response_model=InvoiceFeeAttachmentOut, status_code=status.HTTP_201_CREATED,
+                                     dependencies=[Depends(require_section_edit('invoices'))])
 async def upload_fee_attachment(
     fee_id: str = Form(...),
     file: UploadFile = File(...),
@@ -67,7 +69,7 @@ def get_attachment_detail(attachment_id: str, db: Session = Depends(get_db)):
     return _serialize(att)
 
 
-@invoice_fee_attachments_router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+@invoice_fee_attachments_router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_section_edit('invoices'))])
 def delete_attachment_detail(attachment_id: str, db: Session = Depends(get_db)):
     if not delete_invoice_fee_attachment(db, attachment_id, upload_dir=UPLOAD_DIR):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")

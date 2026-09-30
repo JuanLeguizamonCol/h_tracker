@@ -8,6 +8,7 @@ from models.employees import Employee
 from models.projects import Project
 from utils.auth_jwt import get_current_employee
 from utils.roles import get_role
+from utils.section_access import require_section_view, require_section_edit
 from services.time_entries import (
     create_time_entry, get_time_entries, get_time_entry, update_time_entry, delete_time_entry,
 )
@@ -30,7 +31,8 @@ def _assert_period_open(entry_date) -> None:
         )
 
 
-@time_entries_router.post("/", response_model=TimeEntryOut, status_code=status.HTTP_201_CREATED)
+@time_entries_router.post("/", response_model=TimeEntryOut, status_code=status.HTTP_201_CREATED,
+                           dependencies=[Depends(require_section_edit('timesheet'))])
 def create_new_time_entry(
     entry_in: TimeEntryCreate,
     db: Session = Depends(get_db),
@@ -52,7 +54,7 @@ def create_new_time_entry(
     return create_time_entry(db, entry_in)
 
 
-@time_entries_router.get("/", response_model=List[TimeEntryOut])
+@time_entries_router.get("/", response_model=List[TimeEntryOut], dependencies=[Depends(require_section_view('timesheet'))])
 def list_time_entries(
     user_id: Optional[str] = None,
     project_id: Optional[str] = None,
@@ -80,7 +82,7 @@ def list_time_entries(
     )
 
 
-@time_entries_router.get("/{entry_id}", response_model=TimeEntryOut)
+@time_entries_router.get("/{entry_id}", response_model=TimeEntryOut, dependencies=[Depends(require_section_view('timesheet'))])
 def get_time_entry_detail(
     entry_id: str,
     db: Session = Depends(get_db),
@@ -94,7 +96,7 @@ def get_time_entry_detail(
     return entry
 
 
-@time_entries_router.put("/{entry_id}", response_model=TimeEntryOut)
+@time_entries_router.put("/{entry_id}", response_model=TimeEntryOut, dependencies=[Depends(require_section_edit('timesheet'))])
 def update_time_entry_detail(
     entry_id: str,
     entry_in: TimeEntryUpdate,
@@ -116,7 +118,8 @@ def update_time_entry_detail(
     return entry
 
 
-@time_entries_router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+@time_entries_router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT,
+                             dependencies=[Depends(require_section_edit('timesheet'))])
 def delete_time_entry_detail(
     entry_id: str,
     db: Session = Depends(get_db),

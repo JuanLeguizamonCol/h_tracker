@@ -125,7 +125,8 @@ export default function Employees() {
   const { data: employees = [], isLoading } = useEmployees();
   const { data: allAssignments = [] } = useAssignedProjects();
   const { data: roles = [] } = useEmployeeRoles();
-  const { employee: currentUser, isAdmin } = useAuth();
+  const { employee: currentUser, isAdmin, hasEdit } = useAuth();
+  const canEditEmployees = hasEdit('employees');
   const updateRole = useUpdateRole();
   const createEmployee = useCreateEmployee();
   const deleteEmployee = useDeleteEmployee();
@@ -260,9 +261,11 @@ export default function Employees() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input placeholder="Search employees..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
             </div>
-            <Button size="sm" onClick={openQuickAdd}>
-              <UserPlus className="h-4 w-4 mr-2" />New Employee
-            </Button>
+            {canEditEmployees && (
+              <Button size="sm" onClick={openQuickAdd}>
+                <UserPlus className="h-4 w-4 mr-2" />New Employee
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -322,10 +325,12 @@ export default function Employees() {
                           <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}`)}>
                             <Eye className="h-4 w-4 mr-2" />View Profile
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}/edit`)}>
-                            <Edit className="h-4 w-4 mr-2" />Edit
-                          </DropdownMenuItem>
-                          {!isCurrentUser && !isProtected && !isLastAdmin && (
+                          {canEditEmployees && (
+                            <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}/edit`)}>
+                              <Edit className="h-4 w-4 mr-2" />Edit
+                            </DropdownMenuItem>
+                          )}
+                          {canEditEmployees && !isCurrentUser && !isProtected && !isLastAdmin && (
                             <>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem

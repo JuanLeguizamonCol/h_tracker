@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from utils.auth_jwt import get_current_employee
-from utils.roles import require_admin
+from utils.section_access import require_section_view
 
 # Import routers
 from routers.auth import auth_router
@@ -35,6 +35,7 @@ from routers.announcements import announcements_router
 from routers.announcement_attachments import announcement_attachments_router
 from routers.pto_requests import pto_requests_router
 from routers.pto_request_attachments import pto_request_attachments_router
+from routers.section_access import section_access_router
 
 # Import all models so Base.metadata sees them
 import models  # noqa - imports all models via __init__.py
@@ -66,11 +67,14 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 # JWT auth dependency applied to all protected routers
 auth_deps = [Depends(get_current_employee)]
 
-# Invoices module: admin ONLY — Manager gets elevated access everywhere else,
-# but Invoices is explicitly excluded, so it's gated here at registration
+# Invoices module: Admin by default (Manager gets elevated access everywhere
+# else, but Invoices is explicitly excluded) — resolved per-employee via
+# utils/section_access.py, so an Admin can still grant/revoke it for one
+# person without touching their role. This registration gates VIEW only
 # (previously these routers had no role check at all; any authenticated
-# employee could hit the invoice APIs directly, just not see the nav link).
-invoice_deps = [Depends(get_current_employee), Depends(require_admin)]
+# employee could hit the invoice APIs directly, just not see the nav link);
+# every mutating route additionally requires require_section_edit('invoices').
+invoice_deps = [Depends(get_current_employee), Depends(require_section_view('invoices'))]
 
 # ---------- Routers ----------
 app.include_router(auth_router)  # public — login / register
@@ -102,6 +106,7 @@ app.include_router(announcements_router, dependencies=auth_deps)
 app.include_router(announcement_attachments_router, dependencies=auth_deps)
 app.include_router(pto_requests_router, dependencies=auth_deps)
 app.include_router(pto_request_attachments_router, dependencies=auth_deps)
+app.include_router(section_access_router, dependencies=auth_deps)
 
 
 # ---------- Health check ----------

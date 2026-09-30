@@ -1,51 +1,35 @@
 import { Clock, Calendar, Briefcase, Users, FileText, UserCircle, ChevronLeft, ChevronRight, LogOut, LayoutDashboard, BarChart3, Users2 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
+import { SectionKey } from '@/types';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, SidebarFooter, useSidebar,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 
-const adminNavigationItems = [
-  { title: 'Dashboard', url: '/', icon: LayoutDashboard },
-  { title: 'Weekly Log', url: '/timesheet', icon: Clock },
-  { title: 'History', url: '/history', icon: Calendar },
-  { title: 'My Profile', url: '/profile', icon: UserCircle },
-  { title: 'Projects', url: '/projects', icon: Briefcase },
-  { title: 'Clients', url: '/clients', icon: Users },
-  { title: 'Employees', url: '/employees', icon: UserCircle },
-  { title: 'Staffing', url: '/staffing', icon: Users2 },
-  { title: 'Invoices', url: '/invoices', icon: FileText },
-  { title: 'Reports', url: '/reports', icon: BarChart3 },
-];
-
-// Manager = everything Admin has EXCEPT Invoices (creating/assigning
-// projects and roles is still Admin-only, but Manager can edit an existing
-// assignment's Role/Hours/Window inline in Staffing).
-const managerNavigationItems = adminNavigationItems.filter(item => item.title !== 'Invoices');
-
-// Staffing is visible read-only to everyone — only Admin/Manager can edit an
-// assignment inline (see StaffingPage's canManage gate). Reports is Manager/
-// Admin only (see App.tsx's AdminGuard on /reports) — it surfaces everyone's
-// hours and staffing across the company, not just the viewer's own.
-const employeeNavigationItems = [
-  { title: 'Dashboard', url: '/', icon: LayoutDashboard },
-  { title: 'Weekly Log', url: '/timesheet', icon: Clock },
-  { title: 'History', url: '/history', icon: Calendar },
-  { title: 'My Profile', url: '/profile', icon: UserCircle },
-  { title: 'Staffing', url: '/staffing', icon: Users2 },
+// One list for everyone — each item's visibility is resolved per employee via
+// hasView(section) (role default, or an Admin's per-employee override; see
+// Backend/utils/section_access.py and the Access tab on an employee's
+// profile), not a fixed role-based array like before.
+const NAVIGATION_ITEMS: { title: string; url: string; icon: typeof LayoutDashboard; section: SectionKey }[] = [
+  { title: 'Dashboard', url: '/', icon: LayoutDashboard, section: 'dashboard' },
+  { title: 'Weekly Log', url: '/timesheet', icon: Clock, section: 'timesheet' },
+  { title: 'History', url: '/history', icon: Calendar, section: 'history' },
+  { title: 'My Profile', url: '/profile', icon: UserCircle, section: 'profile' },
+  { title: 'Projects', url: '/projects', icon: Briefcase, section: 'projects' },
+  { title: 'Clients', url: '/clients', icon: Users, section: 'clients' },
+  { title: 'Employees', url: '/employees', icon: UserCircle, section: 'employees' },
+  { title: 'Staffing', url: '/staffing', icon: Users2, section: 'staffing' },
+  { title: 'Invoices', url: '/invoices', icon: FileText, section: 'invoices' },
+  { title: 'Reports', url: '/reports', icon: BarChart3, section: 'reports' },
 ];
 
 export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar();
-  const { isAdmin, isManager, employee, signOut } = useAuth();
+  const { isAdmin, isManager, employee, signOut, hasView } = useAuth();
   const isCollapsed = state === 'collapsed';
-  const navigationItems = isAdmin
-    ? adminNavigationItems
-    : isManager
-    ? managerNavigationItems
-    : employeeNavigationItems;
+  const navigationItems = NAVIGATION_ITEMS.filter(item => hasView(item.section));
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">

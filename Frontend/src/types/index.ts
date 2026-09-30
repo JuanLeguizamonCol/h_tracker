@@ -1,5 +1,27 @@
 export type AppRole = 'admin' | 'manager' | 'employee';
 
+// Per-employee, per-section access override — see Backend/utils/section_access.py.
+// Keys/labels must match SECTIONS there exactly.
+export type SectionKey =
+  | 'dashboard' | 'timesheet' | 'history' | 'profile' | 'projects'
+  | 'clients' | 'employees' | 'staffing' | 'invoices' | 'reports';
+
+export interface SectionAccess {
+  section: SectionKey;
+  label: string;
+  can_view: boolean;
+  can_edit: boolean;
+  /** True when this field is a per-employee override, not the role default. */
+  view_overridden: boolean;
+  edit_overridden: boolean;
+}
+
+export interface SectionAccessPatch {
+  section: SectionKey;
+  can_view?: boolean | null;
+  can_edit?: boolean | null;
+}
+
 export interface Employee {
   id: string;
   user_id: string;

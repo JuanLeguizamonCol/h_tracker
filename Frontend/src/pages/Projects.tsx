@@ -28,7 +28,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function Projects() {
   const navigate = useNavigate();
-  const { isAdmin, canManage } = useAuth();
+  const { isAdmin, hasEdit } = useAuth();
+  const canManage = hasEdit('projects');
   const { data: projects = [], isLoading } = useProjects();
   const { data: clients = [] } = useActiveClients();
   const deleteProject = useDeleteProject();

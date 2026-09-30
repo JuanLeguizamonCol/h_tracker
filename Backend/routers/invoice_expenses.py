@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from config.database import get_db
+from utils.section_access import require_section_edit
 from services.invoice_expenses import (
     create_expense, get_expenses, get_expense, update_expense, delete_expense
 )
@@ -11,7 +12,8 @@ from schemas.invoice_expenses import InvoiceExpenseCreate, InvoiceExpenseUpdate,
 invoice_expenses_router = APIRouter(prefix="/invoice-expenses", tags=["invoice-expenses"])
 
 
-@invoice_expenses_router.post("/", response_model=InvoiceExpenseOut, status_code=status.HTTP_201_CREATED)
+@invoice_expenses_router.post("/", response_model=InvoiceExpenseOut, status_code=status.HTTP_201_CREATED,
+                               dependencies=[Depends(require_section_edit('invoices'))])
 def create_invoice_expense(expense_in: InvoiceExpenseCreate, db: Session = Depends(get_db)):
     return create_expense(db, expense_in)
 
@@ -31,7 +33,7 @@ def get_invoice_expense(expense_id: str, db: Session = Depends(get_db)):
     return expense
 
 
-@invoice_expenses_router.put("/{expense_id}", response_model=InvoiceExpenseOut)
+@invoice_expenses_router.put("/{expense_id}", response_model=InvoiceExpenseOut, dependencies=[Depends(require_section_edit('invoices'))])
 def update_invoice_expense(expense_id: str, expense_in: InvoiceExpenseUpdate, db: Session = Depends(get_db)):
     expense = update_expense(db, expense_id, expense_in)
     if not expense:
@@ -39,7 +41,7 @@ def update_invoice_expense(expense_id: str, expense_in: InvoiceExpenseUpdate, db
     return expense
 
 
-@invoice_expenses_router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+@invoice_expenses_router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_section_edit('invoices'))])
 def delete_invoice_expense(expense_id: str, db: Session = Depends(get_db)):
     if not delete_expense(db, expense_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")

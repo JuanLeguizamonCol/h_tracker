@@ -335,6 +335,13 @@ type MatrixGranularity = 'month' | 'week' | 'day';
 
 export default function Reports() {
   const { employee, canManage } = useAuth();
+  // Deliberately the REAL role here, not hasView('reports') — the company-wide
+  // (vs self-only) data this gates comes from GET /time-entries, whose own
+  // server-side scoping is still tied to the real role (see
+  // routers/time_entries.py), not the section-access resolver. Granting
+  // someone View access to Reports (see the Access tab on an employee's
+  // profile) lets them open this page, but they still only see their own
+  // entries unless they're an actual Manager/Admin — same as History.
   const [f, setF] = useState<Filters>(INIT);
   const set = <K extends keyof Filters>(key: K, val: Filters[K]) =>
     setF(prev => ({ ...prev, [key]: val }));

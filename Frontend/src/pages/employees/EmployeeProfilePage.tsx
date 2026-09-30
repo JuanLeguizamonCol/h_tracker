@@ -8,6 +8,7 @@ import { useEmployee, useEmployees } from '@/hooks/useEmployees';
 import { useEmployeeSkills, useCreateEmployeeSkill, useUpdateEmployeeSkill, useDeleteEmployeeSkill, useSkillCatalog } from '@/hooks/useSkills';
 import { useAssignedProjectsWithDetails } from '@/hooks/useAssignedProjects';
 import { EmployeeProjectsDialog } from '@/components/EmployeeProjectsDialog';
+import { EmployeeAccessPanel } from '@/components/EmployeeAccessPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -237,6 +238,7 @@ export default function EmployeeProfilePage() {
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="skills">Skills {skills.length > 0 && `(${skills.length})`}</TabsTrigger>
           <TabsTrigger value="projects">Projects {assignments.length > 0 && `(${assignments.length})`}</TabsTrigger>
+          {isAdmin && <TabsTrigger value="access">Access</TabsTrigger>}
         </TabsList>
 
         {/* ── Profile Tab ── */}
@@ -451,6 +453,13 @@ export default function EmployeeProfilePage() {
             </div>
           )}
         </TabsContent>
+
+        {/* ── Access Tab (Admin only) ── */}
+        {isAdmin && (
+          <TabsContent value="access" className="mt-4">
+            <EmployeeAccessPanel employeeId={employeeId!} />
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Assign Projects Dialog */}

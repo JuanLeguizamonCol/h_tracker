@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from config.database import get_db
+from utils.section_access import require_section_edit
 from services.invoice_fees import (
     create_invoice_fee, get_invoice_fees, get_invoice_fee, update_invoice_fee, delete_invoice_fee,
 )
@@ -11,7 +12,8 @@ from schemas.invoice_fees import InvoiceFeeCreate, InvoiceFeeUpdate, InvoiceFeeO
 invoice_fees_router = APIRouter(prefix="/invoice-fees", tags=["invoice-fees"])
 
 
-@invoice_fees_router.post("/", response_model=InvoiceFeeOut, status_code=status.HTTP_201_CREATED)
+@invoice_fees_router.post("/", response_model=InvoiceFeeOut, status_code=status.HTTP_201_CREATED,
+                           dependencies=[Depends(require_section_edit('invoices'))])
 def create_new_fee(fee_in: InvoiceFeeCreate, db: Session = Depends(get_db)):
     return create_invoice_fee(db, fee_in)
 
@@ -29,7 +31,7 @@ def get_fee_detail(fee_id: str, db: Session = Depends(get_db)):
     return fee
 
 
-@invoice_fees_router.put("/{fee_id}", response_model=InvoiceFeeOut)
+@invoice_fees_router.put("/{fee_id}", response_model=InvoiceFeeOut, dependencies=[Depends(require_section_edit('invoices'))])
 def update_fee_detail(fee_id: str, fee_in: InvoiceFeeUpdate, db: Session = Depends(get_db)):
     fee = update_invoice_fee(db, fee_id, fee_in)
     if not fee:
@@ -37,7 +39,7 @@ def update_fee_detail(fee_id: str, fee_in: InvoiceFeeUpdate, db: Session = Depen
     return fee
 
 
-@invoice_fees_router.delete("/{fee_id}", status_code=status.HTTP_204_NO_CONTENT)
+@invoice_fees_router.delete("/{fee_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_section_edit('invoices'))])
 def delete_fee_detail(fee_id: str, db: Session = Depends(get_db)):
     if not delete_invoice_fee(db, fee_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fee not found")

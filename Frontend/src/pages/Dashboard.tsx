@@ -16,7 +16,12 @@ import { Progress } from '@/components/ui/progress';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { employee, isAdmin, canManage } = useAuth();
+  const { employee, hasView } = useAuth();
+  // Read-only summary widgets: shown to whoever can currently VIEW that
+  // section (role default, or a per-employee grant — see the Access tab on
+  // an employee's profile), not just real Admins.
+  const canSeeProjectsSummary = hasView('projects');
+  const canSeeInvoicesSummary = hasView('invoices');
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
 
   const { data: allProjects = [] } = useActiveProjects();
@@ -24,17 +29,17 @@ export default function Dashboard() {
   const { data: weekEntries = [], isLoading } = useTimeEntriesByWeek(weekStart, employee?.id);
   // Invoice stats are only rendered for admins (draft/unpaid cards + alerts),
   // so only admins need to fetch the full invoice list.
-  const { data: invoices = [] } = useInvoices({ enabled: isAdmin });
+  const { data: invoices = [] } = useInvoices({ enabled: canSeeInvoicesSummary });
 
   const stats = useMemo(() => {
     const billableHours = weekEntries.filter(e => e.billable).reduce((sum, e) => sum + Number(e.hours), 0);
     const nonBillableHours = weekEntries.filter(e => !e.billable).reduce((sum, e) => sum + Number(e.hours), 0);
     const totalHours = billableHours + nonBillableHours;
-    const projectCount = canManage ? allProjects.length : assignedProjects.length;
+    const projectCount = canSeeProjectsSummary ? allProjects.length : assignedProjects.length;
     const draftInvoices = invoices.filter(i => i.status === 'draft').length;
     const unpaidTotal = invoices.filter(i => i.status === 'sent').reduce((sum, i) => sum + Number(i.total), 0);
     return { billableHours, nonBillableHours, totalHours, projectCount, draftInvoices, unpaidTotal };
-  }, [weekEntries, allProjects, assignedProjects, invoices, canManage]);
+  }, [weekEntries, allProjects, assignedProjects, invoices, canSeeProjectsSummary]);
 
   const projectBreakdown = useMemo(() => {
     const breakdown: Record<string, { name: string; hours: number; billable: number }> = {};
@@ -113,7 +118,7 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-        {isAdmin && (
+        {canSeeInvoicesSummary && (
           <Card className="stat-card">
             <CardContent className="p-6">
               <div className="flex items-center gap-4">
@@ -182,7 +187,7 @@ export default function Dashboard() {
         </Card>
 
         {/* Admin alerts */}
-        {isAdmin && (
+        {canSeeInvoicesSummary && (
           <Card className="card-elevated">
             <CardHeader>
               <CardTitle className="text-base">Admin Alerts</CardTitle>

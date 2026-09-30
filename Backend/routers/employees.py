@@ -22,7 +22,8 @@ from models.user_roles import UserRole
 from models.projects import Project
 from models.employee_projects import EmployeeProject
 from utils.auth_jwt import get_current_employee
-from utils.roles import require_manager_or_admin, get_role, VALID_ROLES
+from utils.roles import get_role, VALID_ROLES
+from utils.section_access import require_section_view, require_section_edit
 import uuid
 
 employees_router = APIRouter(prefix="/employees", tags=["employees"])
@@ -75,7 +76,7 @@ def get_current_employee_me(
     "/",
     response_model=EmployeeOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_edit('employees'))],
 )
 def create_new_employee(employee_in: EmployeeCreate, db: Session = Depends(get_db)):
     if employee_in.user_role and employee_in.user_role.strip().lower() not in VALID_ROLES:
@@ -91,7 +92,7 @@ def create_new_employee(employee_in: EmployeeCreate, db: Session = Depends(get_d
 @employees_router.get(
     "/",
     response_model=List[EmployeeOut],
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_view('employees'))],
 )
 def list_employees(
     active: Optional[bool] = None,
@@ -114,7 +115,7 @@ def list_employees(
 @employees_router.get(
     "/{employee_id}",
     response_model=EmployeeOut,
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_view('employees'))],
 )
 def get_employee_detail(employee_id: str, db: Session = Depends(get_db)):
     emp = get_employee(db, employee_id)
@@ -126,7 +127,7 @@ def get_employee_detail(employee_id: str, db: Session = Depends(get_db)):
 @employees_router.put(
     "/{employee_id}",
     response_model=EmployeeOut,
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_edit('employees'))],
 )
 def update_employee_detail(employee_id: str, employee_in: EmployeeUpdate, db: Session = Depends(get_db)):
     emp = update_employee(db, employee_id, employee_in)
@@ -137,7 +138,7 @@ def update_employee_detail(employee_id: str, employee_in: EmployeeUpdate, db: Se
 
 @employees_router.delete(
     "/{employee_id}",
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_edit('employees'))],
 )
 def delete_employee_detail(
     employee_id: str,
@@ -167,7 +168,7 @@ def delete_employee_detail(
 @employees_router.get(
     "/{employee_id}/internal-cost",
     response_model=EmployeeInternalCostOut,
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_view('employees'))],
 )
 def get_employee_internal_cost(employee_id: str, db: Session = Depends(get_db)):
     record = get_current_internal_cost(db, employee_id)
@@ -180,7 +181,7 @@ def get_employee_internal_cost(employee_id: str, db: Session = Depends(get_db)):
     "/{employee_id}/internal-cost",
     response_model=EmployeeInternalCostOut,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_edit('employees'))],
 )
 def upsert_employee_internal_cost(
     employee_id: str,
@@ -197,7 +198,7 @@ def upsert_employee_internal_cost(
 @employees_router.get(
     "/{employee_id}/internal-cost/history",
     response_model=List[EmployeeInternalCostOut],
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_view('employees'))],
 )
 def get_employee_internal_cost_history(employee_id: str, db: Session = Depends(get_db)):
     return get_internal_cost_history(db, employee_id)
@@ -208,7 +209,7 @@ def get_employee_internal_cost_history(employee_id: str, db: Session = Depends(g
 @employees_router.get(
     "/skills/search",
     response_model=List[SkillSearchResultOut],
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_view('employees'))],
 )
 def search_skills(
     q: Optional[str] = None,
@@ -222,7 +223,7 @@ def search_skills(
 @employees_router.get(
     "/{employee_id}/skills",
     response_model=List[EmployeeSkillOut],
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_view('employees'))],
 )
 def list_employee_skills(employee_id: str, db: Session = Depends(get_db)):
     return get_employee_skills(db, employee_id)
@@ -232,7 +233,7 @@ def list_employee_skills(employee_id: str, db: Session = Depends(get_db)):
     "/{employee_id}/skills",
     response_model=EmployeeSkillOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_edit('employees'))],
 )
 def add_employee_skill(employee_id: str, skill_in: EmployeeSkillCreate, db: Session = Depends(get_db)):
     emp = get_employee(db, employee_id)
@@ -244,7 +245,7 @@ def add_employee_skill(employee_id: str, skill_in: EmployeeSkillCreate, db: Sess
 @employees_router.patch(
     "/{employee_id}/skills/{skill_id}",
     response_model=EmployeeSkillOut,
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_edit('employees'))],
 )
 def update_skill(employee_id: str, skill_id: str, skill_in: EmployeeSkillUpdate, db: Session = Depends(get_db)):
     skill = update_employee_skill(db, skill_id, skill_in)
@@ -256,7 +257,7 @@ def update_skill(employee_id: str, skill_id: str, skill_in: EmployeeSkillUpdate,
 @employees_router.delete(
     "/{employee_id}/skills/{skill_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_section_edit('employees'))],
 )
 def delete_skill(employee_id: str, skill_id: str, db: Session = Depends(get_db)):
     if not delete_employee_skill(db, skill_id):

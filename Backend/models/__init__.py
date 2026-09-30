@@ -29,3 +29,4 @@ from models.announcements import Announcement
 from models.announcement_attachments import AnnouncementAttachment
 from models.pto_requests import PtoRequest
 from models.pto_request_attachments import PtoRequestAttachment
+from models.employee_section_access import EmployeeSectionAccess

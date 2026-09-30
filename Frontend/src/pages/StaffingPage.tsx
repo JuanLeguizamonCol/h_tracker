@@ -67,7 +67,12 @@ export default function StaffingPage() {
   // to Role/Hours/Window are Admin + Manager; creating/deleting an
   // assignment (and the full dialog, incl. changing the project's own
   // dates) stays Admin-only, matching the backend's POST/DELETE guards.
-  const { isAdmin, canManage } = useAuth();
+  const { isAdmin, hasEdit } = useAuth();
+  // "Manage staffing" = Edit access to the Staffing section (role default:
+  // Admin/Manager; can be granted/revoked per employee — see the Access tab
+  // on an employee's profile). Rates stay real-Admin-only regardless (see
+  // `isAdmin` below, only for the Create Role dialog's rate field).
+  const canManage = hasEdit('staffing');
   const { data: employees = [], isLoading: employeesLoading } = useEmployees();
   const { data: allActiveProjects = [], isLoading: projectsLoading } = useActiveProjects();
   const { data: staffing = [], isLoading: staffingLoading } = useStaffing();

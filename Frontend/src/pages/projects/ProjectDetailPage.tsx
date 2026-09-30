@@ -57,7 +57,12 @@ function ProficiencyStars({ level }: { level: number }) {
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { isAdmin, canManage } = useAuth();
+  const { isAdmin, hasEdit } = useAuth();
+  // Edit access to the Projects section (role default: Admin/Manager; can be
+  // granted/revoked per employee). Real project edit/delete (the button just
+  // below) and role rates stay tied to `isAdmin` regardless — see
+  // ProjectRolesPanel and ProjectAssignmentsPanel further down.
+  const canManage = hasEdit('projects');
   const { data: project, isLoading } = useProject(projectId);
 
   if (isLoading || !project) {

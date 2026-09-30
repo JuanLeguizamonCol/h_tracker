@@ -29,7 +29,8 @@ import { FreshSalesImportModal } from '@/components/FreshSalesImportModal';
 
 export default function Clients() {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, hasEdit } = useAuth();
+  const canEditClients = hasEdit('clients');
   const { data: clients = [], isLoading } = useClients();
   const { data: projects = [] } = useProjects();
   const updateClient = useUpdateClient();
@@ -100,14 +101,16 @@ export default function Clients() {
           <h1 className="text-2xl font-bold text-foreground">Clients</h1>
           <p className="text-muted-foreground">Manage clients and their projects</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => setImportOpen(true)}>
-            <Download className="h-4 w-4" /> Import from FreshSales
-          </Button>
-          <Button className="gap-2" onClick={() => navigate('/clients/new')}>
-            <Plus className="h-4 w-4" /> New Client
-          </Button>
-        </div>
+        {canEditClients && (
+          <div className="flex gap-2">
+            <Button variant="outline" className="gap-2" onClick={() => setImportOpen(true)}>
+              <Download className="h-4 w-4" /> Import from FreshSales
+            </Button>
+            <Button className="gap-2" onClick={() => navigate('/clients/new')}>
+              <Plus className="h-4 w-4" /> New Client
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="relative max-w-md">
@@ -183,12 +186,16 @@ export default function Clients() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => navigate(`/clients/${client.id}/edit`)}>
-                            <Edit className="h-4 w-4 mr-2" />Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleToggleActive(client)}>
-                            {client.is_active ? 'Deactivate' : 'Activate'}
-                          </DropdownMenuItem>
+                          {canEditClients && (
+                            <DropdownMenuItem onClick={() => navigate(`/clients/${client.id}/edit`)}>
+                              <Edit className="h-4 w-4 mr-2" />Edit
+                            </DropdownMenuItem>
+                          )}
+                          {canEditClients && (
+                            <DropdownMenuItem onClick={() => handleToggleActive(client)}>
+                              {client.is_active ? 'Deactivate' : 'Activate'}
+                            </DropdownMenuItem>
+                          )}
                           {isAdmin && (
                             <>
                               <DropdownMenuSeparator />

@@ -4,20 +4,21 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
-// Gates admin-level sections (e.g. Employees) to Admin AND Manager — Manager
-// has elevated access everywhere except Invoices (see InvoiceGuard) and,
-// with `adminOnly`, Staffing/project assignment (Admin alone).
-export function AdminGuard({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
-  const { canManage, isAdmin, isLoading } = useAuth();
-  const allowed = adminOnly ? isAdmin : canManage;
+// Real-Admin-only routes — not part of the per-section access system (see
+// SectionGuard), since these aren't a section's "Edit," they're powers that
+// stay tied to the actual role no matter what an Admin grants elsewhere
+// (e.g. editing a project's own fields/dates, distinct from Projects' Edit,
+// which only covers creating projects/roles and assigning people).
+export function AdminGuard({ children }: { children: React.ReactNode }) {
+  const { isAdmin, isLoading } = useAuth();
   const toasted = useRef(false);
 
   useEffect(() => {
-    if (!isLoading && !allowed && !toasted.current) {
+    if (!isLoading && !isAdmin && !toasted.current) {
       toasted.current = true;
       toast.error("You don't have permission to access this section");
     }
-  }, [allowed, isLoading]);
+  }, [isAdmin, isLoading]);
 
   if (isLoading) {
     return (
@@ -27,7 +28,7 @@ export function AdminGuard({ children, adminOnly = false }: { children: React.Re
     );
   }
 
-  if (!allowed) return <Navigate to="/" replace />;
+  if (!isAdmin) return <Navigate to="/" replace />;
 
   return <>{children}</>;
 }

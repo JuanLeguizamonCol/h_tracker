@@ -7,7 +7,8 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
 
 from config.database import get_db
-from utils.auth_jwt import require_admin, get_current_employee
+from utils.auth_jwt import get_current_employee
+from utils.section_access import require_section_edit
 from utils.roles import get_role, is_super_admin
 from services.invoice import create_invoice, get_invoices, get_invoice, update_invoice, delete_invoice
 from services.invoice_expenses import create_expense, get_expenses, get_expense, update_expense, delete_expense
@@ -141,7 +142,8 @@ def preview_fixed_fee(
     return {"period": period, "unit_amount": unit_amount, **result}
 
 
-@invoice_router.post("/", response_model=InvoiceOut, status_code=status.HTTP_201_CREATED)
+@invoice_router.post("/", response_model=InvoiceOut, status_code=status.HTTP_201_CREATED,
+                      dependencies=[Depends(require_section_edit('invoices'))])
 def create_new_invoice(
     invoice_in: InvoiceCreate,
     db: Session = Depends(get_db),
@@ -496,7 +498,8 @@ def _recalculate_managed_services_amount(invoice_id: str, db: Session) -> None:
     db.commit()
 
 
-@invoice_router.put("/{invoice_id}/managed-services/minimums", response_model=InvoiceEditDataOut)
+@invoice_router.put("/{invoice_id}/managed-services/minimums", response_model=InvoiceEditDataOut,
+                     dependencies=[Depends(require_section_edit('invoices'))])
 def update_managed_services_minimums(
     invoice_id: str,
     payload: ManagedServicesMinimumsUpdate,
@@ -528,7 +531,8 @@ def update_managed_services_minimums(
     return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
 
 
-@invoice_router.post("/{invoice_id}/managed-services/recalculate", response_model=InvoiceEditDataOut)
+@invoice_router.post("/{invoice_id}/managed-services/recalculate", response_model=InvoiceEditDataOut,
+                      dependencies=[Depends(require_section_edit('invoices'))])
 def recalculate_managed_services(
     invoice_id: str,
     db: Session = Depends(get_db),
@@ -540,7 +544,7 @@ def recalculate_managed_services(
     return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
 
 
-@invoice_router.patch("/{invoice_id}", response_model=InvoiceOut)
+@invoice_router.patch("/{invoice_id}", response_model=InvoiceOut, dependencies=[Depends(require_section_edit('invoices'))])
 def patch_invoice(
     invoice_id: str,
     patch_in: InvoicePatch,
@@ -792,7 +796,7 @@ def get_invoice_detail(
     return invoice
 
 
-@invoice_router.put("/{invoice_id}", response_model=InvoiceOut)
+@invoice_router.put("/{invoice_id}", response_model=InvoiceOut, dependencies=[Depends(require_section_edit('invoices'))])
 def update_invoice_detail(
     invoice_id: str,
     invoice_in: InvoiceUpdate,
@@ -808,7 +812,7 @@ def update_invoice_detail(
 
 
 @invoice_router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT,
-                       dependencies=[Depends(require_admin)])
+                       dependencies=[Depends(require_section_edit('invoices'))])
 def delete_invoice_detail(
     invoice_id: str,
     db: Session = Depends(get_db),

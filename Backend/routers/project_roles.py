@@ -7,7 +7,8 @@ from models.employees import Employee
 from services.project_roles import create_project_role, get_project_roles, get_project_role, update_project_role, delete_project_role
 from schemas.project_roles import ProjectRoleCreate, ProjectRoleUpdate, ProjectRoleOut, ProjectRoleNameOut
 from utils.auth_jwt import get_current_employee
-from utils.roles import require_admin, require_manager_or_admin, get_role
+from utils.roles import require_admin, get_role
+from utils.section_access import require_section_edit
 
 project_roles_router = APIRouter(prefix="/project-roles", tags=["project-roles"])
 
@@ -18,7 +19,7 @@ project_roles_router = APIRouter(prefix="/project-roles", tags=["project-roles"]
 # fields here (rather than 403ing) means the frontend's plain "name only"
 # dialog for Managers still works without special-casing the request it sends.
 @project_roles_router.post("/", response_model=ProjectRoleOut, status_code=status.HTTP_201_CREATED,
-                            dependencies=[Depends(require_manager_or_admin)])
+                            dependencies=[Depends(require_section_edit('projects'))])
 def create_new_project_role(
     role_in: ProjectRoleCreate,
     db: Session = Depends(get_db),

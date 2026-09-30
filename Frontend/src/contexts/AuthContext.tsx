@@ -1,5 +1,5 @@
 import { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import { Employee, AppRole } from '@/types';
+import { Employee, AppRole, SectionAccess, SectionKey } from '@/types';
 import { api, getStoredToken, setStoredToken, clearStoredToken } from '@/lib/api';
 import { msalInstance, ensureMsalInitialized } from '@/lib/msal';
 
@@ -24,6 +24,12 @@ interface AuthContextType {
    * and manages every invoice, not just the ones for projects they own. */
   isSuperAdmin: boolean;
   isAuthenticated: boolean;
+  /** Per-section View/Edit, resolved server-side (role default, or an Admin's
+   * per-employee override — see Backend/utils/section_access.py). Drives the
+   * sidebar and route guards; falls back to `true` while still loading so the
+   * app doesn't flash "no access" before the first fetch resolves. */
+  hasView: (section: SectionKey) => boolean;
+  hasEdit: (section: SectionKey) => boolean;
   loginWithEntra: () => Promise<void>;
   signOut: () => void;
   refreshProfile: () => Promise<void>;
@@ -34,25 +40,29 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [role, setRole] = useState<AppRole>('employee');
+  const [sectionAccess, setSectionAccess] = useState<Record<string, SectionAccess> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadProfile = useCallback(async () => {
     setIsLoading(true);
     try {
-      // These two are independent (roles are matched client-side by emp.id), so
-      // fetch them in parallel — this gate blocks the first render of the whole
-      // app, so a serial waterfall here adds a full round-trip to every load.
-      const [emp, roles] = await Promise.all([
+      // Independent calls (nothing here depends on another's result), fetched in
+      // parallel — this gate blocks the first render of the whole app, so a
+      // serial waterfall here adds extra round-trips to every load.
+      const [emp, roles, access] = await Promise.all([
         api.get<Employee>('/employees/me'),
         api.get<{ id: string; user_id: string; role: AppRole }[]>('/user-roles'),
+        api.get<SectionAccess[]>('/section-access/me'),
       ]);
       setEmployee(emp);
       const found = roles.find(r => r.user_id === emp.id);
       setRole(found?.role ?? 'employee');
+      setSectionAccess(Object.fromEntries(access.map(a => [a.section, a])));
     } catch {
       clearStoredToken();
       setEmployee(null);
       setRole('employee');
+      setSectionAccess(null);
     } finally {
       setIsLoading(false);
     }
@@ -82,8 +92,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearStoredToken();
     setEmployee(null);
     setRole('employee');
+    setSectionAccess(null);
     window.location.href = '/auth';
   };
+
+  // Defaults to true while sectionAccess hasn't loaded yet (isLoading is what
+  // route guards actually check to hold off rendering) and for any section
+  // this build doesn't recognize, so a stale frontend never over-restricts.
+  const hasView = (section: SectionKey) => sectionAccess?.[section]?.can_view ?? true;
+  const hasEdit = (section: SectionKey) => sectionAccess?.[section]?.can_edit ?? true;
 
   return (
     <AuthContext.Provider value={{
@@ -95,6 +112,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canManage: role === 'admin' || role === 'manager',
       isSuperAdmin: SUPER_ADMIN_NAMES.has((employee?.name || '').trim().toLowerCase()),
       isAuthenticated: !!employee,
+      hasView,
+      hasEdit,
       loginWithEntra,
       signOut,
       refreshProfile: loadProfile,
