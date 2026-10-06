@@ -26,9 +26,9 @@ export function TimeEntryLockOverridePanel({ employeeId }: { employeeId: string 
     setBusy(true);
     try {
       await grant.mutateAsync(employeeId);
-      toast.success('Habilitado por 2 horas para cargar horas en meses cerrados.');
+      toast.success('Enabled for 2 hours to log hours in closed months.');
     } catch {
-      toast.error('Algo salió mal.');
+      toast.error('Something went wrong.');
     } finally {
       setBusy(false);
     }
@@ -39,9 +39,9 @@ export function TimeEntryLockOverridePanel({ employeeId }: { employeeId: string 
     setBusy(true);
     try {
       await revoke.mutateAsync({ id: active.id, employeeId });
-      toast.success('Acceso revocado.');
+      toast.success('Access revoked.');
     } catch {
-      toast.error('Algo salió mal.');
+      toast.error('Something went wrong.');
     } finally {
       setBusy(false);
     }
@@ -56,19 +56,19 @@ export function TimeEntryLockOverridePanel({ employeeId }: { employeeId: string 
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm text-muted-foreground flex items-start gap-2">
           <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-          Habilita a esta persona para cargar, editar o borrar horas en un mes ya
-          cerrado, solo por 2 horas desde que se autoriza. Nadie más se ve afectado,
-          y no se puede extender — si se vence, hay que autorizar de nuevo.
+          Lets this person log, edit, or delete hours in an already-closed month,
+          for 2 hours from when it's granted. Nobody else is affected, and it
+          can't be extended — if it expires, it has to be granted again.
         </p>
         {active ? (
           <Button variant="outline" size="sm" onClick={handleRevoke} disabled={busy}>
             {busy && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-            Revocar ahora
+            Revoke now
           </Button>
         ) : (
           <Button size="sm" onClick={handleGrant} disabled={busy} className="shrink-0">
             {busy && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-            Habilitar por 2 horas
+            Enable for 2 hours
           </Button>
         )}
       </div>
@@ -76,23 +76,23 @@ export function TimeEntryLockOverridePanel({ employeeId }: { employeeId: string 
       {active && (
         <div className="flex items-center gap-2 text-sm">
           <Clock className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-          <Badge variant="default">Activo</Badge>
+          <Badge variant="default">Active</Badge>
           <span className="text-muted-foreground">
-            vence {format(new Date(active.expires_at), 'HH:mm')} ({formatDistanceToNow(new Date(active.expires_at), { addSuffix: true })})
+            expires {format(new Date(active.expires_at), 'HH:mm')} ({formatDistanceToNow(new Date(active.expires_at), { addSuffix: true })})
           </span>
         </div>
       )}
 
       {overrides.length > 0 && (
         <div className="space-y-1 pt-1">
-          <p className="text-xs font-medium text-muted-foreground">Historial</p>
+          <p className="text-xs font-medium text-muted-foreground">History</p>
           {overrides.slice(0, 5).map(o => {
             const expired = !o.is_active && !o.revoked_at && isAfter(new Date(), new Date(o.expires_at));
             return (
               <div key={o.id} className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>{format(new Date(o.granted_at), 'dd/MM/yyyy HH:mm')}</span>
+                <span>{format(new Date(o.granted_at), 'MM/dd/yyyy HH:mm')}</span>
                 <Badge variant="secondary" className="text-xs font-normal">
-                  {o.is_active ? 'Activo' : o.revoked_at ? 'Revocado' : expired ? 'Vencido' : 'Inactivo'}
+                  {o.is_active ? 'Active' : o.revoked_at ? 'Revoked' : expired ? 'Expired' : 'Inactive'}
                 </Badge>
               </div>
             );
