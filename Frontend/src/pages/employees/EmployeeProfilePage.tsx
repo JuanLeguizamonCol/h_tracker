@@ -9,6 +9,7 @@ import { useEmployeeSkills, useCreateEmployeeSkill, useUpdateEmployeeSkill, useD
 import { useAssignedProjectsWithDetails } from '@/hooks/useAssignedProjects';
 import { EmployeeProjectsDialog } from '@/components/EmployeeProjectsDialog';
 import { EmployeeAccessPanel } from '@/components/EmployeeAccessPanel';
+import { TimeEntryLockOverridePanel } from '@/components/TimeEntryLockOverridePanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -456,8 +457,9 @@ export default function EmployeeProfilePage() {
 
         {/* ── Access Tab (Admin only) ── */}
         {isAdmin && (
-          <TabsContent value="access" className="mt-4">
+          <TabsContent value="access" className="mt-4 space-y-4">
             <EmployeeAccessPanel employeeId={employeeId!} />
+            <TimeEntryLockOverridePanel employeeId={employeeId!} />
           </TabsContent>
         )}
       </Tabs>

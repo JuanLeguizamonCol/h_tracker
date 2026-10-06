@@ -22,6 +22,18 @@ export interface SectionAccessPatch {
   can_edit?: boolean | null;
 }
 
+// Admin-granted, 2-hour exception to the monthly time-entry close — see
+// Backend/utils/time_entry_lock.py / routers/time_entry_lock_overrides.py.
+export interface TimeEntryLockOverride {
+  id: string;
+  employee_id: string;
+  granted_by: string;
+  granted_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+  is_active: boolean;
+}
+
 export interface Employee {
   id: string;
   user_id: string;

@@ -30,3 +30,4 @@ from models.announcement_attachments import AnnouncementAttachment
 from models.pto_requests import PtoRequest
 from models.pto_request_attachments import PtoRequestAttachment
 from models.employee_section_access import EmployeeSectionAccess
+from models.time_entry_lock_overrides import TimeEntryLockOverride
