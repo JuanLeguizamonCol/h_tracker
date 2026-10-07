@@ -6,6 +6,7 @@ import { useActiveProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
 import { useAssignedProjectsWithDetails, useAssignedProjects } from '@/hooks/useAssignedProjects';
 import { useTimeEntriesByWeek, useCreateTimeEntry, useUpdateTimeEntry, useDeleteTimeEntry } from '@/hooks/useTimeEntries';
+import { useMyLockOverrideStatus } from '@/hooks/useTimeEntryLockOverrides';
 import { useCreateProjectExpense } from '@/hooks/useProjectExpenses';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -170,10 +171,12 @@ function isOffHoursStep(hours: number): boolean {
   return hours > 0 && Math.abs(steps - Math.round(steps)) > 1e-6;
 }
 
-// Monthly close, no exceptions for any role — mirrors Backend/utils/time_entry_lock.py.
-// A month locks on the 6th of the following month. This is UX only (disables
-// the cell before the user even tries); the server enforces the same rule
-// independently and is the real boundary.
+// Monthly close — mirrors Backend/utils/time_entry_lock.py. A month locks on
+// the 6th of the following month. This is UX only (disables the cell before
+// the user even tries); the server enforces the same rule independently and
+// is the real boundary. Callers must separately check for an active
+// TimeEntryLockOverride (useMyLockOverrideStatus) — this function alone
+// doesn't know about per-employee exceptions.
 function isDateLocked(dateStr: string): boolean {
   const [y, m] = dateStr.split('-').map(Number);
   const lockDate = m === 12 ? new Date(y + 1, 0, 6) : new Date(y, m, 6);
@@ -186,6 +189,10 @@ function isDateLocked(dateStr: string): boolean {
 
 export default function Timesheet() {
   const { employee } = useAuth();
+  // When an Admin has granted ME a temporary override, closed-month cells
+  // unlock just for my own session — see Backend/utils/time_entry_lock.py.
+  const { data: lockOverrideStatus } = useMyLockOverrideStatus();
+  const hasActiveLockOverride = !!lockOverrideStatus?.is_active;
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isSaving, setIsSaving] = useState(false);
   const [rows, setRows] = useState<ProjectRow[]>([]);
@@ -541,7 +548,7 @@ export default function Timesheet() {
           // any entry that already exists on that date.
           const locationDirty = dirtyLocationDays.has(dateStr) && !!dayEntry.id;
           if (!dayEntry.dirty && !locationDirty) continue;
-          if (isDateLocked(dateStr)) { skippedLockedDates.add(dateStr); continue; }
+          if (isDateLocked(dateStr) && !hasActiveLockOverride) { skippedLockedDates.add(dateStr); continue; }
           const roleId = assignmentRoleMap.get(row.projectId) ?? null;
           const billable = row.isInternal ? false : row.billable;
           const location = dayLocations[dateStr] || null;
@@ -859,7 +866,7 @@ export default function Timesheet() {
                       const hours = dayEntry?.hours ?? 0;
                       const notes = dayEntry?.notes ?? '';
                       const noteKey = `${row.projectId}:${row.billable}:${dateStr}`;
-                      const locked = isDateLocked(dateStr);
+                      const locked = isDateLocked(dateStr) && !hasActiveLockOverride;
 
                       return (
                         <div

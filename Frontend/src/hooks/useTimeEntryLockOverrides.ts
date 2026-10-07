@@ -11,6 +11,19 @@ export function useTimeEntryLockOverrides(employeeId: string | undefined) {
   });
 }
 
+/** Any authenticated employee: do THEY currently have an active lock
+ * override? Used by the Weekly Log page to unlock closed-month cells for
+ * themselves when an Admin has granted one — never exposes anyone else's. */
+export function useMyLockOverrideStatus() {
+  return useQuery({
+    queryKey: ['time-entry-lock-overrides', 'me', 'active'],
+    queryFn: () => api.get<{ is_active: boolean }>('/time-entry-lock-overrides/me/active'),
+    // Only matters while someone is actively trying to log closed-month
+    // hours, so poll gently rather than relying on a manual refresh.
+    refetchInterval: 60_000,
+  });
+}
+
 export function useGrantTimeEntryLockOverride() {
   const queryClient = useQueryClient();
   return useMutation({

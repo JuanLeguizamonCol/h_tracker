@@ -78,3 +78,22 @@ def revoke_lock_override(override_id: str, db: Session = Depends(get_db)):
     if override.revoked_at is None:
         override.revoked_at = datetime.now(timezone.utc)
         db.commit()
+
+
+# Separate, non-admin-gated router: any authenticated employee may check their
+# OWN active-override status (read-only, no employee_id param — always "me"),
+# so the Weekly Log page can unlock a closed month's cells for themselves
+# when an Admin has granted them one. Mounted as its own router rather than a
+# route on time_entry_lock_overrides_router so the admin-only gate on that
+# router's grant/list/revoke endpoints is never touched by this addition.
+my_time_entry_lock_status_router = APIRouter(
+    prefix="/time-entry-lock-overrides", tags=["time-entry-lock-overrides"],
+)
+
+
+@my_time_entry_lock_status_router.get("/me/active")
+def get_my_lock_override_status(
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    return {"is_active": has_active_lock_override(db, current_employee.id)}
