@@ -18,6 +18,7 @@ from models.time_entry_lock_overrides import TimeEntryLockOverride
 from schemas.time_entry_lock_overrides import TimeEntryLockOverrideCreate, TimeEntryLockOverrideOut
 from utils.auth_jwt import get_current_employee
 from utils.roles import require_admin
+from utils.time_entry_lock import has_active_lock_override
 
 OVERRIDE_DURATION = timedelta(hours=2)
 
