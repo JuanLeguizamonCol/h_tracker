@@ -707,16 +707,34 @@ export default function Reports() {
     // Leaf columns: one per week, one per day that actually has hours logged
     // (skips empty days so a wide range doesn't add ~90 blank columns), or
     // none at all when grouped by month — each month group then shows only
-    // its total.
-    const columns: { key: string; label: string; start: Date }[] = [];
+    // its total. A week that spans two calendar months is split into two
+    // columns, one per month, each scoped to only the days that actually
+    // fall in that month — so a boundary week's days are always visible
+    // under their real month instead of the whole week being filed under
+    // whichever side happens to hold the majority of its days.
+    const columns: { key: string; label: string; start: Date; end?: Date }[] = [];
     if (matrixGranularity === 'week') {
       let current = startOfWeek(f.startDate, { weekStartsOn: 1 });
       while (current <= f.endDate) {
-        const anchor = addDays(current, 3);
-        const weekN = Math.ceil(anchor.getDate() / 7);
-        const idx = columns.length;
-        columns.push({ key: format(current, 'yyyy-MM-dd'), label: `${format(anchor, 'MMM')}-Week${weekN}`, start: current });
-        monthGroupByKey.get(format(anchor, 'yyyy-MM'))?.weekIndices.push(idx);
+        const weekEnd = addDays(current, 6);
+        const startMonthKey = format(current, 'yyyy-MM');
+        const endMonthKey = format(weekEnd, 'yyyy-MM');
+        if (startMonthKey === endMonthKey) {
+          const anchor = addDays(current, 3);
+          const weekN = Math.ceil(anchor.getDate() / 7);
+          const idx = columns.length;
+          columns.push({ key: format(current, 'yyyy-MM-dd'), label: `${format(anchor, 'MMM')}-Week${weekN}`, start: current, end: weekEnd });
+          monthGroupByKey.get(startMonthKey)?.weekIndices.push(idx);
+        } else {
+          const splitPoint = startOfMonth(weekEnd);
+          const firstEnd = addDays(splitPoint, -1);
+          const idxA = columns.length;
+          columns.push({ key: `${format(current, 'yyyy-MM-dd')}-a`, label: `${format(current, 'MMM d')}–${format(firstEnd, 'd')}`, start: current, end: firstEnd });
+          monthGroupByKey.get(startMonthKey)?.weekIndices.push(idxA);
+          const idxB = columns.length;
+          columns.push({ key: `${format(current, 'yyyy-MM-dd')}-b`, label: `${format(splitPoint, 'MMM d')}–${format(weekEnd, 'd')}`, start: splitPoint, end: weekEnd });
+          monthGroupByKey.get(endMonthKey)?.weekIndices.push(idxB);
+        }
         current = addWeeks(current, 1);
       }
     } else if (matrixGranularity === 'day') {
@@ -730,13 +748,15 @@ export default function Reports() {
     }
 
     // Sums a row's day-level hours into each leaf column's window — a single
-    // day for day granularity, the Mon-Sun span for week granularity.
+    // day for day granularity, start..end (whole week, or the partial span
+    // of a split boundary week) for week granularity.
     function columnHoursFor(dayMap: Record<string, number> | undefined): number[] {
       if (!dayMap) return columns.map(() => 0);
       if (matrixGranularity === 'day') return columns.map(c => dayMap[c.key] ?? 0);
       return columns.map(c => {
         let sum = 0;
-        for (let i = 0; i < 7; i++) sum += dayMap[format(addDays(c.start, i), 'yyyy-MM-dd')] ?? 0;
+        const end = c.end ?? addDays(c.start, 6);
+        for (let d = c.start; d <= end; d = addDays(d, 1)) sum += dayMap[format(d, 'yyyy-MM-dd')] ?? 0;
         return sum;
       });
     }
@@ -825,15 +845,32 @@ export default function Reports() {
     }
     const monthGroupByKey = new Map(monthGroups.map(g => [g.key, g]));
 
-    const columns: { key: string; label: string; start: Date }[] = [];
+    // A week that spans two calendar months is split into two columns, one
+    // per month, each scoped to only the days that actually fall in that
+    // month — mirrors hoursMatrix above.
+    const columns: { key: string; label: string; start: Date; end?: Date }[] = [];
     if (projectMatrixGranularity === 'week') {
       let current = startOfWeek(f.startDate, { weekStartsOn: 1 });
       while (current <= f.endDate) {
-        const anchor = addDays(current, 3);
-        const weekN = Math.ceil(anchor.getDate() / 7);
-        const idx = columns.length;
-        columns.push({ key: format(current, 'yyyy-MM-dd'), label: `${format(anchor, 'MMM')}-Week${weekN}`, start: current });
-        monthGroupByKey.get(format(anchor, 'yyyy-MM'))?.weekIndices.push(idx);
+        const weekEnd = addDays(current, 6);
+        const startMonthKey = format(current, 'yyyy-MM');
+        const endMonthKey = format(weekEnd, 'yyyy-MM');
+        if (startMonthKey === endMonthKey) {
+          const anchor = addDays(current, 3);
+          const weekN = Math.ceil(anchor.getDate() / 7);
+          const idx = columns.length;
+          columns.push({ key: format(current, 'yyyy-MM-dd'), label: `${format(anchor, 'MMM')}-Week${weekN}`, start: current, end: weekEnd });
+          monthGroupByKey.get(startMonthKey)?.weekIndices.push(idx);
+        } else {
+          const splitPoint = startOfMonth(weekEnd);
+          const firstEnd = addDays(splitPoint, -1);
+          const idxA = columns.length;
+          columns.push({ key: `${format(current, 'yyyy-MM-dd')}-a`, label: `${format(current, 'MMM d')}–${format(firstEnd, 'd')}`, start: current, end: firstEnd });
+          monthGroupByKey.get(startMonthKey)?.weekIndices.push(idxA);
+          const idxB = columns.length;
+          columns.push({ key: `${format(current, 'yyyy-MM-dd')}-b`, label: `${format(splitPoint, 'MMM d')}–${format(weekEnd, 'd')}`, start: splitPoint, end: weekEnd });
+          monthGroupByKey.get(endMonthKey)?.weekIndices.push(idxB);
+        }
         current = addWeeks(current, 1);
       }
     } else if (projectMatrixGranularity === 'day') {
@@ -851,7 +888,8 @@ export default function Reports() {
       if (projectMatrixGranularity === 'day') return columns.map(c => dayMap[c.key] ?? 0);
       return columns.map(c => {
         let sum = 0;
-        for (let i = 0; i < 7; i++) sum += dayMap[format(addDays(c.start, i), 'yyyy-MM-dd')] ?? 0;
+        const end = c.end ?? addDays(c.start, 6);
+        for (let d = c.start; d <= end; d = addDays(d, 1)) sum += dayMap[format(d, 'yyyy-MM-dd')] ?? 0;
         return sum;
       });
     }
