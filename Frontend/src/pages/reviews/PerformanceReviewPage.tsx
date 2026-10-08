@@ -272,8 +272,9 @@ export default function PerformanceReviewPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-1">
-          <Button variant="ghost" size="sm" className="gap-2 -ml-2 text-muted-foreground" onClick={() => navigate('/reviews')}>
-            <ArrowLeft className="h-4 w-4" /> Performance Reviews
+          <Button variant="ghost" size="sm" className="gap-2 -ml-2 text-muted-foreground"
+            onClick={() => navigate(manage ? `/reviews/projects/${review.project_id}` : '/reviews')}>
+            <ArrowLeft className="h-4 w-4" /> {manage ? review.project_name : 'Performance Reviews'}
           </Button>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-foreground">{review.employee_name}</h1>

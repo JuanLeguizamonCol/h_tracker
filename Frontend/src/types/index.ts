@@ -812,3 +812,38 @@ export type PerformanceReviewPatch = Partial<Pick<PerformanceReview,
   | 'self_strengths' | 'self_improvement' | 'self_development'
   | 'reviewer_strengths_notes' | 'reviewer_improvement_notes' | 'reviewer_development_notes'
   | 'scores'>>;
+
+export interface ReviewProject {
+  id: string;
+  name: string;
+  project_code: string | null;
+  client_name: string | null;
+  manager_id: string | null;
+  manager_name: string | null;
+  is_active: boolean;
+  status: string;
+  performance_review_enabled: boolean;
+  team_size: number;
+  reviews_total: number;
+  reviews_self_assessment: number;
+  reviews_in_review: number;
+  reviews_completed: number;
+}
+
+export interface ReviewTeamMember {
+  employee_id: string;
+  name: string;
+  title: string | null;
+  role_name: string | null;
+  is_assigned: boolean;
+  is_active: boolean;
+  logged_hours: number;
+  reviews: {
+    id: string;
+    status: PerformanceReviewStatus;
+    review_date: string;
+    reviewer_id: string | null;
+    reviewer_name: string | null;
+    overall_average: number | null;
+  }[];
+}

@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { PerformanceReview, PerformanceReviewPatch, PerformanceReviewStatus, ReviewTemplate } from '@/types';
+import {
+  PerformanceReview, PerformanceReviewPatch, PerformanceReviewStatus, ReviewTemplate, ReviewProject, ReviewTeamMember,
+} from '@/types';
 
 export const REVIEW_STATUS_BADGE: Record<PerformanceReviewStatus, { label: string; className: string }> = {
   self_assessment: { label: 'Self-assessment', className: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300' },
@@ -50,19 +52,6 @@ export function useReviewLoggedHours(params: { projectId?: string; employeeId?: 
   });
 }
 
-export function useCreatePerformanceReview() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: {
-      project_id: string; employee_id: string; reviewer_id?: string | null; review_date: string;
-      period_start?: string | null; period_end?: string | null; duration_hours?: number | null;
-    }) => api.post<PerformanceReview>('/performance-reviews/', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });
-    },
-  });
-}
-
 export function useUpdatePerformanceReview() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -71,6 +60,7 @@ export function useUpdatePerformanceReview() {
     onSuccess: (review) => {
       queryClient.setQueryData(['performance-reviews', 'detail', review.id], review);
       queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });
+      queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'projects'] });
     },
   });
 }
@@ -83,6 +73,7 @@ export function useTransitionPerformanceReview() {
     onSuccess: (review) => {
       queryClient.setQueryData(['performance-reviews', 'detail', review.id], review);
       queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });
+      queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'projects'] });
     },
   });
 }
@@ -93,6 +84,7 @@ export function useDeletePerformanceReview() {
     mutationFn: (id: string) => api.delete<void>(`/performance-reviews/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });
+      queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'projects'] });
     },
   });
 }
@@ -105,4 +97,46 @@ export function reviewExportFilename(review: PerformanceReview): string {
 
 export function downloadReviewXlsx(review: PerformanceReview) {
   return api.download(`/performance-reviews/${review.id}/export/xlsx`, reviewExportFilename(review));
+}
+
+// ---------- Projects panel ----------
+
+export function useReviewProjects(includeInactive = false) {
+  return useQuery({
+    queryKey: ['performance-reviews', 'projects', 'list', includeInactive],
+    queryFn: () => api.get<ReviewProject[]>(`/performance-reviews/projects${includeInactive ? '?include_inactive=true' : ''}`),
+  });
+}
+
+export function useToggleProjectReviews() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, enabled }: { projectId: string; enabled: boolean }) =>
+      api.put<ReviewProject>(`/performance-reviews/projects/${projectId}`, { enabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'projects'] });
+    },
+  });
+}
+
+export function useProjectReviewTeam(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ['performance-reviews', 'projects', 'team', projectId],
+    queryFn: () => api.get<ReviewTeamMember[]>(`/performance-reviews/projects/${projectId}/team`),
+    enabled: !!projectId,
+  });
+}
+
+export function useAssignSelfAssessments() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      project_id: string; employee_ids: string[]; review_date: string;
+      reviewer_id?: string | null; period_start?: string | null; period_end?: string | null;
+    }) => api.post<{ created: PerformanceReview[]; skipped_employee_ids: string[] }>('/performance-reviews/bulk', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });
+      queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'projects'] });
+    },
+  });
 }

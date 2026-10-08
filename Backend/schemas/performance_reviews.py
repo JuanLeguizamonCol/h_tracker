@@ -105,3 +105,63 @@ class ReviewTemplateOut(BaseModel):
     score_min: int
     score_max: int
     criteria: List[ReviewCriterionOut]
+
+
+# ---------- Projects panel ----------
+
+class ReviewProjectOut(BaseModel):
+    id: str
+    name: str
+    project_code: Optional[str] = None
+    client_name: Optional[str] = None
+    manager_id: Optional[str] = None
+    manager_name: Optional[str] = None
+    is_active: bool
+    status: str
+    performance_review_enabled: bool
+    team_size: int
+    reviews_total: int
+    reviews_self_assessment: int
+    reviews_in_review: int
+    reviews_completed: int
+
+
+class ProjectReviewToggle(BaseModel):
+    enabled: bool
+
+
+class ReviewSummaryOut(BaseModel):
+    id: str
+    status: str
+    review_date: date
+    reviewer_id: Optional[str] = None
+    reviewer_name: Optional[str] = None
+    overall_average: Optional[float] = None
+
+
+class ReviewTeamMemberOut(BaseModel):
+    employee_id: str
+    name: str
+    title: Optional[str] = None
+    role_name: Optional[str] = None
+    is_assigned: bool       # currently staffed on the project (employee_projects)
+    is_active: bool
+    logged_hours: float
+    reviews: List[ReviewSummaryOut]  # newest first
+
+
+class BulkAssignIn(BaseModel):
+    project_id: str
+    employee_ids: List[str]
+    review_date: date
+    # Defaults to the project's manager (then owner) when omitted.
+    reviewer_id: Optional[str] = None
+    period_start: Optional[date] = None
+    period_end: Optional[date] = None
+
+
+class BulkAssignOut(BaseModel):
+    created: List[PerformanceReviewOut]
+    # Employees skipped because they already have an open (not completed)
+    # review on this project.
+    skipped_employee_ids: List[str]

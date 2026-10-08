@@ -125,3 +125,34 @@ def test_xlsx_export_layout(db):
     assert ws["C20"].value is None and ws["C21"].value == 3
     assert ws["A43"].value == "Overall Professionalism and Core Values" and ws["C43"].value == 2.75
     assert ws["C44"].value == 2
+
+
+def test_reviewer_never_defaults_to_the_reviewee(db):
+    # The project manager being reviewed falls through to the owner (none here).
+    review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="mgr", review_date=date(2025, 12, 15)), "mgr")
+    assert review.reviewer_id is None
+
+
+def test_projects_panel_and_team(db):
+    from models.employee_projects import EmployeeProject
+    db.add(EmployeeProject(id="ep1", user_id="emp", project_id="prj"))
+    db.add(Project(id="int", client_id="cli", name="Internal", is_internal=True))
+    db.commit()
+
+    panel = svc.list_review_projects(db)
+    assert [p["id"] for p in panel] == ["prj"]  # internal projects excluded
+    assert panel[0]["performance_review_enabled"] is False and panel[0]["team_size"] == 1
+
+    svc.set_project_review_enabled(db, db.get(Project, "prj"), True)
+    svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15)), "mgr")
+    panel = svc.list_review_projects(db)
+    assert panel[0]["performance_review_enabled"] is True
+    assert (panel[0]["reviews_total"], panel[0]["reviews_self_assessment"]) == (1, 1)
+
+    team = {m["employee_id"]: m for m in svc.project_team(db, "prj")}
+    # Assigned employee + someone who only logged time.
+    assert set(team) == {"emp", "mgr"}
+    assert team["emp"]["is_assigned"] and not team["mgr"]["is_assigned"]
+    assert team["emp"]["logged_hours"] == 296 and team["mgr"]["logged_hours"] == 50
+    assert len(team["emp"]["reviews"]) == 1 and team["mgr"]["reviews"] == []
+    assert svc.has_open_review(db, "prj", "emp") and not svc.has_open_review(db, "prj", "mgr")

@@ -30,6 +30,7 @@ const ProjectEditPage = lazy(() => import("./pages/projects/ProjectEditPage"));
 const Reports = lazy(() => import("./pages/Reports"));
 const StaffingPage = lazy(() => import("./pages/StaffingPage"));
 const PerformanceReviews = lazy(() => import("./pages/PerformanceReviews"));
+const ProjectReviewsPage = lazy(() => import("./pages/reviews/ProjectReviewsPage"));
 const PerformanceReviewPage = lazy(() => import("./pages/reviews/PerformanceReviewPage"));
 const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -78,6 +79,7 @@ const App = () => (
               <Route path="/invoices/:invoiceId" element={<ProtectedRoute><MainLayout><SectionGuard section="invoices"><InvoiceDetailPage /></SectionGuard></MainLayout></ProtectedRoute>} />
               <Route path="/reports" element={<ProtectedRoute><MainLayout><SectionGuard section="reports"><Reports /></SectionGuard></MainLayout></ProtectedRoute>} />
               <Route path="/reviews" element={<ProtectedRoute><MainLayout><SectionGuard section="reviews"><PerformanceReviews /></SectionGuard></MainLayout></ProtectedRoute>} />
+              <Route path="/reviews/projects/:projectId" element={<ProtectedRoute><MainLayout><SectionGuard section="reviews" level="edit"><ProjectReviewsPage /></SectionGuard></MainLayout></ProtectedRoute>} />
               <Route path="/reviews/:reviewId" element={<ProtectedRoute><MainLayout><SectionGuard section="reviews"><PerformanceReviewPage /></SectionGuard></MainLayout></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><MainLayout><SectionGuard section="profile"><ProfilePage /></SectionGuard></MainLayout></ProtectedRoute>} />
               {/* Legacy routes */}

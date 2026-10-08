@@ -277,7 +277,10 @@ def hides_reviewer_section(review: PerformanceReview, viewer_id: str, viewer_can
 
 def create_review(db: Session, data, created_by: str) -> PerformanceReview:
     project = db.query(Project).filter(Project.id == data.project_id).first()
-    reviewer_id = data.reviewer_id or (project.manager_id if project else None) or (project.owner_id if project else None)
+    # First of: requested reviewer, project manager, project owner — skipping
+    # the employee themselves (e.g. when the manager is the one being reviewed).
+    candidates = [data.reviewer_id, project.manager_id if project else None, project.owner_id if project else None]
+    reviewer_id = next((c for c in candidates if c and c != data.employee_id), None)
     duration = data.duration_hours
     if duration is None:
         duration = logged_hours(db, data.employee_id, data.project_id, data.period_start, data.period_end)
@@ -346,3 +349,130 @@ def review_export_data(db: Session, review: PerformanceReview) -> dict:
     else:
         data["employee_display_name"] = data["employee_name"]
     return data
+
+
+# ---------- Projects panel ----------
+
+def list_review_projects(db: Session, include_inactive: bool = False) -> List[dict]:
+    """Every client (non-internal) project with its review flag, team size and
+    review counts by status — the Reviews panel's main table."""
+    from models.employee_projects import EmployeeProject
+
+    q = (
+        db.query(Project, Client.name)
+        .outerjoin(Client, Client.id == Project.client_id)
+        .filter(Project.is_internal.is_(False))
+    )
+    if not include_inactive:
+        # Projects already running reviews stay visible even once inactive.
+        q = q.filter((Project.is_active.is_(True)) | (Project.performance_review_enabled.is_(True)))
+    rows = q.all()
+    if not rows:
+        return []
+    project_ids = [p.id for p, _ in rows]
+
+    team_size = dict(
+        db.query(EmployeeProject.project_id, func.count(func.distinct(EmployeeProject.user_id)))
+        .filter(EmployeeProject.project_id.in_(project_ids))
+        .group_by(EmployeeProject.project_id)
+        .all()
+    )
+    counts: Dict[str, Dict[str, int]] = {}
+    for pid, st, n in (
+        db.query(PerformanceReview.project_id, PerformanceReview.status, func.count(PerformanceReview.id))
+        .filter(PerformanceReview.project_id.in_(project_ids))
+        .group_by(PerformanceReview.project_id, PerformanceReview.status)
+        .all()
+    ):
+        counts.setdefault(pid, {})[st] = n
+    manager_ids = {p.manager_id for p, _ in rows if p.manager_id}
+    name_by_id = dict(db.query(Employee.id, Employee.name).filter(Employee.id.in_(manager_ids)).all()) if manager_ids else {}
+
+    out = []
+    for p, client_name in rows:
+        c = counts.get(p.id, {})
+        out.append({
+            "id": p.id,
+            "name": p.name,
+            "project_code": p.project_code,
+            "client_name": client_name,
+            "manager_id": p.manager_id,
+            "manager_name": name_by_id.get(p.manager_id) if p.manager_id else None,
+            "is_active": bool(p.is_active),
+            "status": p.status,
+            "performance_review_enabled": bool(p.performance_review_enabled),
+            "team_size": team_size.get(p.id, 0),
+            "reviews_total": sum(c.values()),
+            "reviews_self_assessment": c.get("self_assessment", 0),
+            "reviews_in_review": c.get("in_review", 0),
+            "reviews_completed": c.get("completed", 0),
+        })
+    out.sort(key=lambda r: (not r["performance_review_enabled"], (r["client_name"] or "").lower(), r["name"].lower()))
+    return out
+
+
+def set_project_review_enabled(db: Session, project: Project, enabled: bool) -> None:
+    project.performance_review_enabled = enabled
+    db.commit()
+
+
+def project_team(db: Session, project_id: str) -> List[dict]:
+    """Everyone who's staffed on the project or has logged time on it, with
+    their logged hours and reviews on this project (newest first)."""
+    from models.employee_projects import EmployeeProject
+    from models.project_roles import ProjectRole
+
+    assignments = db.query(EmployeeProject).filter(EmployeeProject.project_id == project_id).all()
+    role_ids = {a.role_id for a in assignments if a.role_id}
+    role_name_by_id = dict(db.query(ProjectRole.id, ProjectRole.name).filter(ProjectRole.id.in_(role_ids)).all()) if role_ids else {}
+    role_by_emp = {a.user_id: role_name_by_id.get(a.role_id) for a in assignments}
+
+    hours_by_emp = dict(
+        db.query(TimeEntry.user_id, func.sum(TimeEntry.hours))
+        .filter(TimeEntry.project_id == project_id)
+        .group_by(TimeEntry.user_id)
+        .all()
+    )
+    reviews = list_reviews(db, project_id=project_id)
+    emp_ids = set(role_by_emp) | set(hours_by_emp) | {r.employee_id for r in reviews}
+    if not emp_ids:
+        return []
+    employees = db.query(Employee).filter(Employee.id.in_(emp_ids)).all()
+    reviewer_ids = {r.reviewer_id for r in reviews if r.reviewer_id}
+    reviewer_names = dict(db.query(Employee.id, Employee.name).filter(Employee.id.in_(reviewer_ids)).all()) if reviewer_ids else {}
+
+    reviews_by_emp: Dict[str, List[dict]] = {}
+    for r in reviews:  # already newest first
+        _, overall = compute_averages(r.scores or {})
+        reviews_by_emp.setdefault(r.employee_id, []).append({
+            "id": r.id,
+            "status": r.status,
+            "review_date": r.review_date,
+            "reviewer_id": r.reviewer_id,
+            "reviewer_name": reviewer_names.get(r.reviewer_id) if r.reviewer_id else None,
+            "overall_average": overall,
+        })
+
+    team = [
+        {
+            "employee_id": e.id,
+            "name": e.name,
+            "title": e.title,
+            "role_name": role_by_emp.get(e.id),
+            "is_assigned": e.id in role_by_emp,
+            "is_active": bool(e.is_active),
+            "logged_hours": float(hours_by_emp.get(e.id) or 0),
+            "reviews": reviews_by_emp.get(e.id, []),
+        }
+        for e in employees
+    ]
+    team.sort(key=lambda m: (not m["is_assigned"], not m["is_active"], m["name"].lower()))
+    return team
+
+
+def has_open_review(db: Session, project_id: str, employee_id: str) -> bool:
+    return db.query(PerformanceReview.id).filter(
+        PerformanceReview.project_id == project_id,
+        PerformanceReview.employee_id == employee_id,
+        PerformanceReview.status != "completed",
+    ).first() is not None

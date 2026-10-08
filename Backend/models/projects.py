@@ -48,6 +48,10 @@ class Project(Base):
     # minimum; hours above it bill the actual hours worked.
     is_managed_services = Column(Boolean, nullable=False, default=False)
     managed_services_min_hours = Column(Numeric(10, 2), nullable=True)
+    # Whether this project runs performance reviews — toggled from the Reviews
+    # panel (routers/performance_reviews.py); self-assessments can only be
+    # assigned on projects where it's on.
+    performance_review_enabled = Column(Boolean, nullable=False, default=False)
 
     client = relationship("Client", back_populates="projects")
     roles = relationship("ProjectRole", back_populates="project", cascade="all, delete-orphan")

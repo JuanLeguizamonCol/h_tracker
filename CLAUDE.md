@@ -331,6 +331,11 @@ DEL  /pto-request-attachments/{id}      → 204
 ```
 
 ### Performance Reviews (evaluaciones de desempeño por proyecto)
+Panel principal (Admin/Manager): lista de proyectos cliente con un switch
+`projects.performance_review_enabled` ("¿el proyecto tiene evaluación?"); al entrar a un
+proyecto se ve el equipo (asignados + quien registró horas) y se asignan
+autoevaluaciones a uno o varios empleados (`POST /bulk`; solo si el proyecto tiene
+reviews activadas; omite a quien ya tiene una review abierta en ese proyecto).
 Formato fijo del workbook de evaluación de Impact Point (criterios/sub-criterios en
 `services/performance_reviews.py::REVIEW_TEMPLATE`, escala 1–5, N/A excluido del
 promedio; promedio por criterio = media de sus sub-criterios calificados, total =
@@ -342,6 +347,10 @@ hasta `completed`. Export .xlsx replica el layout del workbook
 (`services/export_performance_review.py`). Emails best-effort en cada paso.
 ```
 GET  /performance-reviews/template             → criterios + escala
+GET  /performance-reviews/projects             → List[ReviewProjectOut] (flag + equipo + conteos por estado) ?include_inactive (edit)
+PUT  /performance-reviews/projects/{id}        → activa/desactiva reviews del proyecto body:{enabled} (edit)
+GET  /performance-reviews/projects/{id}/team   → equipo con horas registradas y sus reviews (edit)
+POST /performance-reviews/bulk                 → asigna autoevaluaciones body:{project_id, employee_ids[], review_date, reviewer_id?, period_*?} (edit)
 GET  /performance-reviews/logged-hours         → {hours} ?project_id ?employee_id ?period_start ?period_end (edit)
 GET  /performance-reviews/                     → List (propias como reviewee/reviewer; todas con edit) ?project_id ?employee_id ?status_filter
 POST /performance-reviews/                     → crea (edit) body:{project_id, employee_id, review_date, reviewer_id?, period_*?, duration_hours?}
@@ -376,7 +385,8 @@ GET  /health                      → {status: "ok"}
 /invoices/new/manual   Factura manual (sin time entries)
 /invoices/:id/edit     Editor completo de factura
 /reports               Reportes y análisis
-/reviews               Evaluaciones de desempeño (lista)
+/reviews               Evaluaciones: panel de proyectos (Admin/Manager) + lista de reviews
+/reviews/projects/:id  Equipo del proyecto → asignar autoevaluaciones
 /reviews/:id           Editor de evaluación (formato workbook) + export Excel
 /auth                  Login (redirige a /)
 ```
@@ -479,6 +489,7 @@ var el botón simplemente no se renderiza.
 | 030 | Elimina `password_hash`/`must_change_password` (login exclusivo por Entra ID) |
 | 051 | Elimina la auto-generación de facturas: dropea `scheduler_log` y `projects.billing_period`/`billing_day_of_period`/`billing_anchor_date`/`custom_period_days` (deja `invoices.auto_generated` como flag histórico) |
 | 058 | Tabla `performance_reviews` (evaluaciones de desempeño por proyecto; scores en JSON) |
+| 059 | `projects.performance_review_enabled` (qué proyectos tienen evaluación) |
 
 Para correr migraciones:
 ```bash

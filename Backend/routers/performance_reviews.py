@@ -11,6 +11,7 @@ from models.performance_reviews import PerformanceReview
 from schemas.performance_reviews import (
     PerformanceReviewCreate, PerformanceReviewUpdate, PerformanceReviewTransition,
     PerformanceReviewOut, ReviewTemplateOut,
+    ReviewProjectOut, ProjectReviewToggle, ReviewTeamMemberOut, BulkAssignIn, BulkAssignOut,
 )
 from services import performance_reviews as svc
 from services.export_performance_review import generate_performance_review_xlsx, export_filename
@@ -69,6 +70,99 @@ def get_logged_hours(
     return {"hours": svc.logged_hours(db, employee_id, project_id, period_start, period_end)}
 
 
+def _require_manage(db: Session, employee: Employee) -> None:
+    if not _can_manage(db, employee):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
+
+
+def _load_project(db: Session, project_id: str) -> Project:
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    return project
+
+
+# ---------- Projects panel (Reviews edit access) ----------
+
+@performance_reviews_router.get("/projects", response_model=List[ReviewProjectOut])
+def list_review_projects(
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    _require_manage(db, current_employee)
+    return svc.list_review_projects(db, include_inactive=include_inactive)
+
+
+@performance_reviews_router.put("/projects/{project_id}", response_model=ReviewProjectOut)
+def toggle_project_reviews(
+    project_id: str,
+    body: ProjectReviewToggle,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Turns performance reviews on/off for a project. Turning it off keeps
+    existing reviews; it only blocks assigning new self-assessments."""
+    _require_manage(db, current_employee)
+    project = _load_project(db, project_id)
+    svc.set_project_review_enabled(db, project, body.enabled)
+    return next(p for p in svc.list_review_projects(db, include_inactive=True) if p["id"] == project_id)
+
+
+@performance_reviews_router.get("/projects/{project_id}/team", response_model=List[ReviewTeamMemberOut])
+def get_project_team(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    _require_manage(db, current_employee)
+    _load_project(db, project_id)
+    return svc.project_team(db, project_id)
+
+
+@performance_reviews_router.post("/bulk", response_model=BulkAssignOut, status_code=status.HTTP_201_CREATED)
+def bulk_assign_self_assessments(
+    data: BulkAssignIn,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Assigns a self-assessment (= opens a review) to each selected employee on
+    one project. Employees who already have an open review there are skipped."""
+    _require_manage(db, current_employee)
+    project = _load_project(db, data.project_id)
+    if not project.performance_review_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Performance reviews are turned off for this project.")
+    if not data.employee_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one employee.")
+    if data.period_start and data.period_end and data.period_end < data.period_start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Period end must be on or after the start.")
+    if data.reviewer_id and not db.query(Employee.id).filter(Employee.id == data.reviewer_id).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reviewer not found.")
+    employee_ids = list(dict.fromkeys(data.employee_ids))
+    found = {i for (i,) in db.query(Employee.id).filter(Employee.id.in_(employee_ids)).all()}
+    missing = [i for i in employee_ids if i not in found]
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Employee not found: {missing[0]}")
+
+    created, skipped = [], []
+    for employee_id in employee_ids:
+        if svc.has_open_review(db, data.project_id, employee_id):
+            skipped.append(employee_id)
+            continue
+        review = svc.create_review(db, PerformanceReviewCreate(
+            project_id=data.project_id,
+            employee_id=employee_id,
+            reviewer_id=data.reviewer_id,
+            review_date=data.review_date,
+            period_start=data.period_start,
+            period_end=data.period_end,
+        ), current_employee.id)
+        out = _out(db, review, current_employee, True)
+        notify_review_created(out, _email_of(db, employee_id))
+        created.append(out)
+    return {"created": created, "skipped_employee_ids": skipped}
+
+
 @performance_reviews_router.get("/", response_model=List[PerformanceReviewOut])
 def list_reviews(
     project_id: Optional[str] = None,
@@ -96,8 +190,11 @@ def create_review(
 ):
     if not _can_manage(db, current_employee):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
-    if not db.query(Project.id).filter(Project.id == data.project_id).first():
+    project = db.query(Project).filter(Project.id == data.project_id).first()
+    if not project:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project not found.")
+    if not project.performance_review_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Performance reviews are turned off for this project.")
     if not db.query(Employee.id).filter(Employee.id == data.employee_id).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee not found.")
     if data.reviewer_id and not db.query(Employee.id).filter(Employee.id == data.reviewer_id).first():

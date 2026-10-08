@@ -1,191 +1,172 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { ClipboardCheck, Plus, Search, Loader2, Download, Trash2 } from 'lucide-react';
+import { ClipboardCheck, Search, Loader2, Download, Trash2, ChevronRight, Briefcase } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  usePerformanceReviews, useCreatePerformanceReview, useDeletePerformanceReview,
-  useReviewLoggedHours, downloadReviewXlsx, REVIEW_STATUS_BADGE,
+  usePerformanceReviews, useDeletePerformanceReview, downloadReviewXlsx, REVIEW_STATUS_BADGE,
+  useReviewProjects, useToggleProjectReviews,
 } from '@/hooks/usePerformanceReviews';
-import { useActiveProjects, useProjectAssignments } from '@/hooks/useProjects';
-import { useEmployees } from '@/hooks/useEmployees';
-import { PerformanceReview, PerformanceReviewStatus } from '@/types';
+import { PerformanceReview, PerformanceReviewStatus, ReviewProject } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
 
 function formatDate(iso: string): string {
   return format(new Date(`${iso}T00:00:00`), 'MMM d, yyyy');
 }
 
-type NewReviewForm = {
-  projectId: string | null;
-  employeeId: string | null;
-  reviewerId: string | null;
-  reviewDate: string;
-  periodStart: string;
-  periodEnd: string;
-  durationHours: string;
-};
+function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <div className="relative w-full lg:max-w-sm">
+      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input placeholder={placeholder} value={value} onChange={e => onChange(e.target.value)} className="pl-10" />
+    </div>
+  );
+}
 
-const todayIso = () => format(new Date(), 'yyyy-MM-dd');
+// ---------- Projects panel (Reviews edit access) ----------
 
-function NewReviewDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function ProjectsPanel() {
   const navigate = useNavigate();
-  const { data: projects = [] } = useActiveProjects();
-  const { data: employees = [] } = useEmployees();
-  const createReview = useCreatePerformanceReview();
-  const [form, setForm] = useState<NewReviewForm>({
-    projectId: null, employeeId: null, reviewerId: null, reviewDate: todayIso(), periodStart: '', periodEnd: '', durationHours: '',
-  });
-  const [hoursTouched, setHoursTouched] = useState(false);
-  const { data: assignments = [] } = useProjectAssignments(form.projectId ?? undefined);
-  const { data: logged } = useReviewLoggedHours({
-    projectId: form.projectId ?? undefined,
-    employeeId: form.employeeId ?? undefined,
-    periodStart: form.periodStart || undefined,
-    periodEnd: form.periodEnd || undefined,
-    enabled: open,
-  });
+  const [includeInactive, setIncludeInactive] = useState(false);
+  const { data: projects = [], isLoading } = useReviewProjects(includeInactive);
+  const toggle = useToggleProjectReviews();
+  const [filter, setFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
+  const [search, setSearch] = useState('');
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (open) {
-      setForm({ projectId: null, employeeId: null, reviewerId: null, reviewDate: todayIso(), periodStart: '', periodEnd: '', durationHours: '' });
-      setHoursTouched(false);
-    }
-  }, [open]);
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return projects.filter(p =>
+      (filter === 'all' || (filter === 'enabled') === p.performance_review_enabled) &&
+      (!term || [p.name, p.client_name, p.project_code, p.manager_name].some(v => v?.toLowerCase().includes(term))),
+    );
+  }, [projects, filter, search]);
+  const enabledCount = projects.filter(p => p.performance_review_enabled).length;
 
-  // Duration defaults to the hours actually logged, until the user overrides it.
-  useEffect(() => {
-    if (!hoursTouched && logged) setForm(f => ({ ...f, durationHours: String(logged.hours) }));
-  }, [logged, hoursTouched]);
-
-  const projectOptions = useMemo(
-    () => projects.filter(p => !p.is_internal).map(p => ({ id: p.id, label: p.name, sublabel: p.project_code ?? undefined }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-    [projects],
-  );
-  const activeEmployees = useMemo(() => employees.filter(e => e.is_active).sort((a, b) => a.name.localeCompare(b.name)), [employees]);
-  // People staffed on the project first; anyone else is still selectable.
-  const employeeOptions = useMemo(() => {
-    const assigned = new Set(assignments.map(a => a.user_id));
-    return [...activeEmployees]
-      .sort((a, b) => Number(assigned.has(b.id)) - Number(assigned.has(a.id)))
-      .map(e => ({ id: e.id, label: e.name, sublabel: assigned.has(e.id) ? 'Assigned to project' : e.title ?? undefined }));
-  }, [activeEmployees, assignments]);
-  const reviewerOptions = useMemo(
-    () => activeEmployees.filter(e => e.id !== form.employeeId).map(e => ({ id: e.id, label: e.name, sublabel: e.title ?? undefined })),
-    [activeEmployees, form.employeeId],
-  );
-
-  function selectProject(projectId: string | null) {
-    const project = projects.find(p => p.id === projectId);
-    setForm(f => ({ ...f, projectId, employeeId: null, reviewerId: project?.manager_id ?? project?.owner_id ?? null }));
-    setHoursTouched(false);
-  }
-
-  async function handleCreate() {
-    if (!form.projectId || !form.employeeId) { toast.error('Pick a project and an employee.'); return; }
-    if (form.periodStart && form.periodEnd && form.periodEnd < form.periodStart) { toast.error('Period end must be on or after the start.'); return; }
-    const hours = form.durationHours === '' ? null : parseFloat(form.durationHours);
-    if (hours !== null && (isNaN(hours) || hours < 0)) { toast.error('Enter a valid number of hours.'); return; }
+  async function handleToggle(project: ReviewProject, enabled: boolean) {
+    if (!enabled && project.reviews_total > 0 &&
+      !confirm(`Turn off reviews for ${project.name}? Its ${project.reviews_total} existing review(s) are kept, but no new self-assessments can be assigned.`)) return;
+    setPendingId(project.id);
     try {
-      const review = await createReview.mutateAsync({
-        project_id: form.projectId,
-        employee_id: form.employeeId,
-        reviewer_id: form.reviewerId,
-        review_date: form.reviewDate,
-        period_start: form.periodStart || null,
-        period_end: form.periodEnd || null,
-        duration_hours: hours,
-      });
-      toast.success('Review created — the employee was asked to complete their self-assessment.');
-      onOpenChange(false);
-      navigate(`/reviews/${review.id}`);
-    } catch (e) {
-      toast.error(e instanceof Error && e.message.includes('400') ? e.message.replace(/^API error \d+: /, '') : 'Failed to create review.');
+      await toggle.mutateAsync({ projectId: project.id, enabled });
+      toast.success(enabled ? `Performance reviews enabled for ${project.name}.` : `Performance reviews turned off for ${project.name}.`);
+    } catch {
+      toast.error('Failed to update the project.');
+    } finally {
+      setPendingId(null);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New Performance Review</DialogTitle>
-          <DialogDescription>The employee completes the project details and self-assessment; the reviewer scores each criterion.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>Project</Label>
-            <SearchableCombobox options={projectOptions} value={form.projectId} onChange={selectProject} placeholder="Select a project..." />
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-4">
+          <Tabs value={filter} onValueChange={v => setFilter(v as typeof filter)}>
+            <TabsList>
+              <TabsTrigger value="all">All ({projects.length})</TabsTrigger>
+              <TabsTrigger value="enabled">With reviews ({enabledCount})</TabsTrigger>
+              <TabsTrigger value="disabled">Without reviews ({projects.length - enabledCount})</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <div className="flex items-center gap-2">
+            <Switch id="inactive" checked={includeInactive} onCheckedChange={setIncludeInactive} />
+            <Label htmlFor="inactive" className="text-sm font-normal text-muted-foreground">Show inactive projects</Label>
           </div>
-          <div className="space-y-1.5">
-            <Label>Employee (review for)</Label>
-            <SearchableCombobox
-              options={employeeOptions}
-              value={form.employeeId}
-              onChange={id => { setForm(f => ({ ...f, employeeId: id, reviewerId: f.reviewerId === id ? null : f.reviewerId })); setHoursTouched(false); }}
-              placeholder="Select an employee..."
-              disabled={!form.projectId}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Reviewer</Label>
-            <SearchableCombobox options={reviewerOptions} value={form.reviewerId} onChange={id => setForm(f => ({ ...f, reviewerId: id }))} placeholder="Defaults to the project manager" clearable />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Date of review</Label>
-              <Input type="date" value={form.reviewDate} onChange={e => setForm(f => ({ ...f, reviewDate: e.target.value }))} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Duration (hours)</Label>
-              <Input
-                type="number" min="0" step="0.5" value={form.durationHours}
-                onChange={e => { setHoursTouched(true); setForm(f => ({ ...f, durationHours: e.target.value })); }}
-                placeholder="Logged hours"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Period start <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <Input type="date" value={form.periodStart} onChange={e => setForm(f => ({ ...f, periodStart: e.target.value }))} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Period end <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <Input type="date" value={form.periodEnd} onChange={e => setForm(f => ({ ...f, periodEnd: e.target.value }))} />
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Duration is prefilled with the hours the employee logged on the project{form.periodStart || form.periodEnd ? ' within the period' : ''}.
-          </p>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleCreate} disabled={createReview.isPending}>
-            {createReview.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />} Create Review
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <SearchBox value={search} onChange={setSearch} placeholder="Search project, client, manager..." />
+      </div>
+
+      <Card className="card-elevated">
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+              <Briefcase className="h-8 w-8" />
+              <p className="text-sm">No projects match these filters.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-28">Reviews</TableHead>
+                    <TableHead>Project</TableHead>
+                    <TableHead>Manager</TableHead>
+                    <TableHead className="text-center">Team</TableHead>
+                    <TableHead>Progress</TableHead>
+                    <TableHead className="w-10" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map(p => (
+                    <TableRow key={p.id} className="cursor-pointer" onClick={() => navigate(`/reviews/projects/${p.id}`)}>
+                      <TableCell onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={p.performance_review_enabled}
+                            disabled={pendingId === p.id}
+                            onCheckedChange={v => handleToggle(p, v)}
+                            aria-label={`Performance reviews for ${p.name}`}
+                          />
+                          <span className="text-xs text-muted-foreground">{p.performance_review_enabled ? 'Yes' : 'No'}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">{p.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {[p.client_name, p.project_code].filter(Boolean).join(' · ')}
+                          {!p.is_active && <Badge variant="outline" className="ml-2 text-[10px] py-0">Inactive</Badge>}
+                        </div>
+                      </TableCell>
+                      <TableCell>{p.manager_name ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                      <TableCell className="text-center tabular-nums">{p.team_size}</TableCell>
+                      <TableCell>
+                        {p.reviews_total === 0 ? (
+                          <span className="text-sm text-muted-foreground">{p.performance_review_enabled ? 'Not assigned yet' : '—'}</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {(['self_assessment', 'in_review', 'completed'] as const).map(st => {
+                              const n = p[`reviews_${st}`];
+                              return n > 0 ? (
+                                <Badge key={st} variant="outline" className={`border-0 ${REVIEW_STATUS_BADGE[st].className}`}>
+                                  {n} {REVIEW_STATUS_BADGE[st].label.toLowerCase()}
+                                </Badge>
+                              ) : null;
+                            })}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
-export default function PerformanceReviews() {
+// ---------- Reviews list ----------
+
+function ReviewsList({ canManage }: { canManage: boolean }) {
   const navigate = useNavigate();
-  const { employee, hasEdit } = useAuth();
-  const canManage = hasEdit('reviews');
+  const { employee } = useAuth();
   const { data: reviews = [], isLoading } = usePerformanceReviews();
   const deleteReview = useDeletePerformanceReview();
   const [statusFilter, setStatusFilter] = useState<'all' | PerformanceReviewStatus>('all');
   const [search, setSearch] = useState('');
-  const [newOpen, setNewOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -220,25 +201,13 @@ export default function PerformanceReviews() {
   }
 
   function roleOf(r: PerformanceReview): string | null {
-    if (r.employee_id === employee?.id) return 'You (reviewee)';
-    if (r.reviewer_id === employee?.id) return 'You (reviewer)';
+    if (r.employee_id === employee?.id) return r.status === 'self_assessment' ? 'Your self-assessment is pending' : 'You (reviewee)';
+    if (r.reviewer_id === employee?.id) return r.status === 'in_review' ? 'Waiting on your review' : 'You (reviewer)';
     return null;
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Performance Reviews</h1>
-          <p className="text-muted-foreground">Project evaluations — self-assessment by the employee, scored by the reviewer</p>
-        </div>
-        {canManage && (
-          <Button className="gap-2" onClick={() => setNewOpen(true)}>
-            <Plus className="h-4 w-4" /> New Review
-          </Button>
-        )}
-      </div>
-
+    <div className="space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <Tabs value={statusFilter} onValueChange={v => setStatusFilter(v as typeof statusFilter)}>
           <TabsList className="flex-wrap h-auto">
@@ -248,10 +217,7 @@ export default function PerformanceReviews() {
             <TabsTrigger value="completed">Completed ({counts.completed})</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="relative w-full lg:max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Search employee, project, client, reviewer..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
-        </div>
+        <SearchBox value={search} onChange={setSearch} placeholder="Search employee, project, client, reviewer..." />
       </div>
 
       <Card className="card-elevated">
@@ -282,7 +248,6 @@ export default function PerformanceReviews() {
                   {filtered.map(r => {
                     const badge = REVIEW_STATUS_BADGE[r.status];
                     const mine = roleOf(r);
-                    const canExport = r.reviewer_section_visible;
                     return (
                       <TableRow key={r.id} className="cursor-pointer" onClick={() => navigate(`/reviews/${r.id}`)}>
                         <TableCell>
@@ -300,7 +265,7 @@ export default function PerformanceReviews() {
                         <TableCell><Badge variant="outline" className={`border-0 ${badge.className}`}>{badge.label}</Badge></TableCell>
                         <TableCell onClick={e => e.stopPropagation()}>
                           <div className="flex justify-end gap-1">
-                            {canExport && (
+                            {r.reviewer_section_visible && (
                               <Button variant="ghost" size="icon" title="Export to Excel" onClick={() => handleExport(r)}>
                                 <Download className="h-4 w-4" />
                               </Button>
@@ -321,8 +286,46 @@ export default function PerformanceReviews() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
 
-      {canManage && <NewReviewDialog open={newOpen} onOpenChange={setNewOpen} />}
+const TAB_KEY = 'reviews:tab';
+
+export default function PerformanceReviews() {
+  const { hasEdit } = useAuth();
+  const canManage = hasEdit('reviews');
+  const [tab, setTab] = useState<string>(() => {
+    try { return localStorage.getItem(TAB_KEY) || 'projects'; } catch { return 'projects'; }
+  });
+  const changeTab = (v: string) => {
+    setTab(v);
+    try { localStorage.setItem(TAB_KEY, v); } catch { /* ignore */ }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Performance Reviews</h1>
+        <p className="text-muted-foreground">
+          {canManage
+            ? 'Choose which projects run performance reviews, then open a project to assign self-assessments to its team'
+            : 'Your project self-assessments and the reviews assigned to you'}
+        </p>
+      </div>
+
+      {canManage ? (
+        <Tabs value={tab} onValueChange={changeTab}>
+          <TabsList>
+            <TabsTrigger value="projects">Projects</TabsTrigger>
+            <TabsTrigger value="reviews">All reviews</TabsTrigger>
+          </TabsList>
+          <TabsContent value="projects" className="mt-4"><ProjectsPanel /></TabsContent>
+          <TabsContent value="reviews" className="mt-4"><ReviewsList canManage /></TabsContent>
+        </Tabs>
+      ) : (
+        <ReviewsList canManage={false} />
+      )}
     </div>
   );
 }
