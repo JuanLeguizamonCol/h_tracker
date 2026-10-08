@@ -92,27 +92,84 @@ def test_create_defaults_reviewer_hours_and_description(db):
     assert float(scoped.duration_hours) == 96
 
 
-def test_reviewee_doesnt_see_scores_until_completed(db):
-    review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15)), "mgr")
-    svc.update_review(db, review, {"scores": _scores({"written_1": 4})})
-    as_employee = svc.serialize(db, [review], "emp", False)[0]
-    assert as_employee["scores"] == {} and as_employee["overall_average"] is None
-    assert as_employee["reviewer_section_visible"] is False
-    assert svc.serialize(db, [review], "mgr", False)[0]["overall_average"] == 4.0
+def _visible(db, review, viewer, manage=False):
+    out = svc.serialize(db, [review], viewer, manage)[0]
+    return {k: v["visible"] for k, v in out["evaluations"].items()}, out
 
+
+def test_self_and_manager_are_blind_until_joint(db):
+    review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15)), "x")
+    svc.update_review(db, review, {"self_scores": _scores({"written_1": 5}), "self_strengths": "Excel"})
+    vis, out = _visible(db, review, "emp")
+    assert vis == {"self": True, "manager": False, "joint": False}
+    vis, out = _visible(db, review, "mgr")
+    assert vis == {"self": False, "manager": True, "joint": False}
+    assert out["self_strengths"] is None  # not submitted yet
+
+    svc.transition_review(db, review, "submit_self")
+    svc.update_review(db, review, {"manager_scores": _scores({"written_1": 3, "verbal_1": 4})})
+    vis, out = _visible(db, review, "mgr")
+    assert vis["self"] is False and out["self_strengths"] == "Excel"
+    vis, out = _visible(db, review, "emp")
+    assert vis["manager"] is False and out["evaluations"]["manager"]["scores"] == {}
+    assert out["overall_average"] is None
+
+    svc.transition_review(db, review, "submit_manager")
+    # Joint starts from the manager's scores.
+    assert {k: v["score"] for k, v in review.joint_scores.items()} == {"written_1": 3, "verbal_1": 4}
+    vis, out = _visible(db, review, "emp")
+    assert vis == {"self": True, "manager": True, "joint": True}
+    assert out["overall_average"] == 3.5  # joint only
+    assert out["evaluations"]["self"]["overall_average"] == 5.0
+
+
+def test_editable_fields_follow_the_stage(db):
+    review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15)), "x")
+    assert "self_scores" in svc.editable_fields(review, "emp", False)
+    assert svc.editable_fields(review, "mgr", False) == svc.REVIEWER_FIELDS  # in parallel
+    svc.transition_review(db, review, "submit_self")
+    assert svc.editable_fields(review, "emp", False) == set()
+    assert svc.editable_fields(review, "mgr", False) == svc.REVIEWER_FIELDS
+    svc.transition_review(db, review, "submit_manager")
+    assert svc.editable_fields(review, "mgr", False) == svc.JOINT_FIELDS
     svc.transition_review(db, review, "complete")
-    assert svc.serialize(db, [review], "emp", False)[0]["overall_average"] == 4.0
+    assert svc.editable_fields(review, "mgr", False) == set()
+    assert svc.editable_fields(review, "anyone", True) == svc.ADMIN_FIELDS
+
+
+def test_analytics_uses_completed_reviews_only(db):
+    done = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15)), "x")
+    svc.update_review(db, done, {
+        "self_scores": _scores({"written_1": 5}),
+        "manager_scores": _scores({"written_1": 3}),
+        "joint_scores": _scores({"written_1": 4}),
+    })
+    done.status = "completed"
+    db.commit()
+    svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2026, 1, 15)), "x")
+
+    data = svc.analytics(db, 2025)
+    assert data["years"] == [2025]
+    assert len(data["reviews"]) == 1
+    row = data["reviews"][0]
+    assert (row["self"]["overall"], row["manager"]["overall"], row["joint"]["overall"]) == (5.0, 3.0, 4.0)
+    assert row["joint"]["items"] == {"written_1": 4}
+    assert svc.analytics(db, 2026)["reviews"] == []
 
 
 def test_xlsx_export_layout(db):
     review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15)), "mgr")
     svc.update_review(db, review, {
-        "scores": _scores(SAMPLE_SCORES),
+        "joint_scores": _scores(SAMPLE_SCORES),
+        "manager_scores": _scores({"written_1": 2}),
         "self_strengths": "Excel skills",
         "reviewer_strengths_notes": "Technically sound",
+        "joint_notes": "Agreed",
     })
     data = svc.review_export_data(db, review)
-    ws = load_workbook(BytesIO(generate_performance_review_xlsx(data))).active
+    wb = load_workbook(BytesIO(generate_performance_review_xlsx(data)))
+    assert wb.sheetnames == ["Joint", "Manager", "Self"]
+    ws = wb["Joint"]
 
     assert export_filename(data) == "THERAPAK, LLC - Michael Franz - 2025.xlsx"
     assert ws["B6"].value == "Franz, Michael"
@@ -121,10 +178,14 @@ def test_xlsx_export_layout(db):
     assert ws["B12"].value == "12/15/2025"
     assert [ws[f"D{r}"].value for r in range(7, 13)] == [3.0, 3.25, 2.8, 3.0, 2.75, 2.96]
     assert ws["B14"].value == "Excel skills" and ws["D14"].value == "Technically sound"
+    assert ws["B17"].value == "Agreed"
     assert ws["A19"].value == "Written Communications" and ws["C19"].value == 3.0
     assert ws["C20"].value is None and ws["C21"].value == 3
     assert ws["A43"].value == "Overall Professionalism and Core Values" and ws["C43"].value == 2.75
     assert ws["C44"].value == 2
+
+    assert wb["Manager"]["C20"].value == 2 and wb["Manager"]["D12"].value == 2.0
+    assert wb["Self"]["D12"].value is None and wb["Self"]["B17"].value is None
 
 
 def test_reviewer_never_defaults_to_the_reviewee(db):

@@ -40,12 +40,17 @@ class PerformanceReviewUpdate(BaseModel):
     reviewer_strengths_notes: Optional[str] = None
     reviewer_improvement_notes: Optional[str] = None
     reviewer_development_notes: Optional[str] = None
-    scores: Optional[Dict[str, ReviewScore]] = None
+    joint_notes: Optional[str] = None
+    self_scores: Optional[Dict[str, ReviewScore]] = None
+    manager_scores: Optional[Dict[str, ReviewScore]] = None
+    joint_scores: Optional[Dict[str, ReviewScore]] = None
 
 
 class PerformanceReviewTransition(BaseModel):
-    # "submit_self" (employee → in_review), "complete" (reviewer → completed),
-    # "reopen" (manager/admin: completed → in_review, in_review → self_assessment)
+    # "submit_self" (employee: self_assessment → in_review)
+    # "submit_manager" (reviewer: in_review → joint_review, joint pre-filled from manager scores)
+    # "complete" (reviewer: joint_review → completed)
+    # "reopen" (Admin/Manager: one stage back)
     action: str
 
 
@@ -53,6 +58,21 @@ class CriterionAverage(BaseModel):
     key: str
     label: str
     average: Optional[float] = None
+
+
+class EvaluationOut(BaseModel):
+    # False when the caller may not see this evaluation yet (self and manager
+    # are blind to each other until joint_review) — scores come back empty.
+    visible: bool
+    scores: Dict[str, ReviewScore]
+    criteria_averages: List[CriterionAverage]
+    overall_average: Optional[float] = None
+
+
+class EvaluationsOut(BaseModel):
+    self: EvaluationOut
+    manager: EvaluationOut
+    joint: EvaluationOut
 
 
 class PerformanceReviewOut(BaseModel):
@@ -76,14 +96,13 @@ class PerformanceReviewOut(BaseModel):
     reviewer_strengths_notes: Optional[str] = None
     reviewer_improvement_notes: Optional[str] = None
     reviewer_development_notes: Optional[str] = None
-    scores: Dict[str, ReviewScore]
-    criteria_averages: List[CriterionAverage]
+    joint_notes: Optional[str] = None
+    evaluations: EvaluationsOut
+    # Official score = the joint evaluation's overall average.
     overall_average: Optional[float] = None
     status: str
-    # False when the caller is the reviewee and the review isn't completed —
-    # the reviewer's scores/notes are withheld until then.
-    reviewer_section_visible: bool = True
     self_submitted_at: Optional[datetime] = None
+    manager_submitted_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -123,6 +142,7 @@ class ReviewProjectOut(BaseModel):
     reviews_total: int
     reviews_self_assessment: int
     reviews_in_review: int
+    reviews_joint_review: int
     reviews_completed: int
 
 
@@ -165,3 +185,32 @@ class BulkAssignOut(BaseModel):
     # Employees skipped because they already have an open (not completed)
     # review on this project.
     skipped_employee_ids: List[str]
+
+
+# ---------- Analytics ----------
+
+class EvaluationScoresOut(BaseModel):
+    criteria: Dict[str, Optional[float]]   # criterion key -> average
+    overall: Optional[float] = None
+    items: Dict[str, int]                  # sub-criterion key -> score (rated only)
+
+
+class AnalyticsReviewOut(BaseModel):
+    id: str
+    employee_id: str
+    employee_name: str
+    project_id: str
+    project_name: str
+    client_name: Optional[str] = None
+    reviewer_name: Optional[str] = None
+    review_date: date
+    duration_hours: Optional[float] = None
+    self: EvaluationScoresOut
+    manager: EvaluationScoresOut
+    joint: EvaluationScoresOut
+
+
+class ReviewAnalyticsOut(BaseModel):
+    years: List[int]
+    year: Optional[int] = None
+    reviews: List[AnalyticsReviewOut]

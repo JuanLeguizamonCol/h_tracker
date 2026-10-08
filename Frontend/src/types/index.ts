@@ -753,7 +753,18 @@ export interface InvoiceTimeEntry {
 // served by GET /performance-reviews/template; see
 // Backend/services/performance_reviews.py.
 
-export type PerformanceReviewStatus = 'self_assessment' | 'in_review' | 'completed';
+export type PerformanceReviewStatus = 'self_assessment' | 'in_review' | 'joint_review' | 'completed';
+
+/** The three evaluations of every review — only `joint` is official. */
+export type EvaluationKey = 'self' | 'manager' | 'joint';
+
+export interface ReviewEvaluation {
+  /** False while the caller may not see it yet (self/manager are blind until the joint stage). */
+  visible: boolean;
+  scores: Record<string, ReviewScore>;
+  criteria_averages: { key: string; label: string; average: number | null }[];
+  overall_average: number | null;
+}
 
 export interface ReviewScore {
   score: number | null;
@@ -794,13 +805,13 @@ export interface PerformanceReview {
   reviewer_strengths_notes: string | null;
   reviewer_improvement_notes: string | null;
   reviewer_development_notes: string | null;
-  scores: Record<string, ReviewScore>;
-  criteria_averages: { key: string; label: string; average: number | null }[];
+  joint_notes: string | null;
+  evaluations: Record<EvaluationKey, ReviewEvaluation>;
+  /** Official score = the joint evaluation's overall average. */
   overall_average: number | null;
   status: PerformanceReviewStatus;
-  /** False for the reviewee until the review is completed — scores/notes withheld. */
-  reviewer_section_visible: boolean;
   self_submitted_at: string | null;
+  manager_submitted_at: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -811,7 +822,11 @@ export type PerformanceReviewPatch = Partial<Pick<PerformanceReview,
   | 'project_description' | 'employee_role'
   | 'self_strengths' | 'self_improvement' | 'self_development'
   | 'reviewer_strengths_notes' | 'reviewer_improvement_notes' | 'reviewer_development_notes'
-  | 'scores'>>;
+  | 'joint_notes'>> & {
+  self_scores?: Record<string, ReviewScore>;
+  manager_scores?: Record<string, ReviewScore>;
+  joint_scores?: Record<string, ReviewScore>;
+};
 
 export interface ReviewProject {
   id: string;
@@ -827,6 +842,7 @@ export interface ReviewProject {
   reviews_total: number;
   reviews_self_assessment: number;
   reviews_in_review: number;
+  reviews_joint_review: number;
   reviews_completed: number;
 }
 
@@ -846,4 +862,31 @@ export interface ReviewTeamMember {
     reviewer_name: string | null;
     overall_average: number | null;
   }[];
+}
+
+export interface AnalyticsEvaluationScores {
+  criteria: Record<string, number | null>;
+  overall: number | null;
+  items: Record<string, number>;
+}
+
+export interface AnalyticsReview {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  project_id: string;
+  project_name: string;
+  client_name: string | null;
+  reviewer_name: string | null;
+  review_date: string;
+  duration_hours: number | null;
+  self: AnalyticsEvaluationScores;
+  manager: AnalyticsEvaluationScores;
+  joint: AnalyticsEvaluationScores;
+}
+
+export interface ReviewAnalytics {
+  years: number[];
+  year: number | null;
+  reviews: AnalyticsReview[];
 }

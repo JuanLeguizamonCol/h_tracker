@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import ReviewAnalytics from '@/pages/reviews/ReviewAnalytics';
 
 function formatDate(iso: string): string {
   return format(new Date(`${iso}T00:00:00`), 'MMM d, yyyy');
@@ -134,7 +135,7 @@ function ProjectsPanel() {
                           <span className="text-sm text-muted-foreground">{p.performance_review_enabled ? 'Not assigned yet' : '—'}</span>
                         ) : (
                           <div className="flex flex-wrap gap-1.5">
-                            {(['self_assessment', 'in_review', 'completed'] as const).map(st => {
+                            {(['self_assessment', 'in_review', 'joint_review', 'completed'] as const).map(st => {
                               const n = p[`reviews_${st}`];
                               return n > 0 ? (
                                 <Badge key={st} variant="outline" className={`border-0 ${REVIEW_STATUS_BADGE[st].className}`}>
@@ -177,7 +178,7 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
   }, [reviews, statusFilter, search]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: reviews.length, self_assessment: 0, in_review: 0, completed: 0 };
+    const c: Record<string, number> = { all: reviews.length, self_assessment: 0, in_review: 0, joint_review: 0, completed: 0 };
     reviews.forEach(r => { c[r.status] += 1; });
     return c;
   }, [reviews]);
@@ -201,8 +202,16 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
   }
 
   function roleOf(r: PerformanceReview): string | null {
-    if (r.employee_id === employee?.id) return r.status === 'self_assessment' ? 'Your self-assessment is pending' : 'You (reviewee)';
-    if (r.reviewer_id === employee?.id) return r.status === 'in_review' ? 'Waiting on your review' : 'You (reviewer)';
+    if (r.employee_id === employee?.id) {
+      if (r.status === 'self_assessment') return 'Your self evaluation is pending';
+      if (r.status === 'joint_review') return 'Joint review in progress';
+      return 'You (reviewee)';
+    }
+    if (r.reviewer_id === employee?.id) {
+      if (r.status === 'self_assessment' || r.status === 'in_review') return 'Your manager evaluation is pending';
+      if (r.status === 'joint_review') return 'Joint review — record the agreed scores';
+      return 'You (reviewer)';
+    }
     return null;
   }
 
@@ -213,7 +222,8 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
           <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="all">All ({counts.all})</TabsTrigger>
             <TabsTrigger value="self_assessment">Self-assessment ({counts.self_assessment})</TabsTrigger>
-            <TabsTrigger value="in_review">In review ({counts.in_review})</TabsTrigger>
+            <TabsTrigger value="in_review">Manager review ({counts.in_review})</TabsTrigger>
+            <TabsTrigger value="joint_review">Joint review ({counts.joint_review})</TabsTrigger>
             <TabsTrigger value="completed">Completed ({counts.completed})</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -239,7 +249,7 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
                     <TableHead>Reviewer</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Hours</TableHead>
-                    <TableHead className="text-center">Avg. score</TableHead>
+                    <TableHead className="text-center">Joint score</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-24" />
                   </TableRow>
@@ -265,7 +275,7 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
                         <TableCell><Badge variant="outline" className={`border-0 ${badge.className}`}>{badge.label}</Badge></TableCell>
                         <TableCell onClick={e => e.stopPropagation()}>
                           <div className="flex justify-end gap-1">
-                            {r.reviewer_section_visible && (
+                            {(canManage || r.status === 'completed') && (
                               <Button variant="ghost" size="icon" title="Export to Excel" onClick={() => handleExport(r)}>
                                 <Download className="h-4 w-4" />
                               </Button>
@@ -309,7 +319,7 @@ export default function PerformanceReviews() {
         <h1 className="text-2xl font-bold text-foreground">Performance Reviews</h1>
         <p className="text-muted-foreground">
           {canManage
-            ? 'Choose which projects run performance reviews, then open a project to assign self-assessments to its team'
+            ? 'Each review has a self, a manager and a joint evaluation — only the joint one counts toward the annual score'
             : 'Your project self-assessments and the reviews assigned to you'}
         </p>
       </div>
@@ -319,9 +329,11 @@ export default function PerformanceReviews() {
           <TabsList>
             <TabsTrigger value="projects">Projects</TabsTrigger>
             <TabsTrigger value="reviews">All reviews</TabsTrigger>
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
           </TabsList>
           <TabsContent value="projects" className="mt-4"><ProjectsPanel /></TabsContent>
           <TabsContent value="reviews" className="mt-4"><ReviewsList canManage /></TabsContent>
+          <TabsContent value="analytics" className="mt-4"><ReviewAnalytics /></TabsContent>
         </Tabs>
       ) : (
         <ReviewsList canManage={false} />

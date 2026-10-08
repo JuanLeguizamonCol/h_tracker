@@ -11,12 +11,12 @@ from models.performance_reviews import PerformanceReview
 from schemas.performance_reviews import (
     PerformanceReviewCreate, PerformanceReviewUpdate, PerformanceReviewTransition,
     PerformanceReviewOut, ReviewTemplateOut,
-    ReviewProjectOut, ProjectReviewToggle, ReviewTeamMemberOut, BulkAssignIn, BulkAssignOut,
+    ReviewProjectOut, ProjectReviewToggle, ReviewTeamMemberOut, BulkAssignIn, BulkAssignOut, ReviewAnalyticsOut,
 )
 from services import performance_reviews as svc
 from services.export_performance_review import generate_performance_review_xlsx, export_filename
 from services.performance_review_notifications import (
-    notify_review_created, notify_self_assessment_submitted, notify_review_completed,
+    notify_review_created, notify_self_assessment_submitted, notify_joint_review_ready, notify_review_completed,
 )
 from utils.auth_jwt import get_current_employee
 from utils.section_access import get_section_access
@@ -80,6 +80,18 @@ def _load_project(db: Session, project_id: str) -> Project:
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
     return project
+
+
+@performance_reviews_router.get("/analytics", response_model=ReviewAnalyticsOut)
+def get_analytics(
+    year: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Completed reviews with all three evaluations, for the Analytics tab's
+    employee / project / item matrices. Reviews edit access only."""
+    _require_manage(db, current_employee)
+    return svc.analytics(db, year)
 
 
 # ---------- Projects panel (Reviews edit access) ----------
@@ -228,14 +240,7 @@ def update_review(
 ):
     review, manage = _load_visible(db, review_id, current_employee)
     changes = body.model_dump(exclude_unset=True)
-    if manage:
-        allowed = svc.ADMIN_FIELDS
-    else:
-        allowed = set()
-        if review.employee_id == current_employee.id and review.status == "self_assessment":
-            allowed |= svc.EMPLOYEE_FIELDS
-        if review.reviewer_id == current_employee.id and review.status != "completed":
-            allowed |= svc.REVIEWER_FIELDS
+    allowed = svc.editable_fields(review, current_employee.id, manage)
     forbidden = set(changes) - allowed
     if forbidden:
         raise HTTPException(
@@ -264,30 +269,41 @@ def transition_review(
     is_reviewee = review.employee_id == current_employee.id
     is_reviewer = review.reviewer_id == current_employee.id
 
+    # Every review walks the same stages in order — Admin/Manager can act on
+    # anyone's behalf at each stage, but can't skip one.
     if body.action == "submit_self":
         if not (manage or is_reviewee):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the employee can submit their self-assessment.")
         if review.status != "self_assessment":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The self-assessment was already submitted.")
+    elif body.action == "submit_manager":
+        if not (manage or is_reviewer):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the reviewer can submit the manager evaluation.")
+        if review.status != "in_review":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The manager evaluation can only be submitted after the self-assessment and before the joint review.")
+        if svc.compute_averages(review.manager_scores or {})[1] is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Score at least one item of the manager evaluation first.")
     elif body.action == "complete":
         if not (manage or is_reviewer):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the reviewer can complete this review.")
-        if review.status == "completed":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This review is already completed.")
-        if not manage and review.status != "in_review":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Waiting on the employee's self-assessment.")
+        if review.status != "joint_review":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A review can only be completed from the joint review stage.")
+        if svc.compute_averages(review.joint_scores or {})[1] is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Score the joint evaluation before completing.")
     elif body.action == "reopen":
         if not manage:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
         if review.status == "self_assessment":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This review is already open.")
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='action must be "submit_self", "complete" or "reopen"')
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='action must be "submit_self", "submit_manager", "complete" or "reopen"')
 
     review = svc.transition_review(db, review, body.action)
     out = _out(db, review, current_employee, manage)
     if body.action == "submit_self":
         notify_self_assessment_submitted(out, _email_of(db, review.reviewer_id))
+    elif body.action == "submit_manager":
+        notify_joint_review_ready(out, _email_of(db, review.employee_id), _email_of(db, review.reviewer_id))
     elif body.action == "complete":
         notify_review_completed(out, _email_of(db, review.employee_id))
     return out
@@ -300,7 +316,7 @@ def export_review_xlsx(
     current_employee: Employee = Depends(get_current_employee),
 ):
     review, manage = _load_visible(db, review_id, current_employee)
-    if svc.hides_reviewer_section(review, current_employee.id, manage):
+    if not manage and review.status != "completed":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The review can be exported once it's completed.")
     data = svc.review_export_data(db, review)
     content = generate_performance_review_xlsx(data)

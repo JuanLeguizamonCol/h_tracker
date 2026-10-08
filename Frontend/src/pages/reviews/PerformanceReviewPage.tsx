@@ -2,19 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { ArrowLeft, Download, Loader2, Lock, RotateCcw, Save, Send, CheckCircle2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Lock, RotateCcw, Save, Send, CheckCircle2, RefreshCw, Check } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   usePerformanceReview, useReviewTemplate, useUpdatePerformanceReview, useTransitionPerformanceReview,
-  useReviewLoggedHours, downloadReviewXlsx, REVIEW_STATUS_BADGE,
+  useReviewLoggedHours, downloadReviewXlsx, REVIEW_STATUS_BADGE, EVALUATION_META,
 } from '@/hooks/usePerformanceReviews';
 import { useEmployees } from '@/hooks/useEmployees';
-import { PerformanceReview, PerformanceReviewPatch, ReviewScore, ReviewTemplate } from '@/types';
+import { EvaluationKey, PerformanceReview, PerformanceReviewStatus, ReviewScore, ReviewTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
 import { cn } from '@/lib/utils';
 
@@ -23,14 +24,47 @@ import { cn } from '@/lib/utils';
 const EMPLOYEE_ACCENT = 'border-l-4 border-l-sky-500';
 const REVIEWER_ACCENT = 'border-l-4 border-l-emerald-600';
 
-type Draft = Required<PerformanceReviewPatch>;
+const EVALUATIONS: EvaluationKey[] = ['self', 'manager', 'joint'];
+const SCORE_FIELD: Record<EvaluationKey, 'self_scores' | 'manager_scores' | 'joint_scores'> = {
+  self: 'self_scores', manager: 'manager_scores', joint: 'joint_scores',
+};
 
-const TEXT_FIELDS = [
-  'project_description', 'employee_role', 'self_strengths', 'self_improvement', 'self_development',
-  'reviewer_strengths_notes', 'reviewer_improvement_notes', 'reviewer_development_notes',
-] as const;
-const EMPLOYEE_FIELDS = new Set<keyof Draft>(['project_description', 'employee_role', 'self_strengths', 'self_improvement', 'self_development']);
-const REVIEWER_FIELDS = new Set<keyof Draft>(['scores', 'reviewer_strengths_notes', 'reviewer_improvement_notes', 'reviewer_development_notes']);
+const STAGES: { status: PerformanceReviewStatus; label: string }[] = [
+  { status: 'self_assessment', label: 'Self evaluation' },
+  { status: 'in_review', label: 'Manager evaluation' },
+  { status: 'joint_review', label: 'Joint evaluation' },
+  { status: 'completed', label: 'Completed' },
+];
+
+type Scores = Record<string, ReviewScore>;
+type Draft = {
+  reviewer_id: string | null;
+  review_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  duration_hours: number | null;
+  project_description: string | null;
+  employee_role: string | null;
+  self_strengths: string | null;
+  self_improvement: string | null;
+  self_development: string | null;
+  reviewer_strengths_notes: string | null;
+  reviewer_improvement_notes: string | null;
+  reviewer_development_notes: string | null;
+  joint_notes: string | null;
+  self_scores: Scores;
+  manager_scores: Scores;
+  joint_scores: Scores;
+};
+type TextField =
+  | 'project_description' | 'employee_role' | 'self_strengths' | 'self_improvement' | 'self_development'
+  | 'reviewer_strengths_notes' | 'reviewer_improvement_notes' | 'reviewer_development_notes' | 'joint_notes';
+
+// Mirrors Backend/services/performance_reviews.py field groups.
+const EMPLOYEE_FIELDS: (keyof Draft)[] = ['project_description', 'employee_role', 'self_strengths', 'self_improvement', 'self_development', 'self_scores'];
+const MANAGER_FIELDS: (keyof Draft)[] = ['manager_scores', 'reviewer_strengths_notes', 'reviewer_improvement_notes', 'reviewer_development_notes'];
+const JOINT_FIELDS: (keyof Draft)[] = ['joint_scores', 'joint_notes'];
+const ADMIN_ONLY_FIELDS: (keyof Draft)[] = ['reviewer_id', 'review_date', 'period_start', 'period_end', 'duration_hours'];
 
 function toDraft(r: PerformanceReview): Draft {
   return {
@@ -47,11 +81,14 @@ function toDraft(r: PerformanceReview): Draft {
     reviewer_strengths_notes: r.reviewer_strengths_notes,
     reviewer_improvement_notes: r.reviewer_improvement_notes,
     reviewer_development_notes: r.reviewer_development_notes,
-    scores: r.scores,
+    joint_notes: r.joint_notes,
+    self_scores: r.evaluations.self.scores,
+    manager_scores: r.evaluations.manager.scores,
+    joint_scores: r.evaluations.joint.scores,
   };
 }
 
-function normScores(scores: Record<string, ReviewScore>): string {
+function normScores(scores: Scores): string {
   const clean = Object.entries(scores)
     .map(([k, v]) => [k, v.score ?? null, (v.notes ?? '').trim() || null] as const)
     .filter(([, s, n]) => s !== null || n !== null)
@@ -60,7 +97,7 @@ function normScores(scores: Record<string, ReviewScore>): string {
 }
 
 function isSame(key: keyof Draft, a: unknown, b: unknown): boolean {
-  if (key === 'scores') return normScores(a as Record<string, ReviewScore>) === normScores(b as Record<string, ReviewScore>);
+  if (key.endsWith('_scores')) return normScores(a as Scores) === normScores(b as Scores);
   const norm = (v: unknown) => (v === '' || v === undefined ? null : v);
   return norm(a) === norm(b);
 }
@@ -68,7 +105,7 @@ function isSame(key: keyof Draft, a: unknown, b: unknown): boolean {
 const mean = (values: number[]) => (values.length ? Math.round((values.reduce((s, v) => s + v, 0) / values.length) * 100) / 100 : null);
 
 // Mirrors Backend/services/performance_reviews.py::compute_averages.
-function computeAverages(template: ReviewTemplate, scores: Record<string, ReviewScore>) {
+function computeAverages(template: ReviewTemplate, scores: Scores) {
   const criteria = template.criteria.map(c => ({
     key: c.key,
     label: c.short_label,
@@ -81,8 +118,8 @@ function fmtAvg(v: number | null | undefined) {
   return v == null ? '—' : Number.isInteger(v) ? v.toFixed(1) : String(v);
 }
 
-function ScorePicker({ value, onChange, min, max, disabled }: {
-  value: number | null; onChange: (v: number | null) => void; min: number; max: number; disabled: boolean;
+function ScorePicker({ value, onChange, min, max, disabled, activeClass }: {
+  value: number | null; onChange: (v: number | null) => void; min: number; max: number; disabled: boolean; activeClass: string;
 }) {
   const options = Array.from({ length: max - min + 1 }, (_, i) => min + i);
   return (
@@ -95,8 +132,9 @@ function ScorePicker({ value, onChange, min, max, disabled }: {
           onClick={() => onChange(value === n ? null : n)}
           className={cn(
             'h-8 w-8 rounded-md border text-sm font-medium tabular-nums transition-colors',
-            value === n ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-background hover:bg-muted',
-            disabled && 'opacity-60 cursor-not-allowed hover:bg-background',
+            value === n ? `${activeClass} text-white` : 'bg-background hover:bg-muted',
+            disabled && 'cursor-not-allowed hover:bg-background',
+            disabled && value !== n && 'opacity-50',
           )}
           aria-pressed={value === n}
           aria-label={`Score ${n}`}
@@ -111,7 +149,7 @@ function ScorePicker({ value, onChange, min, max, disabled }: {
         className={cn(
           'h-8 px-2 rounded-md border text-xs transition-colors',
           value == null ? 'bg-muted text-foreground' : 'bg-background text-muted-foreground hover:bg-muted',
-          disabled && 'opacity-60 cursor-not-allowed',
+          disabled && 'opacity-50 cursor-not-allowed',
         )}
         title="Not rated — excluded from the average"
       >
@@ -136,6 +174,36 @@ function ReadOnlyText({ value, placeholder = '—' }: { value: string | null | u
     : <p className="text-sm text-muted-foreground pt-2">{placeholder}</p>;
 }
 
+function LockedNote({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm text-muted-foreground pt-2 flex items-center gap-1.5"><Lock className="h-3.5 w-3.5 shrink-0" /> {children}</p>;
+}
+
+function StageStepper({ status }: { status: PerformanceReviewStatus }) {
+  const current = STAGES.findIndex(s => s.status === status);
+  return (
+    <ol className="flex flex-wrap items-center gap-x-2 gap-y-2 text-xs">
+      {STAGES.map((stage, i) => {
+        const done = i < current || status === 'completed';
+        const active = i === current && status !== 'completed';
+        return (
+          <li key={stage.status} className="flex items-center gap-2">
+            <span className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-semibold',
+              done && 'bg-emerald-600 border-emerald-600 text-white',
+              active && 'border-primary text-primary ring-2 ring-primary/20',
+              !done && !active && 'text-muted-foreground',
+            )}>
+              {done ? <Check className="h-3.5 w-3.5" /> : i + 1}
+            </span>
+            <span className={cn(active ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{stage.label}</span>
+            {i < STAGES.length - 1 && <span className="mx-1 h-px w-6 bg-border" />}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export default function PerformanceReviewPage() {
   const { reviewId } = useParams<{ reviewId: string }>();
   const navigate = useNavigate();
@@ -147,14 +215,26 @@ export default function PerformanceReviewPage() {
   const transition = useTransitionPerformanceReview();
 
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [tab, setTab] = useState<EvaluationKey | null>(null);
   useEffect(() => { if (review) setDraft(toDraft(review)); }, [review]);
 
   const manage = hasEdit('reviews');
   const isReviewee = !!review && review.employee_id === employee?.id;
   const isReviewer = !!review && review.reviewer_id === employee?.id;
-  const canEditEmployee = !!review && (manage || (isReviewee && review.status === 'self_assessment'));
-  const canEditReviewer = !!review && (manage || (isReviewer && review.status !== 'completed'));
-  const canEditAdmin = manage;
+  const status = review?.status;
+  const canEdit: Record<EvaluationKey, boolean> = {
+    self: !!review && (manage || (isReviewee && status === 'self_assessment')),
+    manager: !!review && (manage || (isReviewer && (status === 'self_assessment' || status === 'in_review'))),
+    joint: !!review && (manage || (isReviewer && status === 'joint_review')),
+  };
+
+  // Default tab: whichever evaluation the caller is expected to work on now.
+  useEffect(() => {
+    if (!review || tab) return;
+    if (review.status === 'joint_review' || review.status === 'completed') setTab('joint');
+    else if (isReviewer || (manage && review.status === 'in_review')) setTab('manager');
+    else setTab('self');
+  }, [review, tab, isReviewer, manage]);
 
   const { data: logged, refetch: refetchHours, isFetching: hoursFetching } = useReviewLoggedHours({
     projectId: review?.project_id, employeeId: review?.employee_id,
@@ -164,13 +244,14 @@ export default function PerformanceReviewPage() {
 
   const allowed = useMemo(() => {
     const s = new Set<keyof Draft>();
-    if (canEditEmployee) EMPLOYEE_FIELDS.forEach(f => s.add(f));
-    if (canEditReviewer) REVIEWER_FIELDS.forEach(f => s.add(f));
-    if (canEditAdmin) (['reviewer_id', 'review_date', 'period_start', 'period_end', 'duration_hours'] as const).forEach(f => s.add(f));
+    if (canEdit.self) EMPLOYEE_FIELDS.forEach(f => s.add(f));
+    if (canEdit.manager) MANAGER_FIELDS.forEach(f => s.add(f));
+    if (canEdit.joint) JOINT_FIELDS.forEach(f => s.add(f));
+    if (manage) ADMIN_ONLY_FIELDS.forEach(f => s.add(f));
     return s;
-  }, [canEditEmployee, canEditReviewer, canEditAdmin]);
+  }, [canEdit.self, canEdit.manager, canEdit.joint, manage]);
 
-  const patch = useMemo<PerformanceReviewPatch>(() => {
+  const patch = useMemo(() => {
     if (!review || !draft) return {};
     const base = toDraft(review);
     const out: Record<string, unknown> = {};
@@ -180,14 +261,18 @@ export default function PerformanceReviewPage() {
         out[k] = typeof v === 'string' && v.trim() === '' ? null : v;
       }
     });
-    return out as PerformanceReviewPatch;
+    return out;
   }, [review, draft, allowed]);
   const isDirty = Object.keys(patch).length > 0;
 
-  const averages = useMemo(
-    () => (template && draft ? computeAverages(template, draft.scores) : null),
-    [template, draft],
-  );
+  const averages = useMemo(() => {
+    if (!template || !draft) return null;
+    return {
+      self: computeAverages(template, draft.self_scores),
+      manager: computeAverages(template, draft.manager_scores),
+      joint: computeAverages(template, draft.joint_scores),
+    };
+  }, [template, draft]);
 
   const reviewerOptions = useMemo(
     () => employees.filter(e => e.is_active && e.id !== review?.employee_id)
@@ -196,10 +281,10 @@ export default function PerformanceReviewPage() {
     [employees, review?.employee_id],
   );
 
-  if (isLoading || (review && (!draft || !template))) {
+  if (isLoading || (review && (!draft || !template || !tab))) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
-  if (error || !review || !draft || !template) {
+  if (error || !review || !draft || !template || !averages || !tab) {
     return (
       <div className="space-y-4">
         <Button variant="ghost" className="gap-2" onClick={() => navigate('/reviews')}><ArrowLeft className="h-4 w-4" /> Back to reviews</Button>
@@ -208,12 +293,14 @@ export default function PerformanceReviewPage() {
     );
   }
 
+  const visible = (k: EvaluationKey) => review.evaluations[k].visible;
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(d => (d ? { ...d, [key]: value } : d));
-  const setScore = (subKey: string, change: Partial<ReviewScore>) =>
+  const setScore = (evaluation: EvaluationKey, subKey: string, change: Partial<ReviewScore>) =>
     setDraft(d => {
       if (!d) return d;
-      const current = d.scores[subKey] ?? { score: null, notes: null };
-      return { ...d, scores: { ...d.scores, [subKey]: { ...current, ...change } } };
+      const field = SCORE_FIELD[evaluation];
+      const current = d[field][subKey] ?? { score: null, notes: null };
+      return { ...d, [field]: { ...d[field], [subKey]: { ...current, ...change } } };
     });
 
   async function save(silent = false): Promise<boolean> {
@@ -228,12 +315,13 @@ export default function PerformanceReviewPage() {
     }
   }
 
-  async function runTransition(action: 'submit_self' | 'complete' | 'reopen', confirmText: string, successText: string) {
+  async function runTransition(action: 'submit_self' | 'submit_manager' | 'complete' | 'reopen', confirmText: string, successText: string) {
     if (!confirm(confirmText)) return;
     if (!(await save(true))) return;
     try {
       await transition.mutateAsync({ id: review!.id, action });
       toast.success(successText);
+      if (action === 'submit_manager' || action === 'complete') setTab('joint');
     } catch (e) {
       toast.error(e instanceof Error ? e.message.replace(/^API error \d+: /, '') : 'Action failed.');
     }
@@ -255,17 +343,26 @@ export default function PerformanceReviewPage() {
 
   const badge = REVIEW_STATUS_BADGE[review.status];
   const busy = updateReview.isPending || transition.isPending;
-  const showReviewer = review.reviewer_section_visible;
   const canSubmitSelf = review.status === 'self_assessment' && (isReviewee || manage);
-  const canComplete = review.status !== 'completed' && (manage || (isReviewer && review.status === 'in_review'));
+  const canSubmitManager = review.status === 'in_review' && (isReviewer || manage);
+  const canComplete = review.status === 'joint_review' && (isReviewer || manage);
   const canReopen = manage && review.status !== 'self_assessment';
+  const canExport = manage || review.status === 'completed';
+  const canEditEmployeeText = canEdit.self;
 
-  const textArea = (field: typeof TEXT_FIELDS[number], editable: boolean, placeholder: string, rows = 3) =>
+  const textArea = (field: TextField, editable: boolean, placeholder: string, rows = 3) =>
     editable ? (
       <Textarea value={draft[field] ?? ''} onChange={e => set(field, e.target.value)} placeholder={placeholder} rows={rows} className="resize-y" />
     ) : (
       <ReadOnlyText value={draft[field]} />
     );
+
+  const lockedReason = (k: EvaluationKey) =>
+    k === 'joint'
+      ? 'The joint evaluation opens once the self and manager evaluations are submitted.'
+      : k === 'self'
+      ? 'The self evaluation is visible to the reviewer at the joint stage — evaluations are blind until then.'
+      : 'The manager evaluation is visible to the employee at the joint stage — evaluations are blind until then.';
 
   return (
     <div className="space-y-6 pb-24">
@@ -287,13 +384,11 @@ export default function PerformanceReviewPage() {
         <div className="flex flex-wrap gap-2">
           {canReopen && (
             <Button variant="outline" className="gap-2" disabled={busy}
-              onClick={() => runTransition('reopen',
-                review.status === 'completed' ? 'Reopen this review so the reviewer can edit it again?' : 'Send this review back to the employee for their self-assessment?',
-                'Review reopened.')}>
+              onClick={() => runTransition('reopen', 'Move this review back one stage?', 'Review moved back one stage.')}>
               <RotateCcw className="h-4 w-4" /> Reopen
             </Button>
           )}
-          {showReviewer && (
+          {canExport && (
             <Button variant="outline" className="gap-2" onClick={handleExport} disabled={busy}>
               <Download className="h-4 w-4" /> Export Excel
             </Button>
@@ -305,40 +400,45 @@ export default function PerformanceReviewPage() {
           )}
           {canSubmitSelf && (
             <Button className="gap-2" disabled={busy}
-              onClick={() => runTransition('submit_self', 'Submit your self-assessment to the reviewer? You won\'t be able to edit it afterwards.', 'Self-assessment submitted to the reviewer.')}>
-              <Send className="h-4 w-4" /> Submit Self-Assessment
+              onClick={() => runTransition('submit_self', "Submit your self evaluation to your manager? You won't be able to edit it afterwards.", 'Self evaluation submitted.')}>
+              <Send className="h-4 w-4" /> Submit Self Evaluation
+            </Button>
+          )}
+          {canSubmitManager && (
+            <Button className="gap-2" disabled={busy}
+              onClick={() => runTransition('submit_manager', 'Submit the manager evaluation and open the joint review? The joint scores start from yours, and both evaluations become visible to each other.', 'Manager evaluation submitted — ready for the joint review.')}>
+              <Send className="h-4 w-4" /> Submit Manager Evaluation
             </Button>
           )}
           {canComplete && (
             <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700" disabled={busy}
-              onClick={() => runTransition('complete', 'Complete this review? The employee will be notified and will see the scores.', 'Review completed.')}>
+              onClick={() => runTransition('complete', 'Complete this review? The joint evaluation becomes the official score for the annual measurement.', 'Review completed.')}>
               <CheckCircle2 className="h-4 w-4" /> Complete Review
             </Button>
           )}
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-sky-500" /> Completed by the employee</span>
-        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-emerald-600" /> Completed by the reviewer</span>
-      </div>
+      <Card className="card-elevated">
+        <CardContent className="p-4"><StageStepper status={review.status} /></CardContent>
+      </Card>
 
       {/* Project details + average score */}
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid gap-6 xl:grid-cols-[1fr_400px]">
         <Card className={cn('card-elevated', EMPLOYEE_ACCENT)}>
           <CardHeader className="pb-2"><CardTitle className="text-base">Project Details</CardTitle></CardHeader>
           <CardContent>
             <FieldRow label="Review for"><p className="text-sm pt-2">{review.employee_name}</p></FieldRow>
             <FieldRow label="Project Name"><p className="text-sm pt-2">{review.project_name}{review.client_name ? ` (${review.client_name})` : ''}</p></FieldRow>
             <FieldRow label="Reviewer">
-              {canEditAdmin ? (
+              {manage ? (
                 <SearchableCombobox options={reviewerOptions} value={draft.reviewer_id} onChange={id => set('reviewer_id', id)} placeholder="Select reviewer..." clearable />
               ) : <ReadOnlyText value={review.reviewer_name} />}
             </FieldRow>
-            <FieldRow label="Project Description">{textArea('project_description', canEditEmployee, 'Brief description of the project')}</FieldRow>
-            <FieldRow label="Employee's Role / Key Activities">{textArea('employee_role', canEditEmployee, 'Your role and the key activities you performed', 4)}</FieldRow>
+            <FieldRow label="Project Description">{textArea('project_description', canEditEmployeeText, 'Brief description of the project')}</FieldRow>
+            <FieldRow label="Employee's Role / Key Activities">{textArea('employee_role', canEditEmployeeText, 'Your role and the key activities you performed', 4)}</FieldRow>
             <FieldRow label="Duration">
-              {canEditAdmin ? (
+              {manage ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <Input type="number" min="0" step="0.5" className="w-32" value={draft.duration_hours ?? ''}
                     onChange={e => set('duration_hours', e.target.value === '' ? null : parseFloat(e.target.value))} />
@@ -349,7 +449,7 @@ export default function PerformanceReviewPage() {
                 </div>
               ) : <ReadOnlyText value={review.duration_hours != null ? `${review.duration_hours.toLocaleString()} hours` : null} />}
             </FieldRow>
-            {canEditAdmin && (
+            {manage && (
               <FieldRow label="Period (for hours)">
                 <div className="flex flex-wrap items-center gap-2">
                   <Input type="date" className="w-40" value={draft.period_start ?? ''} onChange={e => set('period_start', e.target.value || null)} />
@@ -359,7 +459,7 @@ export default function PerformanceReviewPage() {
               </FieldRow>
             )}
             <FieldRow label="Date of Review">
-              {canEditAdmin ? (
+              {manage ? (
                 <Input type="date" className="w-40" value={draft.review_date ?? ''} onChange={e => e.target.value && set('review_date', e.target.value)} />
               ) : <ReadOnlyText value={format(new Date(`${review.review_date}T00:00:00`), 'MM/dd/yyyy')} />}
             </FieldRow>
@@ -367,34 +467,51 @@ export default function PerformanceReviewPage() {
         </Card>
 
         <Card className="card-elevated h-fit">
-          <CardHeader className="pb-2"><CardTitle className="text-base">Average Score</CardTitle></CardHeader>
-          <CardContent>
-            {showReviewer && averages ? (
-              <div className="divide-y">
-                {averages.criteria.map(c => (
-                  <div key={c.key} className="flex items-center justify-between py-2 text-sm">
-                    <span>{c.label}</span>
-                    <span className="font-semibold tabular-nums">{fmtAvg(c.average)}</span>
-                  </div>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Average Score</CardTitle>
+            <p className="text-xs text-muted-foreground">Only the joint evaluation counts toward the annual measurement.</p>
+          </CardHeader>
+          <CardContent className="p-0 pb-2">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className="text-left font-medium px-4 py-2">Criteria</th>
+                  {EVALUATIONS.map(k => (
+                    <th key={k} className={cn('font-medium px-2 py-2 text-center', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300')}>
+                      {EVALUATION_META[k].short}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {template.criteria.map((c, i) => (
+                  <tr key={c.key} className="border-b last:border-b-0">
+                    <td className="px-4 py-2">{c.short_label}</td>
+                    {EVALUATIONS.map(k => (
+                      <td key={k} className={cn('px-2 py-2 text-center tabular-nums', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 font-semibold')}>
+                        {visible(k) ? fmtAvg(averages[k].criteria[i].average) : <Lock className="h-3.5 w-3.5 mx-auto text-muted-foreground" />}
+                      </td>
+                    ))}
+                  </tr>
                 ))}
-                <div className="flex items-center justify-between pt-3 text-sm">
-                  <span className="font-semibold">Average Total</span>
-                  <span className="text-lg font-bold tabular-nums text-primary">{fmtAvg(averages.overall)}</span>
-                </div>
-                <p className="pt-3 text-xs text-muted-foreground">
-                  Scale {template.score_min}–{template.score_max}. Each criterion averages its rated sub-criteria; the total averages the criteria.
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2 py-6 text-center text-sm text-muted-foreground">
-                <Lock className="h-5 w-5" /> Scores will be visible once the review is completed.
-              </div>
-            )}
+                <tr className="border-t-2">
+                  <td className="px-4 py-2.5 font-semibold">Average Total</td>
+                  {EVALUATIONS.map(k => (
+                    <td key={k} className={cn('px-2 py-2.5 text-center tabular-nums font-semibold', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 text-lg text-emerald-700 dark:text-emerald-400 font-bold')}>
+                      {visible(k) ? fmtAvg(averages[k].overall) : <Lock className="h-3.5 w-3.5 mx-auto text-muted-foreground" />}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+            <p className="px-4 pt-3 text-xs text-muted-foreground">
+              Scale {template.score_min}–{template.score_max}. Each criterion averages its rated items; the total averages the criteria.
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Self assessment */}
+      {/* Self assessment (text) */}
       <Card className={cn('card-elevated', EMPLOYEE_ACCENT)}>
         <CardHeader className="pb-2"><CardTitle className="text-base">Self Assessment</CardTitle></CardHeader>
         <CardContent className="space-y-4">
@@ -407,59 +524,106 @@ export default function PerformanceReviewPage() {
               <div className="text-sm font-semibold pt-2">{label}</div>
               <div className="space-y-1">
                 <div className="text-xs font-medium text-sky-700 dark:text-sky-400">Self-assessment notes</div>
-                {textArea(selfKey, canEditEmployee, `Your ${label.toLowerCase()}`)}
+                {isReviewee || manage || review.status !== 'self_assessment'
+                  ? textArea(selfKey, canEditEmployeeText, `Your ${label.toLowerCase()}`)
+                  : <LockedNote>Visible once the employee submits</LockedNote>}
               </div>
               <div className="space-y-1">
                 <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Reviewer notes</div>
-                {showReviewer
-                  ? textArea(reviewerKey, canEditReviewer, 'Reviewer comments')
-                  : <p className="text-sm text-muted-foreground pt-2 flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> Visible once completed</p>}
+                {visible('manager')
+                  ? textArea(reviewerKey, canEdit.manager, 'Reviewer comments')
+                  : <LockedNote>Visible at the joint review</LockedNote>}
               </div>
             </div>
           ))}
         </CardContent>
       </Card>
 
-      {/* Reviewer assessment */}
-      {showReviewer && (
-        <Card className={cn('card-elevated', REVIEWER_ACCENT)}>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Reviewer Assessment</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Rate each sub-criterion from {template.score_min} to {template.score_max}; leave N/A when it doesn't apply to this project.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {template.criteria.map(criterion => {
-              const avg = averages?.criteria.find(c => c.key === criterion.key)?.average;
+      {/* The three evaluations */}
+      <Card className={cn('card-elevated', REVIEWER_ACCENT)}>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Evaluations</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Rate each item from {template.score_min} to {template.score_max}; leave N/A when it doesn't apply to this project.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={tab} onValueChange={v => setTab(v as EvaluationKey)}>
+            <TabsList className="h-auto flex-wrap">
+              {EVALUATIONS.map(k => (
+                <TabsTrigger key={k} value={k} className="gap-2">
+                  <span className={cn('h-2.5 w-2.5 rounded-full', EVALUATION_META[k].dot)} />
+                  {EVALUATION_META[k].label}
+                  {!visible(k) && <Lock className="h-3 w-3" />}
+                  {visible(k) && averages[k].overall != null && <span className="tabular-nums text-muted-foreground">· {fmtAvg(averages[k].overall)}</span>}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+
+            {EVALUATIONS.map(k => {
+              const field = SCORE_FIELD[k];
+              const editable = canEdit[k];
+              const meta = EVALUATION_META[k];
               return (
-                <div key={criterion.key} className="rounded-lg border overflow-hidden">
-                  <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 px-4 py-2.5">
-                    <span className="font-semibold text-sm">{criterion.label}</span>
-                    <span className="text-sm">Average: <span className="font-bold tabular-nums">{fmtAvg(avg)}</span></span>
-                  </div>
-                  <div className="divide-y">
-                    {criterion.sub_criteria.map(sub => {
-                      const entry = draft.scores[sub.key] ?? { score: null, notes: null };
-                      return (
-                        <div key={sub.key} className="grid gap-3 px-4 py-3 lg:grid-cols-[1fr_240px_1fr]">
-                          <p className="text-sm whitespace-pre-line">{sub.label}</p>
-                          <ScorePicker value={entry.score} onChange={v => setScore(sub.key, { score: v })}
-                            min={template.score_min} max={template.score_max} disabled={!canEditReviewer} />
-                          {canEditReviewer ? (
-                            <Textarea value={entry.notes ?? ''} onChange={e => setScore(sub.key, { notes: e.target.value })}
-                              placeholder="Notes (optional)" rows={2} className="resize-y" />
-                          ) : <ReadOnlyText value={entry.notes} placeholder="" />}
+                <TabsContent key={k} value={k} className="mt-4 space-y-5">
+                  <p className="text-sm text-muted-foreground">
+                    <span className={cn('font-medium', meta.text)}>{meta.label}</span> — {meta.who}.
+                    {!editable && visible(k) && ' Read-only at this stage.'}
+                  </p>
+                  {!visible(k) ? (
+                    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
+                      <Lock className="h-5 w-5" /> {lockedReason(k)}
+                    </div>
+                  ) : (
+                    <>
+                      {k === 'joint' && (
+                        <div className="space-y-1.5">
+                          <div className="text-sm font-semibold">Joint review notes</div>
+                          {textArea('joint_notes', editable, 'What was agreed in the joint session', 2)}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                      )}
+                      {template.criteria.map((criterion, ci) => (
+                        <div key={criterion.key} className="rounded-lg border overflow-hidden">
+                          <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 px-4 py-2.5">
+                            <span className="font-semibold text-sm">{criterion.label}</span>
+                            <span className="text-sm">Average: <span className="font-bold tabular-nums">{fmtAvg(averages[k].criteria[ci].average)}</span></span>
+                          </div>
+                          <div className="divide-y">
+                            {criterion.sub_criteria.map(sub => {
+                              const entry = draft[field][sub.key] ?? { score: null, notes: null };
+                              const selfScore = draft.self_scores[sub.key]?.score;
+                              const managerScore = draft.manager_scores[sub.key]?.score;
+                              return (
+                                <div key={sub.key} className="grid gap-3 px-4 py-3 lg:grid-cols-[1fr_250px_1fr]">
+                                  <div className="space-y-1.5">
+                                    <p className="text-sm whitespace-pre-line">{sub.label}</p>
+                                    {k === 'joint' && (
+                                      <div className="flex gap-3 text-xs text-muted-foreground">
+                                        <span>Self: <span className="font-semibold tabular-nums text-sky-700 dark:text-sky-400">{selfScore ?? '—'}</span></span>
+                                        <span>Manager: <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{managerScore ?? '—'}</span></span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <ScorePicker value={entry.score} onChange={v => setScore(k, sub.key, { score: v })}
+                                    min={template.score_min} max={template.score_max} disabled={!editable} activeClass={meta.ring} />
+                                  {editable ? (
+                                    <Textarea value={entry.notes ?? ''} onChange={e => setScore(k, sub.key, { notes: e.target.value })}
+                                      placeholder="Notes (optional)" rows={2} className="resize-y" />
+                                  ) : <ReadOnlyText value={entry.notes} placeholder="" />}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </TabsContent>
               );
             })}
-          </CardContent>
-        </Card>
-      )}
+          </Tabs>
+        </CardContent>
+      </Card>
 
       {isDirty && (
         <div className="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-lg border bg-background px-4 py-3 shadow-lg">

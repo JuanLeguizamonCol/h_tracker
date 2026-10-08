@@ -75,11 +75,27 @@ def export_filename(data: dict) -> str:
     return re.sub(r'[\\/:*?"<>|]', "", name)
 
 
+
+# (evaluation key, sheet name, caption) — joint first: it's the official one.
+SHEETS = [
+    ("joint", "Joint", "Joint evaluation (official — counts toward the annual score)"),
+    ("manager", "Manager", "Manager evaluation"),
+    ("self", "Self", "Self evaluation"),
+]
+
+
 def generate_performance_review_xlsx(data: dict) -> bytes:
     wb = Workbook()
-    ws = wb.active
-    title = f"{data.get('client_name') or data['project_name']} - {data['employee_name']}"
-    ws.title = re.sub(r"[\\/*?:\[\]]", "", title)[:31]
+    wb.remove(wb.active)
+    for set_key, sheet_name, caption in SHEETS:
+        _write_sheet(wb.create_sheet(sheet_name), data, set_key, caption)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _write_sheet(ws, data: dict, set_key: str, caption: str) -> None:
+    evaluation = data["evaluations"][set_key]
     for col, width in COL_WIDTHS.items():
         ws.column_dimensions[col].width = width
 
@@ -89,6 +105,8 @@ def generate_performance_review_xlsx(data: dict) -> bytes:
     _cell(ws, "A2", "Instructions:", BOLD10, align=LEFT)
     _cell(ws, "B2", "Employees complete sections in Blue.")
     _cell(ws, "B3", "Reviewers complete sections in Green.")
+    _cell(ws, "C2", "Evaluation:", BOLD10, align=LEFT)
+    _cell(ws, "D2", caption, BOLD10)
 
     # Project details (left) + average score summary (right)
     _cell(ws, "A5", "Project Details", H12_WHITE, NAVY, LEFT)
@@ -106,8 +124,8 @@ def generate_performance_review_xlsx(data: dict) -> bytes:
         ("Duration", _hours_label(data.get("duration_hours"))),
         ("Date of Review", data["review_date"].strftime("%m/%d/%Y")),
     ]
-    summary = [(c["label"], c["average"]) for c in data["criteria_averages"]]
-    summary.append(("Average Total", data.get("overall_average")))
+    summary = [(c["label"], c["average"]) for c in evaluation["criteria_averages"]]
+    summary.append(("Average Total", evaluation["overall_average"]))
     for i, (label, value) in enumerate(details):
         row = 7 + i
         _cell(ws, f"A{row}", label, BOLD10, LIGHT_BLUE, LEFT)
@@ -133,13 +151,17 @@ def generate_performance_review_xlsx(data: dict) -> bytes:
         _cell(ws, f"B{row}", data.get(self_key) or None, align=WRAP)
         _cell(ws, f"D{row}", data.get(reviewer_key) or None, align=WRAP)
         _fit_row(ws, row)
+    if set_key == "joint" and data.get("joint_notes"):
+        _cell(ws, "A17", "Joint Review Notes", BOLD10, LIGHT_GREEN, LEFT)
+        _cell(ws, "B17", data["joint_notes"], align=WRAP)
+        _fit_row(ws, 17)
 
     # Reviewer assessment
     for col, label in zip("ABCD", ("Reviewer Assessment", "Sub-Criteria", "Score", "Reviewer Notes")):
         _cell(ws, f"{col}18", label, H12_WHITE, GREEN, CENTER if col == "C" else LEFT)
 
-    scores = data.get("scores") or {}
-    avg_by_key = {c["key"]: c["average"] for c in data["criteria_averages"]}
+    scores = evaluation["scores"] or {}
+    avg_by_key = {c["key"]: c["average"] for c in evaluation["criteria_averages"]}
     row = 19
     for criterion in REVIEW_TEMPLATE:
         _cell(ws, f"A{row}", criterion["label"], BOLD10, LIGHT_GREEN, LEFT)
@@ -155,6 +177,3 @@ def generate_performance_review_xlsx(data: dict) -> bytes:
             _fit_row(ws, row)
             row += 1
 
-    buf = BytesIO()
-    wb.save(buf)
-    return buf.getvalue()

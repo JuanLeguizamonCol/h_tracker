@@ -3,10 +3,14 @@ from sqlalchemy import Column, String, Date, DateTime, Numeric, ForeignKey, Text
 from datetime import datetime, timezone
 import uuid
 
-# Lifecycle: the employee fills the "blue" sections (project details +
-# self-assessment) while `self_assessment`, submits → `in_review`, the reviewer
-# fills the "green" sections (scores + notes) and completes → `completed`.
-REVIEW_STATUSES = ("self_assessment", "in_review", "completed")
+# Lifecycle — three evaluations of the same criteria, one per stage:
+#   self_assessment: the employee fills project details + self-assessment + SELF scores
+#   in_review:       the reviewer (manager on the project) fills MANAGER scores + notes
+#   joint_review:    employee + reviewer agree on the JOINT scores (official)
+#   completed
+# Self and manager scores are blind to each other until joint_review (see
+# services/performance_reviews.py::visibility).
+REVIEW_STATUSES = ("self_assessment", "in_review", "joint_review", "completed")
 
 
 class PerformanceReview(Base):
@@ -42,11 +46,16 @@ class PerformanceReview(Base):
     reviewer_improvement_notes = Column(Text, nullable=True)
     reviewer_development_notes = Column(Text, nullable=True)
 
-    # Reviewer assessment: {sub_criterion_key: {"score": int|None, "notes": str|None}}
-    scores = Column(JSON, nullable=False, default=dict)
+    # One {sub_criterion_key: {"score": int|None, "notes": str|None}} per
+    # evaluation. Only joint_scores feeds the official/annual averages.
+    self_scores = Column(JSON, nullable=False, default=dict)
+    manager_scores = Column(JSON, nullable=False, default=dict)
+    joint_scores = Column(JSON, nullable=False, default=dict)
+    joint_notes = Column(Text, nullable=True)
 
     status = Column(String, nullable=False, default="self_assessment", index=True)
     self_submitted_at = Column(DateTime, nullable=True)
+    manager_submitted_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),

@@ -2,12 +2,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import {
   PerformanceReview, PerformanceReviewPatch, PerformanceReviewStatus, ReviewTemplate, ReviewProject, ReviewTeamMember,
+  ReviewAnalytics, EvaluationKey,
 } from '@/types';
 
 export const REVIEW_STATUS_BADGE: Record<PerformanceReviewStatus, { label: string; className: string }> = {
   self_assessment: { label: 'Self-assessment', className: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300' },
-  in_review: { label: 'In review', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
+  in_review: { label: 'Manager review', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
+  joint_review: { label: 'Joint review', className: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300' },
   completed: { label: 'Completed', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' },
+};
+
+export const EVALUATION_META: Record<EvaluationKey, { label: string; short: string; who: string; dot: string; text: string; ring: string }> = {
+  self: { label: 'Self evaluation', short: 'Self', who: 'by the employee', dot: 'bg-sky-500', text: 'text-sky-700 dark:text-sky-400', ring: 'bg-sky-600 border-sky-600' },
+  manager: { label: 'Manager evaluation', short: 'Manager', who: 'by the project manager', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400', ring: 'bg-amber-600 border-amber-600' },
+  joint: { label: 'Joint evaluation', short: 'Joint', who: 'agreed together — official', dot: 'bg-emerald-600', text: 'text-emerald-700 dark:text-emerald-400', ring: 'bg-emerald-600 border-emerald-600' },
 };
 
 export function useReviewTemplate() {
@@ -68,7 +76,7 @@ export function useUpdatePerformanceReview() {
 export function useTransitionPerformanceReview() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, action }: { id: string; action: 'submit_self' | 'complete' | 'reopen' }) =>
+    mutationFn: ({ id, action }: { id: string; action: 'submit_self' | 'submit_manager' | 'complete' | 'reopen' }) =>
       api.post<PerformanceReview>(`/performance-reviews/${id}/transition`, { action }),
     onSuccess: (review) => {
       queryClient.setQueryData(['performance-reviews', 'detail', review.id], review);
@@ -138,5 +146,12 @@ export function useAssignSelfAssessments() {
       queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });
       queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'projects'] });
     },
+  });
+}
+
+export function useReviewAnalytics(year: number | null) {
+  return useQuery({
+    queryKey: ['performance-reviews', 'analytics', year ?? 'all'],
+    queryFn: () => api.get<ReviewAnalytics>(`/performance-reviews/analytics${year ? `?year=${year}` : ''}`),
   });
 }

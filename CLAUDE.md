@@ -338,12 +338,22 @@ autoevaluaciones a uno o varios empleados (`POST /bulk`; solo si el proyecto tie
 reviews activadas; omite a quien ya tiene una review abierta en ese proyecto).
 Formato fijo del workbook de evaluación de Impact Point (criterios/sub-criterios en
 `services/performance_reviews.py::REVIEW_TEMPLATE`, escala 1–5, N/A excluido del
-promedio; promedio por criterio = media de sus sub-criterios calificados, total =
-media de los criterios). Flujo: Admin/Manager (edit en la sección `reviews`) crea →
-`self_assessment` (el empleado llena Project Details + Self Assessment, "azul") →
-`submit_self` → `in_review` (el reviewer — default: manager del proyecto — califica,
-"verde") → `complete` → `completed`. El empleado no ve scores/notas del reviewer
-hasta `completed`. Export .xlsx replica el layout del workbook
+promedio; promedio por criterio = media de sus ítems calificados, total = media de
+los criterios). **Cada review tiene tres evaluaciones** del mismo template, en
+columnas JSON separadas: `self_scores` (empleado), `manager_scores` (reviewer —
+default: manager del proyecto) y `joint_scores` (conjunta, **la única oficial**:
+`overall_average` y la medición anual usan solo la joint).
+Flujo: `self_assessment` (empleado: project details + self-assessment + self scores;
+el manager puede ir calificando en paralelo) → `submit_self` → `in_review` (manager
+termina su evaluación) → `submit_manager` → `joint_review` (joint precargada con los
+puntajes del manager; el reviewer registra lo acordado) → `complete` → `completed`.
+Self y manager son ciegas entre sí hasta `joint_review`
+(`services/performance_reviews.py::visibility`). Admin/Manager (edit en `reviews`)
+ve y edita todo y puede `reopen` (una etapa atrás).
+Medición anual por empleado = media simple de los `joint` overall de sus reviews
+completadas en el año (por `review_date`) — pestaña **Analytics** (matrices por
+empleado / proyecto / ítem; esta última compara self vs manager vs joint).
+Export .xlsx: 3 hojas (Joint, Manager, Self) con el layout del workbook
 (`services/export_performance_review.py`). Emails best-effort en cada paso.
 ```
 GET  /performance-reviews/template             → criterios + escala
@@ -351,12 +361,13 @@ GET  /performance-reviews/projects             → List[ReviewProjectOut] (flag 
 PUT  /performance-reviews/projects/{id}        → activa/desactiva reviews del proyecto body:{enabled} (edit)
 GET  /performance-reviews/projects/{id}/team   → equipo con horas registradas y sus reviews (edit)
 POST /performance-reviews/bulk                 → asigna autoevaluaciones body:{project_id, employee_ids[], review_date, reviewer_id?, period_*?} (edit)
+GET  /performance-reviews/analytics            → reviews completadas con self/manager/joint ?year (edit)
 GET  /performance-reviews/logged-hours         → {hours} ?project_id ?employee_id ?period_start ?period_end (edit)
 GET  /performance-reviews/                     → List (propias como reviewee/reviewer; todas con edit) ?project_id ?employee_id ?status_filter
 POST /performance-reviews/                     → crea (edit) body:{project_id, employee_id, review_date, reviewer_id?, period_*?, duration_hours?}
 GET  /performance-reviews/{id}                 → PerformanceReviewOut
 PATCH /performance-reviews/{id}                → campos permitidos según rol/estado
-POST /performance-reviews/{id}/transition      → body:{action: submit_self|complete|reopen}
+POST /performance-reviews/{id}/transition      → body:{action: submit_self|submit_manager|complete|reopen}
 GET  /performance-reviews/{id}/export/xlsx     → XLSX "{Cliente} - {Empleado} - {Año}.xlsx"
 DEL  /performance-reviews/{id}                 → 204 (edit)
 ```
@@ -385,7 +396,7 @@ GET  /health                      → {status: "ok"}
 /invoices/new/manual   Factura manual (sin time entries)
 /invoices/:id/edit     Editor completo de factura
 /reports               Reportes y análisis
-/reviews               Evaluaciones: panel de proyectos (Admin/Manager) + lista de reviews
+/reviews               Evaluaciones: panel de proyectos + lista + Analytics (Admin/Manager); lista propia (empleados)
 /reviews/projects/:id  Equipo del proyecto → asignar autoevaluaciones
 /reviews/:id           Editor de evaluación (formato workbook) + export Excel
 /auth                  Login (redirige a /)
@@ -490,6 +501,7 @@ var el botón simplemente no se renderiza.
 | 051 | Elimina la auto-generación de facturas: dropea `scheduler_log` y `projects.billing_period`/`billing_day_of_period`/`billing_anchor_date`/`custom_period_days` (deja `invoices.auto_generated` como flag histórico) |
 | 058 | Tabla `performance_reviews` (evaluaciones de desempeño por proyecto; scores en JSON) |
 | 059 | `projects.performance_review_enabled` (qué proyectos tienen evaluación) |
+| 060 | Self/manager/joint por review: `scores`→`manager_scores`, + `self_scores`/`joint_scores`/`joint_notes`, estado `joint_review` |
 
 Para correr migraciones:
 ```bash
