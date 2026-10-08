@@ -1,4 +1,4 @@
-import { Clock, Calendar, Briefcase, Users, FileText, UserCircle, ChevronLeft, ChevronRight, LogOut, LayoutDashboard, BarChart3, Users2 } from 'lucide-react';
+import { Clock, Calendar, Briefcase, Users, FileText, UserCircle, ChevronLeft, ChevronRight, LogOut, LayoutDashboard, BarChart3, Users2, ClipboardCheck } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
 import { SectionKey } from '@/types';
@@ -23,6 +23,7 @@ const NAVIGATION_ITEMS: { title: string; url: string; icon: typeof LayoutDashboa
   { title: 'Staffing', url: '/staffing', icon: Users2, section: 'staffing' },
   { title: 'Invoices', url: '/invoices', icon: FileText, section: 'invoices' },
   { title: 'Reports', url: '/reports', icon: BarChart3, section: 'reports' },
+  { title: 'Reviews', url: '/reviews', icon: ClipboardCheck, section: 'reviews' },
 ];
 
 export function AppSidebar() {

@@ -38,6 +38,7 @@ SECTIONS: Dict[str, str] = {
     "staffing": "Staffing",
     "invoices": "Invoices",
     "reports": "Reports",
+    "reviews": "Performance Reviews",
 }
 
 _EVERYONE: Callable[[str], bool] = lambda role: True
@@ -57,6 +58,9 @@ _DEFAULTS: Dict[str, Tuple[Callable[[str], bool], Callable[[str], bool]]] = {
     "staffing": (_EVERYONE, _ADMIN_OR_MANAGER),
     "invoices": (_ADMIN_ONLY, _ADMIN_ONLY),
     "reports": (_ADMIN_OR_MANAGER, _NEVER),    # read-only analytics
+    # Everyone sees their own reviews (as reviewee or reviewer); Edit = create,
+    # delete, reopen and edit any review (routers/performance_reviews.py).
+    "reviews": (_EVERYONE, _ADMIN_OR_MANAGER),
 }
 
 

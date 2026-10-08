@@ -36,6 +36,7 @@ from routers.announcement_attachments import announcement_attachments_router
 from routers.pto_requests import pto_requests_router
 from routers.pto_request_attachments import pto_request_attachments_router
 from routers.section_access import section_access_router
+from routers.performance_reviews import performance_reviews_router
 from routers.time_entry_lock_overrides import time_entry_lock_overrides_router, my_time_entry_lock_status_router
 
 # Import all models so Base.metadata sees them
@@ -110,6 +111,7 @@ app.include_router(pto_request_attachments_router, dependencies=auth_deps)
 app.include_router(section_access_router, dependencies=auth_deps)
 app.include_router(time_entry_lock_overrides_router, dependencies=auth_deps)
 app.include_router(my_time_entry_lock_status_router, dependencies=auth_deps)
+app.include_router(performance_reviews_router, dependencies=[Depends(get_current_employee), Depends(require_section_view('reviews'))])
 
 
 # ---------- Health check ----------

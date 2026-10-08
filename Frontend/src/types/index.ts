@@ -4,7 +4,7 @@ export type AppRole = 'admin' | 'manager' | 'employee';
 // Keys/labels must match SECTIONS there exactly.
 export type SectionKey =
   | 'dashboard' | 'timesheet' | 'history' | 'profile' | 'projects'
-  | 'clients' | 'employees' | 'staffing' | 'invoices' | 'reports';
+  | 'clients' | 'employees' | 'staffing' | 'invoices' | 'reports' | 'reviews';
 
 export interface SectionAccess {
   section: SectionKey;
@@ -747,3 +747,68 @@ export interface InvoiceTimeEntry {
   time_entry_id: string;
   created_at: string;
 }
+
+// ---------- Performance reviews ----------
+// Fixed Impact Point review format — the template (criteria/sub-criteria) is
+// served by GET /performance-reviews/template; see
+// Backend/services/performance_reviews.py.
+
+export type PerformanceReviewStatus = 'self_assessment' | 'in_review' | 'completed';
+
+export interface ReviewScore {
+  score: number | null;
+  notes: string | null;
+}
+
+export interface ReviewCriterion {
+  key: string;
+  label: string;
+  short_label: string;
+  sub_criteria: { key: string; label: string }[];
+}
+
+export interface ReviewTemplate {
+  score_min: number;
+  score_max: number;
+  criteria: ReviewCriterion[];
+}
+
+export interface PerformanceReview {
+  id: string;
+  project_id: string;
+  project_name: string;
+  client_name: string | null;
+  employee_id: string;
+  employee_name: string;
+  reviewer_id: string | null;
+  reviewer_name: string | null;
+  review_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  duration_hours: number | null;
+  project_description: string | null;
+  employee_role: string | null;
+  self_strengths: string | null;
+  self_improvement: string | null;
+  self_development: string | null;
+  reviewer_strengths_notes: string | null;
+  reviewer_improvement_notes: string | null;
+  reviewer_development_notes: string | null;
+  scores: Record<string, ReviewScore>;
+  criteria_averages: { key: string; label: string; average: number | null }[];
+  overall_average: number | null;
+  status: PerformanceReviewStatus;
+  /** False for the reviewee until the review is completed — scores/notes withheld. */
+  reviewer_section_visible: boolean;
+  self_submitted_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PerformanceReviewPatch = Partial<Pick<PerformanceReview,
+  | 'reviewer_id' | 'review_date' | 'period_start' | 'period_end' | 'duration_hours'
+  | 'project_description' | 'employee_role'
+  | 'self_strengths' | 'self_improvement' | 'self_development'
+  | 'reviewer_strengths_notes' | 'reviewer_improvement_notes' | 'reviewer_development_notes'
+  | 'scores'>>;

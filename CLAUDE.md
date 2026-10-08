@@ -330,6 +330,28 @@ GET  /pto-request-attachments/          → List[PtoRequestAttachmentOut] ?pto_r
 DEL  /pto-request-attachments/{id}      → 204
 ```
 
+### Performance Reviews (evaluaciones de desempeño por proyecto)
+Formato fijo del workbook de evaluación de Impact Point (criterios/sub-criterios en
+`services/performance_reviews.py::REVIEW_TEMPLATE`, escala 1–5, N/A excluido del
+promedio; promedio por criterio = media de sus sub-criterios calificados, total =
+media de los criterios). Flujo: Admin/Manager (edit en la sección `reviews`) crea →
+`self_assessment` (el empleado llena Project Details + Self Assessment, "azul") →
+`submit_self` → `in_review` (el reviewer — default: manager del proyecto — califica,
+"verde") → `complete` → `completed`. El empleado no ve scores/notas del reviewer
+hasta `completed`. Export .xlsx replica el layout del workbook
+(`services/export_performance_review.py`). Emails best-effort en cada paso.
+```
+GET  /performance-reviews/template             → criterios + escala
+GET  /performance-reviews/logged-hours         → {hours} ?project_id ?employee_id ?period_start ?period_end (edit)
+GET  /performance-reviews/                     → List (propias como reviewee/reviewer; todas con edit) ?project_id ?employee_id ?status_filter
+POST /performance-reviews/                     → crea (edit) body:{project_id, employee_id, review_date, reviewer_id?, period_*?, duration_hours?}
+GET  /performance-reviews/{id}                 → PerformanceReviewOut
+PATCH /performance-reviews/{id}                → campos permitidos según rol/estado
+POST /performance-reviews/{id}/transition      → body:{action: submit_self|complete|reopen}
+GET  /performance-reviews/{id}/export/xlsx     → XLSX "{Cliente} - {Empleado} - {Año}.xlsx"
+DEL  /performance-reviews/{id}                 → 204 (edit)
+```
+
 ### Health
 ```
 GET  /health                      → {status: "ok"}
@@ -354,6 +376,8 @@ GET  /health                      → {status: "ok"}
 /invoices/new/manual   Factura manual (sin time entries)
 /invoices/:id/edit     Editor completo de factura
 /reports               Reportes y análisis
+/reviews               Evaluaciones de desempeño (lista)
+/reviews/:id           Editor de evaluación (formato workbook) + export Excel
 /auth                  Login (redirige a /)
 ```
 
@@ -454,6 +478,7 @@ var el botón simplemente no se renderiza.
 | 025 | `invoices.auto_generated` + índice único parcial anti-duplicados |
 | 030 | Elimina `password_hash`/`must_change_password` (login exclusivo por Entra ID) |
 | 051 | Elimina la auto-generación de facturas: dropea `scheduler_log` y `projects.billing_period`/`billing_day_of_period`/`billing_anchor_date`/`custom_period_days` (deja `invoices.auto_generated` como flag histórico) |
+| 058 | Tabla `performance_reviews` (evaluaciones de desempeño por proyecto; scores en JSON) |
 
 Para correr migraciones:
 ```bash
