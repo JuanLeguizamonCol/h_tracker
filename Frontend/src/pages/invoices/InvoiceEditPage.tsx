@@ -1,11 +1,11 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Plus, Trash2, Clock, FileDown, FileSpreadsheet, RefreshCw, ChevronDown, ChevronUp, RotateCcw, Pencil } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Plus, Trash2, Clock, FileDown, FileSpreadsheet, RefreshCw, ChevronDown, ChevronUp, RotateCcw, Pencil, Check, ChevronsUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums, useRecalculateInvoice } from '@/hooks/useInvoices';
 import { useAuth } from '@/contexts/AuthContext';
-import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, TimeDetailWeekPatch, InvoiceTimeDetailRow, MinHoursBasis, MIN_HOURS_BASIS_LABELS, FIXED_FEE_PERIOD_LABELS } from '@/types';
+import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, TimeDetailWeekPatch, InvoiceTimeDetailRow, MinHoursBasis, MIN_HOURS_BASIS_LABELS, FIXED_FEE_PERIOD_LABELS, Employee } from '@/types';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,13 +16,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { cn } from '@/lib/utils';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import { formatFeeUnits, fixedFeeErrorMessage } from '@/components/FixedFeePeriodPicker';
 import { getCompanyProfile, type CompanyCode } from '@/lib/invoice/signatories';
 import { useEmployees } from '@/hooks/useEmployees';
-import { useProjectRoles, useUpdateProjectRole } from '@/hooks/useProjectRoles';
+import { useProjectRoles, useUpdateProjectRole, useCreateProjectRole } from '@/hooks/useProjectRoles';
 import { useAssignedProjectsWithDetails, useUpdateAssignment } from '@/hooks/useAssignedProjects';
 
 // An invoice bills a flat fee when it was created as one (fixed_fee_period), or —
@@ -120,6 +122,8 @@ function computeLineTotals(line: LocalLine) {
 // /employee-projects/{id}) — without leaving the invoice to go to Staffing /
 // Project Roles. Neither action touches this already-created line's own
 // role_id/rate_snapshot — use the Recalculate button for that.
+const CREATE_ROLE_VALUE = '__create_new_role__';
+
 function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: string }) {
   const [open, setOpen] = useState(false);
   const { data: projectRoles = [] } = useProjectRoles(open ? projectId : undefined);
@@ -127,16 +131,51 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
   const assignment = assignments?.find(a => a.project_id === projectId);
   const updateRole = useUpdateProjectRole();
   const updateAssignment = useUpdateAssignment();
+  const createRole = useCreateProjectRole();
   const [rateDraft, setRateDraft] = useState('');
   const [roleIdDraft, setRoleIdDraft] = useState('');
+  const [isCreatingRole, setIsCreatingRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRoleRate, setNewRoleRate] = useState('');
 
   const selectedRole = projectRoles.find(r => r.id === roleIdDraft);
+
+  const assignRole = async (roleId: string) => {
+    setRoleIdDraft(roleId);
+    if (!assignment) return;
+    try {
+      await updateAssignment.mutateAsync({ id: assignment.id, role_id: roleId });
+      toast.success("Employee's project role updated.");
+    } catch {
+      toast.error('Failed to update role assignment.');
+    }
+  };
+
+  const handleCreateRole = async () => {
+    const name = newRoleName.trim();
+    const rate = parseFloat(newRoleRate);
+    if (!name || isNaN(rate) || rate < 0) {
+      toast.error('Enter a role name and a valid rate.');
+      return;
+    }
+    try {
+      const role = await createRole.mutateAsync({ project_id: projectId, name, hourly_rate_usd: rate });
+      setIsCreatingRole(false);
+      setNewRoleName('');
+      setNewRoleRate('');
+      await assignRole(role.id);
+      toast.success(`Role "${name}" created and assigned.`);
+    } catch {
+      toast.error('Failed to create role.');
+    }
+  };
 
   return (
     <Popover open={open} onOpenChange={next => {
       setOpen(next);
       if (next) {
         setRoleIdDraft(assignment?.role_id || '');
+        setIsCreatingRole(false);
       }
     }}>
       <PopoverTrigger asChild>
@@ -149,15 +188,12 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
           <Label className="text-xs">Employee's project role</Label>
           <Select
             value={roleIdDraft}
-            onValueChange={async id => {
-              setRoleIdDraft(id);
-              if (!assignment) return;
-              try {
-                await updateAssignment.mutateAsync({ id: assignment.id, role_id: id });
-                toast.success("Employee's project role updated.");
-              } catch {
-                toast.error('Failed to update role assignment.');
+            onValueChange={id => {
+              if (id === CREATE_ROLE_VALUE) {
+                setIsCreatingRole(true);
+                return;
               }
+              assignRole(id);
             }}
           >
             <SelectTrigger className="h-8">
@@ -167,13 +203,47 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
               {projectRoles.map(r => (
                 <SelectItem key={r.id} value={r.id}>{r.name} (${r.hourly_rate_usd}/h)</SelectItem>
               ))}
+              <SelectItem value={CREATE_ROLE_VALUE} className="text-primary font-medium">
+                + Create new role…
+              </SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
             Changes their role on this project going forward — doesn't change this line.
           </p>
         </div>
-        {selectedRole && (
+        {isCreatingRole && (
+          <div className="space-y-2 rounded-md border p-2">
+            <div className="space-y-1">
+              <Label className="text-xs">New role name</Label>
+              <Input
+                className="h-8"
+                placeholder="e.g. Senior Analyst"
+                value={newRoleName}
+                onChange={e => setNewRoleName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Rate</Label>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground">$</span>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="h-8"
+                  value={newRoleRate}
+                  onChange={e => setNewRoleRate(e.target.value)}
+                />
+              </div>
+            </div>
+            <Button type="button" size="sm" className="h-7 w-full text-xs" disabled={createRole.isPending} onClick={handleCreateRole}>
+              {createRole.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+              Create &amp; assign
+            </Button>
+          </div>
+        )}
+        {selectedRole && !isCreatingRole && (
           <div className="space-y-1">
             <Label className="text-xs">Rate for "{selectedRole.name}"</Label>
             <div className="flex items-center gap-1">
@@ -202,6 +272,62 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
             </p>
           </div>
         )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Searchable signatory picker — the plain Select got unwieldy once it listed
+// every active employee instead of 4-5 hardcoded names.
+function SignatoryCombobox({
+  signatories, value, fallbackLabel, onSelect,
+}: {
+  signatories: Employee[];
+  value: string;
+  // What was saved on the invoice (signatory_name) — shown when value
+  // doesn't match anyone in the list (e.g. an inactive employee).
+  fallbackLabel?: string;
+  onSelect: (employee: Employee) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = signatories.find(s => s.id === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-8 w-full justify-between font-normal"
+        >
+          <span className="truncate">{selected?.name || fallbackLabel || 'Select signatory…'}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search employees…" className="h-8" />
+          <CommandList>
+            <CommandEmpty>No employee found.</CommandEmpty>
+            <CommandGroup>
+              {signatories.map(s => (
+                <CommandItem
+                  key={s.id}
+                  value={s.name}
+                  onSelect={() => { onSelect(s); setOpen(false); }}
+                >
+                  <Check className={cn('mr-2 h-4 w-4', s.id === value ? 'opacity-100' : 'opacity-0')} />
+                  <span className="truncate">
+                    {s.name}
+                    {!s.signature_url && <span className="text-muted-foreground"> (no signature on file)</span>}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </PopoverContent>
     </Popover>
   );
@@ -468,14 +594,17 @@ export default function InvoiceEditPage() {
         notes: '',
       },
     ]);
+    setIsDirty(true);
   };
 
   const removeExpense = (idx: number) => {
     setExpenses(prev => prev.filter((_, i) => i !== idx));
+    setIsDirty(true);
   };
 
   const updateExpense = (idx: number, updates: Partial<LocalExpense>) => {
     setExpenses(prev => prev.map((e, i) => i === idx ? { ...e, ...updates } : e));
+    setIsDirty(true);
   };
 
   const handleSave = async () => {
@@ -927,28 +1056,17 @@ export default function InvoiceEditPage() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Signatory</Label>
-                  <Select
+                  <SignatoryCombobox
+                    signatories={signatories}
                     value={signatoryEmployeeId}
-                    onValueChange={employeeId => {
-                      const sig = signatories.find(s => s.id === employeeId);
-                      if (!sig) return;
-                      setSignatoryEmployeeId(employeeId);
+                    fallbackLabel={signatoryName}
+                    onSelect={sig => {
+                      setSignatoryEmployeeId(sig.id);
                       setSignatoryName(sig.name);
                       setSignatoryTitle(sig.title || '');
                       setIsDirty(true);
                     }}
-                  >
-                    <SelectTrigger className="h-8">
-                      <SelectValue placeholder="Select signatory…">{signatoryName || undefined}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {signatories.map(s => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.name}{!s.signature_url && <span className="text-muted-foreground"> (no signature on file)</span>}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Signatory Title</Label>
