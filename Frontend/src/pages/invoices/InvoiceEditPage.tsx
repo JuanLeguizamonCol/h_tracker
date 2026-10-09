@@ -25,7 +25,7 @@ import { formatFeeUnits, fixedFeeErrorMessage } from '@/components/FixedFeePerio
 import { getCompanyProfile, type CompanyCode } from '@/lib/invoice/signatories';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useProjectRoles, useUpdateProjectRole, useCreateProjectRole } from '@/hooks/useProjectRoles';
-import { useAssignedProjectsWithDetails, useUpdateAssignment } from '@/hooks/useAssignedProjects';
+import { useAssignedProjectsWithDetails, useUpdateAssignment, useCreateAssignment } from '@/hooks/useAssignedProjects';
 
 // An invoice bills a flat fee when it was created as one (fixed_fee_period), or —
 // for invoices from before that existed — when its project is fixed-fee and the
@@ -127,10 +127,11 @@ const CREATE_ROLE_VALUE = '__create_new_role__';
 function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: string }) {
   const [open, setOpen] = useState(false);
   const { data: projectRoles = [] } = useProjectRoles(open ? projectId : undefined);
-  const { data: assignments } = useAssignedProjectsWithDetails(open ? userId : undefined);
+  const { data: assignments, isLoading: assignmentsLoading } = useAssignedProjectsWithDetails(open ? userId : undefined);
   const assignment = assignments?.find(a => a.project_id === projectId);
   const updateRole = useUpdateProjectRole();
   const updateAssignment = useUpdateAssignment();
+  const createAssignment = useCreateAssignment();
   const createRole = useCreateProjectRole();
   const [rateDraft, setRateDraft] = useState('');
   const [roleIdDraft, setRoleIdDraft] = useState('');
@@ -142,9 +143,19 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
 
   const assignRole = async (roleId: string) => {
     setRoleIdDraft(roleId);
-    if (!assignment) return;
+    if (assignmentsLoading) {
+      toast.error('Still loading — try again in a moment.');
+      return;
+    }
     try {
-      await updateAssignment.mutateAsync({ id: assignment.id, role_id: roleId });
+      if (assignment) {
+        await updateAssignment.mutateAsync({ id: assignment.id, role_id: roleId });
+      } else {
+        // No existing Staffing row for this person on this project (e.g. they
+        // only logged hours without being formally assigned) — create one
+        // instead of silently doing nothing.
+        await createAssignment.mutateAsync({ user_id: userId, project_id: projectId, role_id: roleId });
+      }
       toast.success("Employee's project role updated.");
     } catch {
       toast.error('Failed to update role assignment.');
@@ -183,11 +194,12 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
           <Pencil className="h-3 w-3" />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 space-y-3" align="end">
+      <PopoverContent className="w-72 space-y-3" align="start" side="bottom">
         <div className="space-y-1">
           <Label className="text-xs">Employee's project role</Label>
           <Select
             value={roleIdDraft}
+            disabled={assignmentsLoading}
             onValueChange={id => {
               if (id === CREATE_ROLE_VALUE) {
                 setIsCreatingRole(true);
