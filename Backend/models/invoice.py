@@ -59,15 +59,20 @@ class Invoice(Base):
     # signature IMAGE is resolved from this employee, not from name matching.
     signatory_employee_id = Column(String, ForeignKey("employees.id"), nullable=True)
     owner_company = Column(String(10), nullable=True, default='IPC')
-    # Per-invoice "Bill To" overrides — null falls back to the client's own
-    # fields (see services/export_pdf.py). Lets an admin fix a duplicated or
-    # wrong field (e.g. no manager_name on file, so contact == company) on a
-    # single invoice without editing the shared Client record.
+    # "Bill To" fields, mirroring Client's own columns 1:1 (manager_name,
+    # job_title, name, street_address_1/2, city, state, zip) so this panel and
+    # the Client edit form share the same shape. Editing these here always
+    # writes through to the Client record too (see patch_invoice) — these are
+    # no longer a silent per-invoice-only override, they're just where you can
+    # fix the client's billing info from inside an invoice.
     bill_to_contact = Column(String, nullable=True)
     bill_to_title = Column(String, nullable=True)
     bill_to_company = Column(String, nullable=True)
-    bill_to_address = Column(String, nullable=True)
-    bill_to_city_state_zip = Column(String, nullable=True)
+    bill_to_street_address_1 = Column(String, nullable=True)
+    bill_to_street_address_2 = Column(String, nullable=True)
+    bill_to_city = Column(String, nullable=True)
+    bill_to_state = Column(String, nullable=True)
+    bill_to_zip = Column(String, nullable=True)
     # Per-invoice ACH/bank overrides — null falls back to the owner company's
     # static bank profile (see services/invoice_config.py), which is blank
     # for Pegasus (PI) until filled in on an invoice.

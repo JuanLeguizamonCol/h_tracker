@@ -681,29 +681,35 @@ def generate_invoice_html(edit_data: dict) -> str:
     signatory_title = invoice.get("signatory_title") or ""
 
     # ── Client fields ─────────────────────────────────────────────────────────
-    # Per-invoice "Bill To" overrides (see schemas/invoice.py) win when set —
-    # they let an admin fix a duplicated/wrong field for one invoice (e.g. no
-    # manager_name on file, so the contact line repeats the company name)
-    # without touching the shared Client record.
+    # Bill To fields on the invoice (see schemas/invoice.py) win when set — they
+    # always get written through to the Client record on save too (see
+    # patch_invoice), but a saved invoice keeps showing what was true for it at
+    # billing time even if the Client record changes again afterward.
+    def _compose_address(street1, street2):
+        return ", ".join(part for part in [street1 or "", street2 or ""] if part)
+
+    def _compose_city_state_zip(city, state, zip_):
+        result = ", ".join(part for part in [city or "", state or ""] if part)
+        if zip_:
+            result = f"{result} {zip_}".strip(", ")
+        return result
+
     default_company = client.get("name") or "—"
     default_contact = client.get("manager_name") or client.get("name") or "—"
     default_title = client.get("job_title") or client.get("manager_title") or ""
+    default_address = _compose_address(client.get("street_address_1"), client.get("street_address_2")) or client.get("address") or ""
+    default_city_state_zip = _compose_city_state_zip(client.get("city"), client.get("state"), client.get("zip"))
 
-    addr1 = client.get("street_address_1") or ""
-    addr2 = client.get("street_address_2") or ""
-    default_address = ", ".join(part for part in [addr1, addr2] if part) or client.get("address") or ""
-    city = client.get("city") or ""
-    state = client.get("state") or ""
-    zip_ = client.get("zip") or ""
-    default_city_state_zip = ", ".join(part for part in [city, state] if part)
-    if zip_:
-        default_city_state_zip = f"{default_city_state_zip} {zip_}".strip(", ")
+    bill_to_address = _compose_address(invoice.get("bill_to_street_address_1"), invoice.get("bill_to_street_address_2"))
+    bill_to_city_state_zip = _compose_city_state_zip(
+        invoice.get("bill_to_city"), invoice.get("bill_to_state"), invoice.get("bill_to_zip")
+    )
 
     client_company = invoice.get("bill_to_company") or default_company
     client_contact = invoice.get("bill_to_contact") or default_contact
     client_title = invoice.get("bill_to_title") or default_title
-    client_address = invoice.get("bill_to_address") or default_address
-    client_city_state_zip = invoice.get("bill_to_city_state_zip") or default_city_state_zip
+    client_address = bill_to_address or default_address
+    client_city_state_zip = bill_to_city_state_zip or default_city_state_zip
 
     # Salutation: contact name + colon  →  "Dear John Smith:"
     greeting = f"{client_contact}:"

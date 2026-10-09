@@ -1,9 +1,9 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Plus, Trash2, Clock, FileDown, FileSpreadsheet, RefreshCw, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Plus, Trash2, Clock, FileDown, FileSpreadsheet, RefreshCw, ChevronDown, ChevronUp, RotateCcw, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums } from '@/hooks/useInvoices';
+import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums, useRecalculateInvoice } from '@/hooks/useInvoices';
 import { useAuth } from '@/contexts/AuthContext';
 import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, TimeDetailWeekPatch, InvoiceTimeDetailRow, MinHoursBasis, MIN_HOURS_BASIS_LABELS, FIXED_FEE_PERIOD_LABELS } from '@/types';
 import { api } from '@/lib/api';
@@ -15,11 +15,15 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import { formatFeeUnits, fixedFeeErrorMessage } from '@/components/FixedFeePeriodPicker';
-import { getSignatoriesForCompany, getCompanyProfile, type CompanyCode } from '@/lib/invoice/signatories';
+import { getCompanyProfile, type CompanyCode } from '@/lib/invoice/signatories';
+import { useEmployees } from '@/hooks/useEmployees';
+import { useProjectRoles, useUpdateProjectRole } from '@/hooks/useProjectRoles';
+import { useAssignedProjectsWithDetails, useUpdateAssignment } from '@/hooks/useAssignedProjects';
 
 // An invoice bills a flat fee when it was created as one (fixed_fee_period), or —
 // for invoices from before that existed — when its project is fixed-fee and the
@@ -78,16 +82,21 @@ function weekRowTotals(row: LocalTimeDetailRow, rate: number) {
 }
 
 // Mirrors the backend's fallback (services/export_pdf.py) so the "Bill To"
-// fields start pre-filled with what the PDF would show today, not blank.
+// fields start pre-filled with what the client record already has, not
+// blank — same field shape as ClientFormPage, so editing here and there
+// feels like the same form.
 function defaultBillTo(client: InvoiceEditData['client']) {
-  if (!client) return { contact: '', title: '', company: '', address: '', cityStateZip: '' };
-  const contact = client.manager_name || client.name || '';
-  const title = client.job_title || '';
-  const company = client.name || '';
-  const address = [client.street_address_1, client.street_address_2].filter(Boolean).join(', ');
-  const cityState = [client.city, client.state].filter(Boolean).join(', ');
-  const cityStateZip = client.zip ? `${cityState} ${client.zip}`.trim() : cityState;
-  return { contact, title, company, address, cityStateZip };
+  if (!client) return { contact: '', title: '', company: '', streetAddress1: '', streetAddress2: '', city: '', state: '', zip: '' };
+  return {
+    contact: client.manager_name || client.name || '',
+    title: client.job_title || '',
+    company: client.name || '',
+    streetAddress1: client.street_address_1 || '',
+    streetAddress2: client.street_address_2 || '',
+    city: client.city || '',
+    state: client.state || '',
+    zip: client.zip || '',
+  };
 }
 
 function computeLineTotals(line: LocalLine) {
@@ -103,6 +112,99 @@ function computeLineTotals(line: LocalLine) {
   const discountHours = line._rate > 0 ? discountDollars / line._rate : 0;
   const total = Math.max(0, subtotal - discountDollars);
   return { subtotal, discountDollars, discountHours, total };
+}
+
+// Admin-only quick-edit, opened from a line row: change the role's hourly
+// rate (project-wide, PUT /project-roles/{id}) and/or which ProjectRole this
+// employee is assigned to on the project going forward (PUT
+// /employee-projects/{id}) — without leaving the invoice to go to Staffing /
+// Project Roles. Neither action touches this already-created line's own
+// role_id/rate_snapshot — use the Recalculate button for that.
+function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data: projectRoles = [] } = useProjectRoles(open ? projectId : undefined);
+  const { data: assignments } = useAssignedProjectsWithDetails(open ? userId : undefined);
+  const assignment = assignments?.find(a => a.project_id === projectId);
+  const updateRole = useUpdateProjectRole();
+  const updateAssignment = useUpdateAssignment();
+  const [rateDraft, setRateDraft] = useState('');
+  const [roleIdDraft, setRoleIdDraft] = useState('');
+
+  const selectedRole = projectRoles.find(r => r.id === roleIdDraft);
+
+  return (
+    <Popover open={open} onOpenChange={next => {
+      setOpen(next);
+      if (next) {
+        setRoleIdDraft(assignment?.role_id || '');
+      }
+    }}>
+      <PopoverTrigger asChild>
+        <button type="button" className="text-muted-foreground hover:text-foreground" title="Edit role / rate">
+          <Pencil className="h-3 w-3" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 space-y-3" align="end">
+        <div className="space-y-1">
+          <Label className="text-xs">Employee's project role</Label>
+          <Select
+            value={roleIdDraft}
+            onValueChange={async id => {
+              setRoleIdDraft(id);
+              if (!assignment) return;
+              try {
+                await updateAssignment.mutateAsync({ id: assignment.id, role_id: id });
+                toast.success("Employee's project role updated.");
+              } catch {
+                toast.error('Failed to update role assignment.');
+              }
+            }}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue placeholder="Select role…" />
+            </SelectTrigger>
+            <SelectContent>
+              {projectRoles.map(r => (
+                <SelectItem key={r.id} value={r.id}>{r.name} (${r.hourly_rate_usd}/h)</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Changes their role on this project going forward — doesn't change this line.
+          </p>
+        </div>
+        {selectedRole && (
+          <div className="space-y-1">
+            <Label className="text-xs">Rate for "{selectedRole.name}"</Label>
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground">$</span>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                className="h-8"
+                value={rateDraft || String(selectedRole.hourly_rate_usd)}
+                onChange={e => setRateDraft(e.target.value)}
+                onBlur={async e => {
+                  const num = parseFloat(e.target.value);
+                  if (isNaN(num) || num === selectedRole.hourly_rate_usd) return;
+                  try {
+                    await updateRole.mutateAsync({ id: selectedRole.id, updates: { hourly_rate_usd: num } });
+                    toast.success('Role rate updated.');
+                  } catch {
+                    toast.error('Failed to update rate.');
+                  }
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Updates this rate project-wide, for every future invoice.
+            </p>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export default function InvoiceEditPage() {
@@ -127,6 +229,7 @@ export default function InvoiceEditPage() {
   const [periodEnd, setPeriodEnd] = useState('');
   const [signatoryName, setSignatoryName] = useState('');
   const [signatoryTitle, setSignatoryTitle] = useState('');
+  const [signatoryEmployeeId, setSignatoryEmployeeId] = useState('');
   const [ownerCompany, setOwnerCompany] = useState<CompanyCode>('IPC');
   const [fixedFeeAmount, setFixedFeeAmount] = useState<string>('');
   const [isRecalcFee, setIsRecalcFee] = useState(false);
@@ -134,11 +237,15 @@ export default function InvoiceEditPage() {
   // Managed Services panel: unsaved per-role minimum edits (role_id -> draft).
   const [msDraft, setMsDraft] = useState<Record<string, { min: string; basis: MinHoursBasis }>>({});
   const updateMinimums = useUpdateManagedServicesMinimums();
+  const recalculateInvoice = useRecalculateInvoice();
   const [billToContact, setBillToContact] = useState('');
   const [billToTitle, setBillToTitle] = useState('');
   const [billToCompany, setBillToCompany] = useState('');
-  const [billToAddress, setBillToAddress] = useState('');
-  const [billToCityStateZip, setBillToCityStateZip] = useState('');
+  const [billToStreetAddress1, setBillToStreetAddress1] = useState('');
+  const [billToStreetAddress2, setBillToStreetAddress2] = useState('');
+  const [billToCity, setBillToCity] = useState('');
+  const [billToState, setBillToState] = useState('');
+  const [billToZip, setBillToZip] = useState('');
   const [bankName, setBankName] = useState('');
   const [bankAba, setBankAba] = useState('');
   const [bankAccountName, setBankAccountName] = useState('');
@@ -153,8 +260,11 @@ export default function InvoiceEditPage() {
   // Snapshot of lines/time-detail before a save attempt — used for optimistic-revert on error
   const saveSnapshot = useRef<{ lines: LocalLine[]; timeDetailRows: LocalTimeDetailRow[] }>({ lines: [], timeDetailRows: [] });
 
-  // Signatories filtered by company (local config — no API call needed)
-  const signatories = useMemo(() => getSignatoriesForCompany(ownerCompany), [ownerCompany]);
+  // Eligible signatories: any employee who's uploaded their own signature
+  // (self-service, admin-only — see Backend/routers/profile.py) rather than
+  // the old hardcoded per-company list.
+  const { data: allEmployees = [] } = useEmployees();
+  const signatories = useMemo(() => allEmployees.filter(e => !!e.signature_url), [allEmployees]);
 
   // Expensify panel state
   const [expensifyOpen, setExpensifyOpen] = useState(false);
@@ -205,6 +315,7 @@ export default function InvoiceEditPage() {
     setPeriodEnd((data.invoice as any).period_end || '');
     setSignatoryName((data.invoice as any).signatory_name || '');
     setSignatoryTitle((data.invoice as any).signatory_title || '');
+    setSignatoryEmployeeId((data.invoice as any).signatory_employee_id || '');
     const company = ((data.invoice as any).owner_company || data.project?.owner_company || 'IPC') as CompanyCode;
     setOwnerCompany(company);
     setFixedFeeAmount(data.invoice.fixed_fee_amount != null ? String(data.invoice.fixed_fee_amount) : '');
@@ -212,8 +323,11 @@ export default function InvoiceEditPage() {
     setBillToContact(data.invoice.bill_to_contact || billToDefaults.contact);
     setBillToTitle(data.invoice.bill_to_title || billToDefaults.title);
     setBillToCompany(data.invoice.bill_to_company || billToDefaults.company);
-    setBillToAddress(data.invoice.bill_to_address || billToDefaults.address);
-    setBillToCityStateZip(data.invoice.bill_to_city_state_zip || billToDefaults.cityStateZip);
+    setBillToStreetAddress1(data.invoice.bill_to_street_address_1 || billToDefaults.streetAddress1);
+    setBillToStreetAddress2(data.invoice.bill_to_street_address_2 || billToDefaults.streetAddress2);
+    setBillToCity(data.invoice.bill_to_city || billToDefaults.city);
+    setBillToState(data.invoice.bill_to_state || billToDefaults.state);
+    setBillToZip(data.invoice.bill_to_zip || billToDefaults.zip);
     const defaultBank = getCompanyProfile(company).bank;
     setBankName(data.invoice.bank_name || defaultBank.bank_name);
     setBankAba(data.invoice.bank_aba || defaultBank.aba);
@@ -418,12 +532,16 @@ export default function InvoiceEditPage() {
           notes: notes || null,
           signatory_name: signatoryName || null,
           signatory_title: signatoryTitle || null,
+          signatory_employee_id: signatoryEmployeeId || null,
           owner_company: ownerCompany,
           bill_to_contact: billToContact || null,
           bill_to_title: billToTitle || null,
           bill_to_company: billToCompany || null,
-          bill_to_address: billToAddress || null,
-          bill_to_city_state_zip: billToCityStateZip || null,
+          bill_to_street_address_1: billToStreetAddress1 || null,
+          bill_to_street_address_2: billToStreetAddress2 || null,
+          bill_to_city: billToCity || null,
+          bill_to_state: billToState || null,
+          bill_to_zip: billToZip || null,
           bank_name: bankName || null,
           bank_aba: bankAba || null,
           bank_account_name: bankAccountName || null,
@@ -442,6 +560,18 @@ export default function InvoiceEditPage() {
       setLines(saveSnapshot.current.lines);
       setTimeDetailRows(saveSnapshot.current.timeDetailRows);
       toast.error(err?.message?.includes('422') ? 'Invalid data — check required fields.' : 'Error saving invoice.');
+    }
+  };
+
+  const handleRecalculateInvoice = async () => {
+    if (!invoiceId) return;
+    try {
+      await recalculateInvoice.mutateAsync(invoiceId);
+      toast.success('Recalculated from current rates and hours.');
+      setIsDirty(false);
+      setInitialized(false); // reconcile state from server response
+    } catch {
+      toast.error('Failed to recalculate invoice.');
     }
   };
 
@@ -791,20 +921,22 @@ export default function InvoiceEditPage() {
                 <div className="space-y-1">
                   <Label className="text-xs">Signatory</Label>
                   <Select
-                    value={signatoryName}
-                    onValueChange={name => {
-                      setSignatoryName(name);
+                    value={signatoryEmployeeId}
+                    onValueChange={employeeId => {
+                      const sig = signatories.find(s => s.id === employeeId);
+                      if (!sig) return;
+                      setSignatoryEmployeeId(employeeId);
+                      setSignatoryName(sig.name);
+                      setSignatoryTitle(sig.title || '');
                       setIsDirty(true);
-                      const sig = signatories.find(s => s.name === name);
-                      if (sig) setSignatoryTitle(sig.title);
                     }}
                   >
                     <SelectTrigger className="h-8">
-                      <SelectValue placeholder="Select signatory…" />
+                      <SelectValue placeholder="Select signatory…">{signatoryName || undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {signatories.map(s => (
-                        <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -837,8 +969,8 @@ export default function InvoiceEditPage() {
             <CardHeader>
               <CardTitle className="text-base">Bill To (PDF)</CardTitle>
               <p className="text-xs text-muted-foreground">
-                Pre-filled from the client record — edit here to fix a wrong or duplicated
-                field on this invoice only, without changing the client.
+                Pre-filled from the client record — editing a field here also updates
+                it on the client (same fields as the Client edit form).
               </p>
             </CardHeader>
             <CardContent>
@@ -867,20 +999,49 @@ export default function InvoiceEditPage() {
                     onChange={e => { setBillToCompany(e.target.value); setIsDirty(true); }}
                   />
                 </div>
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs">Address</Label>
+                <div className="space-y-1">
+                  <Label className="text-xs">Street Address</Label>
                   <Input
                     className="h-8"
-                    value={billToAddress}
-                    onChange={e => { setBillToAddress(e.target.value); setIsDirty(true); }}
+                    placeholder="123 Main St"
+                    value={billToStreetAddress1}
+                    onChange={e => { setBillToStreetAddress1(e.target.value); setIsDirty(true); }}
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">City, State ZIP</Label>
+                  <Label className="text-xs">Address Line 2</Label>
                   <Input
                     className="h-8"
-                    value={billToCityStateZip}
-                    onChange={e => { setBillToCityStateZip(e.target.value); setIsDirty(true); }}
+                    placeholder="Suite 400"
+                    value={billToStreetAddress2}
+                    onChange={e => { setBillToStreetAddress2(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">City</Label>
+                  <Input
+                    className="h-8"
+                    placeholder="New York"
+                    value={billToCity}
+                    onChange={e => { setBillToCity(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">State</Label>
+                  <Input
+                    className="h-8"
+                    placeholder="NY"
+                    value={billToState}
+                    onChange={e => { setBillToState(e.target.value); setIsDirty(true); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">ZIP</Label>
+                  <Input
+                    className="h-8"
+                    placeholder="10001"
+                    value={billToZip}
+                    onChange={e => { setBillToZip(e.target.value); setIsDirty(true); }}
                   />
                 </div>
               </div>
@@ -1083,6 +1244,22 @@ export default function InvoiceEditPage() {
                   Managed Services — hours shown for reference only
                 </Badge>
               )}
+              {!isFlatBilling && status === 'draft' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  disabled={recalculateInvoice.isPending}
+                  onClick={handleRecalculateInvoice}
+                  title="Pull current role rates and linked hours into this draft's lines"
+                >
+                  {recalculateInvoice.isPending
+                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                    : <RefreshCw className="h-3 w-3" />}
+                  Recalculate
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               {Object.keys(groupedLines).length === 0 ? (
@@ -1245,6 +1422,9 @@ export default function InvoiceEditPage() {
                                           }}
                                           className="w-20 h-7 text-right text-sm"
                                         />
+                                        {isAdmin && line.user_id && data.project && (
+                                          <LineRoleRateEditor projectId={data.project.id} userId={line.user_id} />
+                                        )}
                                       </div>
                                       {line.role_id && line.project_role_rate === 0 && line._rate > 0 && (
                                         <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">

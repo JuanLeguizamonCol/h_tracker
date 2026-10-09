@@ -413,8 +413,11 @@ export interface Invoice {
   bill_to_contact?: string | null;
   bill_to_title?: string | null;
   bill_to_company?: string | null;
-  bill_to_address?: string | null;
-  bill_to_city_state_zip?: string | null;
+  bill_to_street_address_1?: string | null;
+  bill_to_street_address_2?: string | null;
+  bill_to_city?: string | null;
+  bill_to_state?: string | null;
+  bill_to_zip?: string | null;
   bank_name?: string | null;
   bank_aba?: string | null;
   bank_account_name?: string | null;
@@ -564,8 +567,11 @@ export interface InvoicePatch {
   bill_to_contact?: string | null;
   bill_to_title?: string | null;
   bill_to_company?: string | null;
-  bill_to_address?: string | null;
-  bill_to_city_state_zip?: string | null;
+  bill_to_street_address_1?: string | null;
+  bill_to_street_address_2?: string | null;
+  bill_to_city?: string | null;
+  bill_to_state?: string | null;
+  bill_to_zip?: string | null;
   bank_name?: string | null;
   bank_aba?: string | null;
   bank_account_name?: string | null;

@@ -381,8 +381,11 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "bill_to_contact": invoice.bill_to_contact,
             "bill_to_title": invoice.bill_to_title,
             "bill_to_company": invoice.bill_to_company,
-            "bill_to_address": invoice.bill_to_address,
-            "bill_to_city_state_zip": invoice.bill_to_city_state_zip,
+            "bill_to_street_address_1": invoice.bill_to_street_address_1,
+            "bill_to_street_address_2": invoice.bill_to_street_address_2,
+            "bill_to_city": invoice.bill_to_city,
+            "bill_to_state": invoice.bill_to_state,
+            "bill_to_zip": invoice.bill_to_zip,
             "bank_name": invoice.bank_name,
             "bank_aba": invoice.bank_aba,
             "bank_account_name": invoice.bank_account_name,
@@ -484,6 +487,28 @@ def _managed_services_project_invoice(invoice_id: str, db: Session):
     return invoice
 
 
+def _recalculate_invoice_totals(invoice) -> None:
+    """Subtotal/discount/total from `invoice.lines` — unless this invoice bills
+    a single flat fee, in which case the fee amount IS the subtotal/total and
+    hours-based line amounts (always 0 for fixed-fee lines) are ignored. Shared
+    by patch_invoice and the plain-hourly recalculate endpoint below."""
+    if invoice.fixed_fee_amount is not None:
+        invoice.subtotal = float(invoice.fixed_fee_amount)
+        invoice.discount = 0
+        invoice.total = float(invoice.fixed_fee_amount)
+    else:
+        subtotal = sum(float(ln.amount) for ln in invoice.lines)
+        total_discount = sum(
+            (float(ln.amount) * float(ln.discount_value) / 100)
+            if ln.discount_type == "percent"
+            else float(ln.discount_value)
+            for ln in invoice.lines
+        )
+        invoice.subtotal = subtotal
+        invoice.discount = total_discount
+        invoice.total = subtotal - total_discount
+
+
 def _recalculate_managed_services_amount(invoice_id: str, db: Session) -> None:
     """Amount to Bill = every role's billed hours x rate (minimums applied per
     week/month/period) plus the additional-hours fees already on the invoice."""
@@ -544,6 +569,72 @@ def recalculate_managed_services(
     return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
 
 
+@invoice_router.post("/{invoice_id}/recalculate", response_model=InvoiceEditDataOut,
+                      dependencies=[Depends(require_section_edit('invoices'))])
+def recalculate_invoice(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Pull current ProjectRole rates and linked TimeEntry hours into a draft
+    invoice's lines — the ordinary-hourly-invoice equivalent of the Managed
+    Services recalculate action above (that one re-derives a single fixed fee
+    total; this one refreshes each line's rate/hours individually).
+
+    Only refreshes TimeEntry rows already linked to this invoice via
+    InvoiceTimeEntry — it does not discover and link brand-new unlinked
+    entries for the period, to avoid any double-billing risk. A line that
+    already has saved weekly detail (InvoiceLineWeek) keeps its hours as
+    managed by the Time Detail panel; only its rate refreshes.
+    """
+    invoice = get_invoice(db, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
+    if invoice.status != "draft":
+        raise HTTPException(status_code=400, detail="Only draft invoices can be recalculated")
+    if invoice.fixed_fee_amount is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Fixed-fee invoices use the Managed Services recalculate action instead",
+        )
+
+    lines = db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).all()
+    role_ids = {ln.role_id for ln in lines if ln.role_id}
+    rate_by_role_id = dict(
+        db.query(ProjectRole.id, ProjectRole.hourly_rate_usd).filter(ProjectRole.id.in_(role_ids)).all()
+    ) if role_ids else {}
+
+    hours_by_user = dict(
+        db.query(TimeEntry.user_id, func.coalesce(func.sum(TimeEntry.hours), 0))
+        .join(InvoiceTimeEntry, InvoiceTimeEntry.time_entry_id == TimeEntry.id)
+        .filter(InvoiceTimeEntry.invoice_id == invoice_id)
+        .group_by(TimeEntry.user_id)
+        .all()
+    )
+
+    line_ids = [ln.id for ln in lines]
+    lines_with_weeks = {
+        row[0] for row in db.query(InvoiceLineWeek.invoice_line_id)
+        .filter(InvoiceLineWeek.invoice_line_id.in_(line_ids)).distinct().all()
+    } if line_ids else set()
+
+    for line in lines:
+        if line.fee_period:
+            continue  # fixed-fee line within an otherwise-hourly invoice — amount IS the fee, not hours x rate
+        if line.role_id and line.role_id in rate_by_role_id:
+            line.rate_snapshot = rate_by_role_id[line.role_id]
+        if line.id not in lines_with_weeks and line.user_id in hours_by_user:
+            line.hours = hours_by_user[line.user_id]
+        line.amount = float(line.hours) * float(line.rate_snapshot)
+
+    db.flush()
+    db.refresh(invoice)
+    _recalculate_invoice_totals(invoice)
+    db.commit()
+    return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
+
+
 @invoice_router.patch("/{invoice_id}", response_model=InvoiceOut, dependencies=[Depends(require_section_edit('invoices'))])
 def patch_invoice(
     invoice_id: str,
@@ -580,13 +671,36 @@ def patch_invoice(
         "period_start", "period_end", "notes", "signatory_name", "signatory_title",
         "signatory_employee_id", "owner_company",
         "bill_to_contact", "bill_to_title", "bill_to_company",
-        "bill_to_address", "bill_to_city_state_zip",
+        "bill_to_street_address_1", "bill_to_street_address_2",
+        "bill_to_city", "bill_to_state", "bill_to_zip",
         "bank_name", "bank_aba", "bank_account_name", "bank_account_number",
     ]
     for field in simple_fields:
         value = getattr(patch_in, field)
         if value is not None:
             setattr(invoice, field, value)
+
+    # Bill To fields mirror Client's own columns 1:1 (see models/invoice.py) —
+    # editing one here always writes through to the shared Client record too,
+    # so this panel and the Client edit form never drift apart.
+    _BILL_TO_TO_CLIENT_FIELD = {
+        "bill_to_contact": "manager_name",
+        "bill_to_title": "job_title",
+        "bill_to_company": "name",
+        "bill_to_street_address_1": "street_address_1",
+        "bill_to_street_address_2": "street_address_2",
+        "bill_to_city": "city",
+        "bill_to_state": "state",
+        "bill_to_zip": "zip",
+    }
+    if any(getattr(patch_in, f) is not None for f in _BILL_TO_TO_CLIENT_FIELD):
+        project = db.query(Project).filter(Project.id == invoice.project_id).first()
+        client = db.query(Client).filter(Client.id == project.client_id).first() if project else None
+        if client:
+            for bill_to_field, client_field in _BILL_TO_TO_CLIENT_FIELD.items():
+                value = getattr(patch_in, bill_to_field)
+                if value is not None:
+                    setattr(client, client_field, value)
 
     # Update lines
     if patch_in.lines:
@@ -667,21 +781,7 @@ def patch_invoice(
     # hours-based line amounts (always 0 for fixed-fee lines) are ignored.
     db.flush()
     db.refresh(invoice)
-    if invoice.fixed_fee_amount is not None:
-        invoice.subtotal = float(invoice.fixed_fee_amount)
-        invoice.discount = 0
-        invoice.total = float(invoice.fixed_fee_amount)
-    else:
-        subtotal = sum(float(ln.amount) for ln in invoice.lines)
-        total_discount = sum(
-            (float(ln.amount) * float(ln.discount_value) / 100)
-            if ln.discount_type == "percent"
-            else float(ln.discount_value)
-            for ln in invoice.lines
-        )
-        invoice.subtotal = subtotal
-        invoice.discount = total_discount
-        invoice.total = subtotal - total_discount
+    _recalculate_invoice_totals(invoice)
 
     # Handle expenses (upsert)
     if patch_in.expenses is not None:

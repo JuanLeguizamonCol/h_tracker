@@ -65,8 +65,11 @@ class InvoiceOut(BaseModel):
     bill_to_contact: Optional[str] = None
     bill_to_title: Optional[str] = None
     bill_to_company: Optional[str] = None
-    bill_to_address: Optional[str] = None
-    bill_to_city_state_zip: Optional[str] = None
+    bill_to_street_address_1: Optional[str] = None
+    bill_to_street_address_2: Optional[str] = None
+    bill_to_city: Optional[str] = None
+    bill_to_state: Optional[str] = None
+    bill_to_zip: Optional[str] = None
     bank_name: Optional[str] = None
     bank_aba: Optional[str] = None
     bank_account_name: Optional[str] = None
@@ -249,13 +252,16 @@ class InvoicePatch(BaseModel):
     signatory_title: Optional[str] = None
     signatory_employee_id: Optional[str] = None
     owner_company: Optional[str] = None
-    # Per-invoice "Bill To" overrides — empty string clears back to the
-    # client's own field, None leaves it untouched.
+    # "Bill To" fields — editing these also writes through to the Client
+    # record (see patch_invoice). None leaves a field untouched.
     bill_to_contact: Optional[str] = None
     bill_to_title: Optional[str] = None
     bill_to_company: Optional[str] = None
-    bill_to_address: Optional[str] = None
-    bill_to_city_state_zip: Optional[str] = None
+    bill_to_street_address_1: Optional[str] = None
+    bill_to_street_address_2: Optional[str] = None
+    bill_to_city: Optional[str] = None
+    bill_to_state: Optional[str] = None
+    bill_to_zip: Optional[str] = None
     bank_name: Optional[str] = None
     bank_aba: Optional[str] = None
     bank_account_name: Optional[str] = None

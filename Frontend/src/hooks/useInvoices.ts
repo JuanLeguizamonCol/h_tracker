@@ -157,3 +157,17 @@ export function useUpdateManagedServicesMinimums() {
     },
   });
 }
+
+/** Draft, ordinary-hourly invoices only — pulls current ProjectRole rates and
+ * linked TimeEntry hours into the invoice's lines. See
+ * Backend/routers/invoice.py::recalculate_invoice. */
+export function useRecalculateInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<InvoiceEditData>(`/invoices/${id}/recalculate`, {}),
+    onSuccess: (data, id) => {
+      queryClient.setQueryData(['invoice-edit-data', id], data);
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    },
+  });
+}
