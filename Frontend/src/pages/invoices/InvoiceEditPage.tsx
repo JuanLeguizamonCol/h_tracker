@@ -260,11 +260,18 @@ export default function InvoiceEditPage() {
   // Snapshot of lines/time-detail before a save attempt — used for optimistic-revert on error
   const saveSnapshot = useRef<{ lines: LocalLine[]; timeDetailRows: LocalTimeDetailRow[] }>({ lines: [], timeDetailRows: [] });
 
-  // Eligible signatories: any employee who's uploaded their own signature
-  // (self-service, admin-only — see Backend/routers/profile.py) rather than
-  // the old hardcoded per-company list.
+  // Eligible signatories: every active employee, not the old hardcoded
+  // per-company list of 4-5 names. Whoever's picked gets their uploaded
+  // signature image on the PDF if they have one (self-service, admin-only —
+  // see Backend/routers/profile.py); shown first and flagged, since most
+  // employees won't have uploaded one yet.
   const { data: allEmployees = [] } = useEmployees();
-  const signatories = useMemo(() => allEmployees.filter(e => !!e.signature_url), [allEmployees]);
+  const signatories = useMemo(
+    () => allEmployees
+      .filter(e => e.is_active)
+      .sort((a, b) => (b.signature_url ? 1 : 0) - (a.signature_url ? 1 : 0) || a.name.localeCompare(b.name)),
+    [allEmployees]
+  );
 
   // Expensify panel state
   const [expensifyOpen, setExpensifyOpen] = useState(false);
@@ -936,7 +943,9 @@ export default function InvoiceEditPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {signatories.map(s => (
-                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}{!s.signature_url && <span className="text-muted-foreground"> (no signature on file)</span>}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1293,11 +1302,18 @@ export default function InvoiceEditPage() {
                           return (
                             <TableRow key={line.id}>
                               <TableCell>
-                                <div className="font-medium text-sm">{line.employee_name}</div>
-                                {line.title && (
-                                  <div className="text-xs text-muted-foreground">{line.title}</div>
-                                )}
-                                <Badge variant="outline" className="text-xs mt-1 capitalize">{line.role || 'employee'}</Badge>
+                                <div className="flex items-start gap-1.5">
+                                  <div>
+                                    <div className="font-medium text-sm">{line.employee_name}</div>
+                                    {line.title && (
+                                      <div className="text-xs text-muted-foreground">{line.title}</div>
+                                    )}
+                                    <Badge variant="outline" className="text-xs mt-1 capitalize">{line.role || 'employee'}</Badge>
+                                  </div>
+                                  {isAdmin && line.user_id && data.project && (
+                                    <LineRoleRateEditor projectId={data.project.id} userId={line.user_id} />
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex flex-col items-end gap-0.5">
@@ -1422,9 +1438,6 @@ export default function InvoiceEditPage() {
                                           }}
                                           className="w-20 h-7 text-right text-sm"
                                         />
-                                        {isAdmin && line.user_id && data.project && (
-                                          <LineRoleRateEditor projectId={data.project.id} userId={line.user_id} />
-                                        )}
                                       </div>
                                       {line.role_id && line.project_role_rate === 0 && line._rate > 0 && (
                                         <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
