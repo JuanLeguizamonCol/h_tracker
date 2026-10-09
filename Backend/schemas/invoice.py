@@ -202,6 +202,8 @@ class InvoiceLinePatch(BaseModel):
     discount_value: Optional[float] = None
     # Only honoured on fixed-fee lines (whose amount is the fee, not hours x rate).
     amount: Optional[float] = None
+    # Reassigns which ProjectRole this line was billed at — see patch_invoice.
+    role_id: Optional[str] = None
 
 
 class InvoiceExpensePatch(BaseModel):

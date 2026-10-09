@@ -116,15 +116,25 @@ function computeLineTotals(line: LocalLine) {
   return { subtotal, discountDollars, discountHours, total };
 }
 
-// Admin-only quick-edit, opened from a line row: change the role's hourly
-// rate (project-wide, PUT /project-roles/{id}) and/or which ProjectRole this
-// employee is assigned to on the project going forward (PUT
-// /employee-projects/{id}) — without leaving the invoice to go to Staffing /
-// Project Roles. Neither action touches this already-created line's own
-// role_id/rate_snapshot — use the Recalculate button for that.
+// Admin-only quick-edit, opened from a line row: change which ProjectRole
+// this employee is assigned to on the project (PUT /employee-projects/{id},
+// creating the assignment if none exists yet), and — via the Apply button —
+// push that same role (and its rate) onto THIS invoice's line too, so the
+// change is visible immediately instead of only affecting future invoices.
+// The rate field below is a separate, standalone action: it only edits the
+// role's project-wide rate (PUT /project-roles/{id}), for fixing a rate
+// without reassigning anyone.
 const CREATE_ROLE_VALUE = '__create_new_role__';
 
-function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: string }) {
+function LineRoleRateEditor({
+  projectId, userId, onApplyToLine,
+}: {
+  projectId: string;
+  userId: string;
+  // Reflects the new role/rate on this invoice line immediately (local
+  // state) and persists it — called after the role is applied below.
+  onApplyToLine: (role: { id: string; name: string; hourly_rate_usd: number }) => void;
+}) {
   const [open, setOpen] = useState(false);
   const { data: projectRoles = [] } = useProjectRoles(open ? projectId : undefined);
   const { data: assignments, isLoading: assignmentsLoading } = useAssignedProjectsWithDetails(open ? userId : undefined);
@@ -135,30 +145,36 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
   const createRole = useCreateProjectRole();
   const [rateDraft, setRateDraft] = useState('');
   const [roleIdDraft, setRoleIdDraft] = useState('');
+  const [isApplying, setIsApplying] = useState(false);
   const [isCreatingRole, setIsCreatingRole] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleRate, setNewRoleRate] = useState('');
 
   const selectedRole = projectRoles.find(r => r.id === roleIdDraft);
+  const hasChanged = !!roleIdDraft && roleIdDraft !== (assignment?.role_id || '');
 
-  const assignRole = async (roleId: string) => {
-    setRoleIdDraft(roleId);
-    if (assignmentsLoading) {
-      toast.error('Still loading — try again in a moment.');
-      return;
-    }
+  const applyRole = async (role: { id: string; name: string; hourly_rate_usd: number }) => {
+    setIsApplying(true);
     try {
+      if (assignmentsLoading) {
+        toast.error('Still loading — try again in a moment.');
+        return;
+      }
       if (assignment) {
-        await updateAssignment.mutateAsync({ id: assignment.id, role_id: roleId });
+        await updateAssignment.mutateAsync({ id: assignment.id, role_id: role.id });
       } else {
         // No existing Staffing row for this person on this project (e.g. they
         // only logged hours without being formally assigned) — create one
         // instead of silently doing nothing.
-        await createAssignment.mutateAsync({ user_id: userId, project_id: projectId, role_id: roleId });
+        await createAssignment.mutateAsync({ user_id: userId, project_id: projectId, role_id: role.id });
       }
-      toast.success("Employee's project role updated.");
+      onApplyToLine(role);
+      toast.success(`Role updated to "${role.name}" — on Staffing and this invoice.`);
+      setOpen(false);
     } catch {
-      toast.error('Failed to update role assignment.');
+      toast.error('Failed to update role.');
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -174,8 +190,8 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
       setIsCreatingRole(false);
       setNewRoleName('');
       setNewRoleRate('');
-      await assignRole(role.id);
-      toast.success(`Role "${name}" created and assigned.`);
+      setRoleIdDraft(role.id);
+      await applyRole(role);
     } catch {
       toast.error('Failed to create role.');
     }
@@ -205,7 +221,7 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
                 setIsCreatingRole(true);
                 return;
               }
-              assignRole(id);
+              setRoleIdDraft(id);
             }}
           >
             <SelectTrigger className="h-8">
@@ -220,8 +236,20 @@ function LineRoleRateEditor({ projectId, userId }: { projectId: string; userId: 
               </SelectItem>
             </SelectContent>
           </Select>
+          {hasChanged && !isCreatingRole && (
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 w-full text-xs"
+              disabled={isApplying || !selectedRole}
+              onClick={() => selectedRole && applyRole(selectedRole)}
+            >
+              {isApplying && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+              Apply role change
+            </Button>
+          )}
           <p className="text-xs text-muted-foreground">
-            Changes their role on this project going forward — doesn't change this line.
+            Updates their Staffing assignment and this invoice line's rate immediately.
           </p>
         </div>
         {isCreatingRole && (
@@ -486,6 +514,28 @@ export default function InvoiceEditPage() {
     setIsDirty(true);
     setLines(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
   }, []);
+
+  // Called from LineRoleRateEditor once the employee's Staffing assignment is
+  // updated — reflects the same role/rate on this invoice line right away
+  // (optimistic local update) and persists it, instead of only taking effect
+  // on a future invoice.
+  const handleApplyRoleToLine = useCallback(async (
+    lineId: string,
+    role: { id: string; name: string; hourly_rate_usd: number },
+  ) => {
+    setLines(prev => prev.map(l => l.id === lineId
+      ? { ...l, role_id: role.id, title: role.name, _rate: role.hourly_rate_usd, _rateInput: String(role.hourly_rate_usd) }
+      : l));
+    if (!invoiceId) return;
+    try {
+      await patchInvoice.mutateAsync({
+        id: invoiceId,
+        patch: { lines: [{ id: lineId, role_id: role.id, rate_snapshot: role.hourly_rate_usd }] },
+      });
+    } catch {
+      toast.error("Role was updated in Staffing, but saving it to this invoice line failed — try Save.");
+    }
+  }, [invoiceId, patchInvoice]);
 
   // A line's hours/discount are now just the sum of its Time Detail weeks
   // (see updateTimeDetailRow below) — this keeps the Professionals table's
@@ -1441,7 +1491,11 @@ export default function InvoiceEditPage() {
                                     <Badge variant="outline" className="text-xs mt-1 capitalize">{line.role || 'employee'}</Badge>
                                   </div>
                                   {isAdmin && line.user_id && data.project && (
-                                    <LineRoleRateEditor projectId={data.project.id} userId={line.user_id} />
+                                    <LineRoleRateEditor
+                                      projectId={data.project.id}
+                                      userId={line.user_id}
+                                      onApplyToLine={role => handleApplyRoleToLine(line.id, role)}
+                                    />
                                   )}
                                 </div>
                               </TableCell>

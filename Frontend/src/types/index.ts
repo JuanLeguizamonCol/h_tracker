@@ -516,6 +516,8 @@ export interface InvoiceLinePatch {
   discount_value?: number;
   /** Only honoured on fixed-fee lines. */
   amount?: number;
+  /** Reassigns which ProjectRole this line was billed at. */
+  role_id?: string;
 }
 
 export interface TimeDetailWeekPatch {

@@ -721,6 +721,16 @@ def patch_invoice(
                 line.discount_type = "amount"
                 line.discount_value = 0
             elif line:
+                if line_patch.role_id is not None and line_patch.role_id != line.role_id:
+                    new_role = db.query(ProjectRole).filter(ProjectRole.id == line_patch.role_id).first()
+                    if not new_role:
+                        raise HTTPException(status_code=400, detail="Role not found")
+                    line.role_id = new_role.id
+                    line.role_name = new_role.name
+                    # Rides along with the role unless this same patch also
+                    # specifies an explicit rate (handled below).
+                    if line_patch.rate_snapshot is None:
+                        line.rate_snapshot = new_role.hourly_rate_usd
                 if line_patch.hours is not None:
                     line.hours = line_patch.hours
                 if line_patch.rate_snapshot is not None:
