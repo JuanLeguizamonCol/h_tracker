@@ -2,6 +2,16 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Literal, Optional, List
 from datetime import date, datetime
+# Pydantic v2 resolves `Optional[date]` by looking up `date` in the class's
+# OWN namespace first — which, for a field literally named `date` with a
+# default (e.g. `date: Optional[date] = None`), already holds that field's
+# default value by the time the annotation is evaluated. `date` then
+# resolves to `None`'s type instead of the real `datetime.date`, and the
+# field silently accepts nothing but null (422 "Input should be None" on any
+# real date). A required `date: date` field has no default in the class
+# namespace yet, so it's unaffected. Only Optional/defaulted fields named
+# `date` need this alias in their annotation instead.
+from datetime import date as DateValue
 
 from schemas.projects import FixedFeePeriod
 
@@ -209,7 +219,7 @@ class InvoiceLinePatch(BaseModel):
 class InvoiceExpensePatch(BaseModel):
     id: Optional[str] = None  # null = create new
     invoice_id: Optional[str] = None
-    date: Optional[date] = None
+    date: Optional[DateValue] = None
     professional: Optional[str] = None
     vendor: Optional[str] = None
     description: Optional[str] = None

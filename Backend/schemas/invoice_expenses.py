@@ -2,6 +2,14 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import date, datetime
+# See schemas/invoice.py's DateValue comment: Pydantic v2 resolves
+# `Optional[date]` against the class's OWN namespace first, which for a
+# field literally named `date` with a default already holds that field's
+# default (None) by the time the annotation is evaluated — so it silently
+# accepts nothing but null. Only Optional/defaulted fields named `date` need
+# this alias; the required `date: date` fields above are unaffected (no
+# default in the class namespace to shadow the import).
+from datetime import date as DateValue
 
 EXPENSE_CATEGORIES = ["Airfare", "Hotel", "Parking / Transportation", "Meals", "Other"]
 
@@ -24,7 +32,7 @@ class InvoiceExpenseCreate(InvoiceExpenseBase):
 
 
 class InvoiceExpenseUpdate(BaseModel):
-    date: Optional[date] = None
+    date: Optional[DateValue] = None
     professional: Optional[str] = None
     vendor: Optional[str] = None
     description: Optional[str] = None

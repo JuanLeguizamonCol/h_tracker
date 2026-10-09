@@ -2,6 +2,13 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import date, datetime
+# See schemas/invoice.py's DateValue comment: Pydantic v2 resolves
+# `Optional[date]` against the class's OWN namespace first, which for a
+# field literally named `date` with a default already holds that field's
+# default (None) by the time the annotation is evaluated — so it silently
+# accepts nothing but null. Only Optional/defaulted fields named `date` need
+# this alias; TimeEntryBase.date (required, no default) is unaffected.
+from datetime import date as DateValue
 
 # A single day's entry can't exceed 24 hours. Enforced on the input schemas only
 # (not on Base/Out) so reading any pre-existing out-of-range rows still works.
@@ -30,7 +37,7 @@ class TimeEntryUpdate(BaseModel):
     user_id: Optional[str] = None
     project_id: Optional[str] = None
     role_id: Optional[str] = None
-    date: Optional[date] = None
+    date: Optional[DateValue] = None
     hours: Optional[float] = Field(None, ge=0, le=MAX_HOURS_PER_DAY)
     billable: Optional[bool] = None
     notes: Optional[str] = None
