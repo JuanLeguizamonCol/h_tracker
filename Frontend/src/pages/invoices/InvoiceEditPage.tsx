@@ -127,10 +127,17 @@ function computeLineTotals(line: LocalLine) {
 const CREATE_ROLE_VALUE = '__create_new_role__';
 
 function LineRoleRateEditor({
-  projectId, userId, onApplyToLine,
+  projectId, userId, currentLineRoleId, currentLineRate, onApplyToLine,
 }: {
   projectId: string;
   userId: string;
+  // This invoice line's own role/rate right now — compared against the
+  // selected role so "Apply" shows up whenever the LINE is out of sync, not
+  // just when it differs from the Staffing assignment (e.g. the assignment
+  // already has the right role, but this line was created before that, or
+  // some other legacy mismatch, and still needs the sync).
+  currentLineRoleId: string | null;
+  currentLineRate: number;
   // Reflects the new role/rate on this invoice line immediately (local
   // state) and persists it — called after the role is applied below.
   onApplyToLine: (role: { id: string; name: string; hourly_rate_usd: number }) => void;
@@ -151,7 +158,15 @@ function LineRoleRateEditor({
   const [newRoleRate, setNewRoleRate] = useState('');
 
   const selectedRole = projectRoles.find(r => r.id === roleIdDraft);
-  const hasChanged = !!roleIdDraft && roleIdDraft !== (assignment?.role_id || '');
+  // Needs applying if the selected role differs from the Staffing assignment
+  // OR from this line's own role/rate — the two can disagree (e.g. Staffing
+  // already has the right role, but the line predates that and is still
+  // sitting at $0 or a stale rate).
+  const needsApply = !!selectedRole && (
+    selectedRole.id !== (assignment?.role_id || '')
+    || selectedRole.id !== currentLineRoleId
+    || Number(selectedRole.hourly_rate_usd) !== currentLineRate
+  );
 
   const applyRole = async (role: { id: string; name: string; hourly_rate_usd: number }) => {
     setIsApplying(true);
@@ -236,7 +251,7 @@ function LineRoleRateEditor({
               </SelectItem>
             </SelectContent>
           </Select>
-          {hasChanged && !isCreatingRole && (
+          {needsApply && !isCreatingRole && (
             <Button
               type="button"
               size="sm"
@@ -1494,6 +1509,8 @@ export default function InvoiceEditPage() {
                                     <LineRoleRateEditor
                                       projectId={data.project.id}
                                       userId={line.user_id}
+                                      currentLineRoleId={line.role_id}
+                                      currentLineRate={line._rate}
                                       onApplyToLine={role => handleApplyRoleToLine(line.id, role)}
                                     />
                                   )}
