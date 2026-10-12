@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UserCircle, Search, MoreHorizontal, Edit, Shield, Loader2, FolderKanban, UserPlus, Eye, Lock, Trash2 } from 'lucide-react';
-import { useEmployees, useCreateEmployee, useDeleteEmployee } from '@/hooks/useEmployees';
+import { UserCircle, Search, MoreHorizontal, Edit, Shield, Loader2, FolderKanban, UserPlus, Eye, Lock, Trash2, UserX, UserCheck } from 'lucide-react';
+import { useEmployees, useCreateEmployee, useDeleteEmployee, useUpdateEmployee } from '@/hooks/useEmployees';
 import { useAssignedProjects } from '@/hooks/useAssignedProjects';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppRole, Employee } from '@/types';
@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -130,8 +131,13 @@ export default function Employees() {
   const updateRole = useUpdateRole();
   const createEmployee = useCreateEmployee();
   const deleteEmployee = useDeleteEmployee();
+  const updateEmployee = useUpdateEmployee();
 
   const [searchTerm, setSearchTerm] = useState('');
+  // Departed employees are kept (not deleted) so their hours/invoices/history
+  // stay intact, but they shouldn't clutter the roster or be pickable anywhere
+  // going forward — hidden by default, one checkbox away if you need to find one.
+  const [showInactive, setShowInactive] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickName, setQuickName] = useState('');
   const [quickEmail, setQuickEmail] = useState('');
@@ -140,13 +146,27 @@ export default function Employees() {
     { emp: Employee; currentRole: AppRole; newRole: AppRole } | null
   >(null);
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<Employee | null>(null);
 
   const getRole = (employeeId: string): AppRole => roles.find(r => r.user_id === employeeId)?.role || 'employee';
-  const adminCount = roles.filter(r => r.role === 'admin').length;
+  const activeEmployees = employees.filter(e => e.is_active);
+  const adminCount = roles.filter(r => r.role === 'admin' && activeEmployees.some(e => e.id === r.user_id)).length;
+  const inactiveCount = employees.length - activeEmployees.length;
 
-  const filteredEmployees = employees.filter(
+  const filteredEmployees = (showInactive ? employees : activeEmployees).filter(
     emp => emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || emp.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleToggleActive = async (emp: Employee, nextActive: boolean) => {
+    try {
+      await updateEmployee.mutateAsync({ id: emp.id, updates: { is_active: nextActive } });
+      toast.success(nextActive ? `${emp.name} is active again.` : `${emp.name} was deactivated — hidden from active lists everywhere, history kept intact.`);
+    } catch {
+      toast.error('Failed to update employee. Please try again.');
+    } finally {
+      setDeactivateTarget(null);
+    }
+  };
 
   const getAssignedProjectsCount = (employeeId: string): number => allAssignments.filter(a => a.user_id === employeeId).length;
 
@@ -234,12 +254,12 @@ export default function Employees() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <Card className="stat-card">
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10"><UserCircle className="h-6 w-6 text-primary" /></div>
-              <div><p className="text-sm text-muted-foreground">Total Employees</p><p className="text-2xl font-bold text-foreground">{employees.length}</p></div>
+              <div><p className="text-sm text-muted-foreground">Active Employees</p><p className="text-2xl font-bold text-foreground">{activeEmployees.length}</p></div>
             </div>
           </CardContent>
         </Card>
@@ -251,12 +271,24 @@ export default function Employees() {
             </div>
           </CardContent>
         </Card>
+        <Card className="stat-card">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted"><UserX className="h-6 w-6 text-muted-foreground" /></div>
+              <div><p className="text-sm text-muted-foreground">Inactive</p><p className="text-2xl font-bold text-foreground">{inactiveCount}</p></div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card className="card-elevated">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Team Members</CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap cursor-pointer">
+              <Checkbox checked={showInactive} onCheckedChange={v => setShowInactive(!!v)} />
+              Show inactive ({inactiveCount})
+            </label>
             <div className="relative w-64">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input placeholder="Search employees..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
@@ -289,7 +321,7 @@ export default function Employees() {
                 return (
                   <TableRow
                     key={emp.id}
-                    className="cursor-pointer"
+                    className={`cursor-pointer ${!emp.is_active ? 'opacity-60' : ''}`}
                     onClick={() => navigate(`/employees/${emp.id}`)}
                   >
                     <TableCell>
@@ -298,6 +330,7 @@ export default function Employees() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-medium">{emp.name}</span>
+                            {!emp.is_active && <Badge variant="secondary" className="text-xs">Inactive</Badge>}
                           </div>
                           {emp.title && <p className="text-xs text-muted-foreground">{emp.title}</p>}
                         </div>
@@ -328,6 +361,16 @@ export default function Employees() {
                           {canEditEmployees && (
                             <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}/edit`)}>
                               <Edit className="h-4 w-4 mr-2" />Edit
+                            </DropdownMenuItem>
+                          )}
+                          {canEditEmployees && emp.is_active && !isCurrentUser && !isProtected && !isLastAdmin && (
+                            <DropdownMenuItem onClick={() => setDeactivateTarget(emp)}>
+                              <UserX className="h-4 w-4 mr-2" />Deactivate
+                            </DropdownMenuItem>
+                          )}
+                          {canEditEmployees && !emp.is_active && (
+                            <DropdownMenuItem onClick={() => handleToggleActive(emp, true)}>
+                              <UserCheck className="h-4 w-4 mr-2" />Reactivate
                             </DropdownMenuItem>
                           )}
                           {canEditEmployees && !isCurrentUser && !isProtected && !isLastAdmin && (
@@ -452,6 +495,30 @@ export default function Employees() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleteEmployee.isPending ? 'Removing…' : 'Remove'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Deactivate Confirmation Dialog */}
+      <AlertDialog open={!!deactivateTarget} onOpenChange={open => { if (!open) setDeactivateTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate employee?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{deactivateTarget?.name}</strong> will be hidden from active employee lists,
+              project/role assignment pickers, and approver dropdowns everywhere in the app — their
+              past hours, invoices, and history stay intact and keep showing up in Reports exactly as
+              before. You can reactivate them from here any time.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deactivateTarget && handleToggleActive(deactivateTarget, false)}
+              disabled={updateEmployee.isPending}
+            >
+              {updateEmployee.isPending ? 'Deactivating…' : 'Deactivate'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

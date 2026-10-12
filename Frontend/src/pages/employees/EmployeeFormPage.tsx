@@ -323,7 +323,12 @@ export default function EmployeeFormPage() {
     return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
 
-  const otherEmployees = allEmployees.filter(e => e.id !== employeeId);
+  // Active-only for picking a NEW supervisor, but if this person's current
+  // supervisor has since gone inactive, keep showing them so the field
+  // doesn't appear to silently clear on an unrelated edit.
+  const otherEmployees = allEmployees.filter(e =>
+    e.id !== employeeId && (e.is_active || e.id === form.supervisor_id)
+  );
 
   return (
     <div className="space-y-6">

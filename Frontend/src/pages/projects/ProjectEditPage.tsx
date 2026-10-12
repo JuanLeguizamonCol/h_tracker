@@ -151,13 +151,23 @@ export default function ProjectEditPage() {
     setAreaCategory(area);
     setBusinessUnit(prev => nextBusinessUnitForArea(area, prev));
   };
-  // Owner must be able to invoice → Admins only. Manager may be any Manager or Admin.
-  const ownerOptions = adminEmployees.map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
-  const managerOptions = [...managerEmployees, ...adminEmployees]
+  // Owner must be able to invoice → Admins only. Manager may be any Manager or
+  // Admin. Both lists are active-only (picking someone departed going forward
+  // doesn't make sense) — but if this project's CURRENT owner/manager has
+  // since gone inactive, keep showing them here so editing the project
+  // doesn't make their name silently vanish from the field.
+  const currentOwner = allEmployees.find(e => e.id === ownerId);
+  const currentManager = allEmployees.find(e => e.id === managerId);
+  const ownerOptions = [...adminEmployees, ...(currentOwner && !adminEmployees.some(e => e.id === ownerId) ? [currentOwner] : [])]
+    .map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
+  const managerOptions = [
+    ...managerEmployees, ...adminEmployees,
+    ...(currentManager && ![...managerEmployees, ...adminEmployees].some(e => e.id === managerId) ? [currentManager] : []),
+  ]
     .filter((e, i, arr) => arr.findIndex(x => x.id === e.id) === i)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
-  const referralOptions = allEmployees.map(e => ({ id: e.id, label: e.name }));
+  const referralOptions = allEmployees.filter(e => e.is_active).map(e => ({ id: e.id, label: e.name }));
 
   return (
     <div className="space-y-6 pb-12 max-w-3xl mx-auto">

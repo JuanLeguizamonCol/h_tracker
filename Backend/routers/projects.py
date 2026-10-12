@@ -215,7 +215,10 @@ def get_assignable_employees(
         for a in db.query(EmployeeProject).filter(EmployeeProject.project_id == project_id).all()
     }
 
-    q = db.query(Employee)
+    # Only active employees are offered for new assignments — someone who's
+    # left shouldn't be pickable going forward (their past assignments/hours
+    # are untouched and still show wherever they already appear).
+    q = db.query(Employee).filter(Employee.is_active == True)  # noqa: E712
     if name:
         q = q.filter(Employee.name.ilike(f"%{name}%"))
     employees = q.order_by(Employee.name).all()

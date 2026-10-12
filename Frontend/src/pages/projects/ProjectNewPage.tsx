@@ -168,7 +168,7 @@ export default function ProjectNewPage() {
   const assignedIds = new Set(assignments.map(a => a.user_id));
 
   const filteredEmployees = allEmployees.filter(
-    e => !assignedIds.has(e.user_id) &&
+    e => e.is_active && !assignedIds.has(e.user_id) &&
       e.name.toLowerCase().includes(employeeSearch.toLowerCase())
   );
 
@@ -298,7 +298,7 @@ export default function ProjectNewPage() {
     .filter((e, i, arr) => arr.findIndex(x => x.id === e.id) === i)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(e => ({ id: e.id, label: e.name, sublabel: e.email }));
-  const referralOptions = allEmployees.map(e => ({ id: e.id, label: e.name }));
+  const referralOptions = allEmployees.filter(e => e.is_active).map(e => ({ id: e.id, label: e.name }));
 
   return (
     <div className="space-y-6 pb-12 max-w-3xl mx-auto">

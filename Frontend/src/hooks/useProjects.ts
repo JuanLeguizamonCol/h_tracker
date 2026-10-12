@@ -39,17 +39,19 @@ export function useProjectAssignments(projectId: string | undefined) {
   });
 }
 
+// Used to pick a project owner/manager or PTO approver — only active
+// employees should be selectable going forward.
 export function useAdminEmployees() {
   return useQuery({
     queryKey: ['employees', 'admin'],
-    queryFn: () => api.get<Employee[]>('/employees?user_role=admin'),
+    queryFn: () => api.get<Employee[]>('/employees?user_role=admin&active=true'),
   });
 }
 
 export function useManagerEmployees() {
   return useQuery({
     queryKey: ['employees', 'manager'],
-    queryFn: () => api.get<Employee[]>('/employees?user_role=manager'),
+    queryFn: () => api.get<Employee[]>('/employees?user_role=manager&active=true'),
   });
 }
 
