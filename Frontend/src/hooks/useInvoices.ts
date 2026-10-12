@@ -171,3 +171,19 @@ export function useRecalculateInvoice() {
     },
   });
 }
+
+/** Adds a line for an employee missed when the invoice was first built —
+ * finds their unbilled hours for this invoice's project/period and links
+ * them, even on an already-issued invoice. See
+ * Backend/routers/invoice.py::add_employee_to_invoice. */
+export function useAddEmployeeToInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, userId }: { id: string; userId: string }) =>
+      api.post<InvoiceEditData>(`/invoices/${id}/add-employee`, { user_id: userId }),
+    onSuccess: (data, { id }) => {
+      queryClient.setQueryData(['invoice-edit-data', id], data);
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    },
+  });
+}

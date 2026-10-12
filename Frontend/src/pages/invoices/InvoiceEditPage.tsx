@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Clock, FileDown, FileSpreadsheet, RefreshCw, ChevronDown, ChevronUp, RotateCcw, Pencil, Check, ChevronsUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums, useRecalculateInvoice } from '@/hooks/useInvoices';
+import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums, useRecalculateInvoice, useAddEmployeeToInvoice } from '@/hooks/useInvoices';
 import { useAuth } from '@/contexts/AuthContext';
 import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, TimeDetailWeekPatch, InvoiceTimeDetailRow, MinHoursBasis, MIN_HOURS_BASIS_LABELS, FIXED_FEE_PERIOD_LABELS, Employee } from '@/types';
 import { api } from '@/lib/api';
@@ -388,6 +388,48 @@ function SignatoryCombobox({
   );
 }
 
+// "Add Professional" — picks an employee not already on this invoice and
+// adds their unbilled hours for this invoice's project/period, even on an
+// already-issued invoice (see useAddEmployeeToInvoice). Lets you fix a
+// forgotten employee without deleting and recreating the whole invoice.
+function AddEmployeeCombobox({
+  candidates, disabled, onSelect,
+}: {
+  candidates: Employee[];
+  disabled?: boolean;
+  onSelect: (employee: Employee) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" size="sm" className="h-7 gap-1 text-xs" disabled={disabled}>
+          {disabled ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+          Add Professional
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search employees…" className="h-8" />
+          <CommandList>
+            <CommandEmpty>
+              {candidates.length === 0 ? 'Everyone active is already on this invoice.' : 'No employee found.'}
+            </CommandEmpty>
+            <CommandGroup>
+              {candidates.map(e => (
+                <CommandItem key={e.id} value={e.name} onSelect={() => { onSelect(e); setOpen(false); }}>
+                  {e.name}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function InvoiceEditPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const navigate = useNavigate();
@@ -419,6 +461,7 @@ export default function InvoiceEditPage() {
   const [msDraft, setMsDraft] = useState<Record<string, { min: string; basis: MinHoursBasis }>>({});
   const updateMinimums = useUpdateManagedServicesMinimums();
   const recalculateInvoice = useRecalculateInvoice();
+  const addEmployeeToInvoice = useAddEmployeeToInvoice();
   const [billToContact, setBillToContact] = useState('');
   const [billToTitle, setBillToTitle] = useState('');
   const [billToCompany, setBillToCompany] = useState('');
@@ -573,6 +616,19 @@ export default function InvoiceEditPage() {
       return next;
     });
   }, [syncLineFromWeeks]);
+
+  // Week rows are keyed by (line_id, week_start) — editing the date by hand
+  // (e.g. a client wants a specific week-of shown) must not collide with
+  // another row this professional already has.
+  const handleWeekStartChange = useCallback((row: LocalTimeDetailRow, newWeekStart: string) => {
+    if (!newWeekStart || newWeekStart === row.week_start) return;
+    const collides = timeDetailRows.some(r => r.line_id === row.line_id && r.week_start === newWeekStart);
+    if (collides) {
+      toast.error('This professional already has a row for that week — pick a different date.');
+      return;
+    }
+    updateTimeDetailRow(row.line_id, row.week_start, { week_start: newWeekStart });
+  }, [timeDetailRows, updateTimeDetailRow]);
 
   // "Reset to original hours" — scales that line's weeks back up/down
   // proportionally so their sum matches the originally-linked hours, keeping
@@ -785,6 +841,22 @@ export default function InvoiceEditPage() {
       setInitialized(false); // reconcile state from server response
     } catch {
       toast.error('Failed to recalculate invoice.');
+    }
+  };
+
+  const handleAddEmployee = async (userId: string) => {
+    if (!invoiceId) return;
+    try {
+      await addEmployeeToInvoice.mutateAsync({ id: invoiceId, userId });
+      toast.success('Employee added — their unbilled hours for this period are now on the invoice.');
+      setIsDirty(false);
+      setInitialized(false); // reconcile state from server response
+    } catch (err: any) {
+      toast.error(
+        err?.message?.includes('400')
+          ? "No unbilled hours found for them on this project in this invoice's period."
+          : 'Failed to add employee.',
+      );
     }
   };
 
@@ -1448,22 +1520,31 @@ export default function InvoiceEditPage() {
                   Managed Services — hours shown for reference only
                 </Badge>
               )}
-              {!isFlatBilling && status === 'draft' && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 gap-1 text-xs"
-                  disabled={recalculateInvoice.isPending}
-                  onClick={handleRecalculateInvoice}
-                  title="Pull current role rates and linked hours into this draft's lines"
-                >
-                  {recalculateInvoice.isPending
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : <RefreshCw className="h-3 w-3" />}
-                  Recalculate
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {!isFlatBilling && !['paid', 'cancelled', 'voided'].includes(status) && data.project && (
+                  <AddEmployeeCombobox
+                    candidates={allEmployees.filter(e => e.is_active && !lines.some(l => l.user_id === e.id))}
+                    disabled={addEmployeeToInvoice.isPending}
+                    onSelect={emp => handleAddEmployee(emp.id)}
+                  />
+                )}
+                {!isFlatBilling && status === 'draft' && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    disabled={recalculateInvoice.isPending}
+                    onClick={handleRecalculateInvoice}
+                    title="Pull current role rates and linked hours into this draft's lines"
+                  >
+                    {recalculateInvoice.isPending
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <RefreshCw className="h-3 w-3" />}
+                    Recalculate
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {Object.keys(groupedLines).length === 0 ? (
@@ -1853,10 +1934,17 @@ export default function InvoiceEditPage() {
                         const rate = lines.find(l => l.id === r.line_id)?._rate ?? r.hourly_rate;
                         const rowFlat = !!lines.find(l => l.id === r.line_id)?.fee_period;
                         const { subtotal, discountDollars, total } = weekRowTotals(r, rate);
-                        const [y, m, d] = r.week_start.split('-').map(Number);
                         return (
                           <TableRow key={`${r.line_id}-${r.week_start}`}>
-                            <TableCell className="tabular-nums">{`${m}/${d}/${String(y % 100).padStart(2, '0')}`}</TableCell>
+                            <TableCell className="tabular-nums">
+                              <Input
+                                type="date"
+                                value={r.week_start}
+                                onChange={e => handleWeekStartChange(r, e.target.value)}
+                                className="h-7 w-[9.5rem] text-sm"
+                                title="Weeks are Monday-aligned — a week spanning a month boundary legitimately starts the prior month. Edit here if the client needs a specific date shown instead."
+                              />
+                            </TableCell>
                             <TableCell>{r.employee_name}{r.title ? `, ${r.title}` : ''}</TableCell>
                             <TableCell className="text-right tabular-nums">{rowFlat ? 'Fixed' : `$${rate.toFixed(2)}`}</TableCell>
                             <TableCell className="text-right">

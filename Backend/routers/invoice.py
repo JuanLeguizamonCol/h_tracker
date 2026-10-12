@@ -18,7 +18,7 @@ from schemas.invoice import (
     InvoiceCreate, InvoiceUpdate, InvoiceOut,
     InvoiceEditDataOut, InvoiceEditClient, InvoiceEditProject, InvoiceEditLine, InvoiceEditExpense,
     InvoiceEditTimeDetail, InvoiceManagedServices,
-    InvoicePatch, ManagedServicesMinimumsUpdate, FixedFeePreviewOut,
+    InvoicePatch, ManagedServicesMinimumsUpdate, FixedFeePreviewOut, AddEmployeeToInvoiceBody,
 )
 from schemas.projects import FixedFeePeriod
 from services.fixed_fee_calc import compute_fixed_fee
@@ -33,6 +33,7 @@ from models.clients import Client
 from models.employees import Employee
 from models.user_roles import UserRole
 from models.invoice_time_entries import InvoiceTimeEntry
+from models.employee_projects import EmployeeProject
 from services.invoice_hours_on_hold import upsert_on_hold_entry, delete_on_hold_entry
 from services.invoice_time_detail import build_time_detail, week_start
 from models.invoice_line_weeks import InvoiceLineWeek
@@ -627,6 +628,97 @@ def recalculate_invoice(
         if line.id not in lines_with_weeks and line.user_id in hours_by_user:
             line.hours = hours_by_user[line.user_id]
         line.amount = float(line.hours) * float(line.rate_snapshot)
+
+    db.flush()
+    db.refresh(invoice)
+    _recalculate_invoice_totals(invoice)
+    db.commit()
+    return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
+
+
+@invoice_router.post("/{invoice_id}/add-employee", response_model=InvoiceEditDataOut,
+                      dependencies=[Depends(require_section_edit('invoices'))])
+def add_employee_to_invoice(
+    invoice_id: str,
+    body: AddEmployeeToInvoiceBody,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Add a line for an employee who was missed when this invoice was first
+    built — e.g. they logged their hours late. Finds their unbilled (unlinked)
+    TimeEntry rows for this invoice's project and period, links them, and
+    either folds them into their existing line (if they're already on this
+    invoice) or creates a new one. Works on an already-issued invoice, not
+    just drafts — that's the whole point (no more delete-and-recreate).
+    """
+    invoice = get_invoice(db, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
+    if invoice.status in ("paid", "cancelled", "voided"):
+        raise HTTPException(status_code=400, detail=f"Cannot add hours to a {invoice.status} invoice")
+    if invoice.fixed_fee_amount is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="This invoice bills a flat fee — add the employee from the project's roles/minimums instead",
+        )
+
+    employee = db.query(Employee).filter(Employee.id == body.user_id).first()
+    if not employee:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+
+    linked_ids = {
+        row[0] for row in db.query(InvoiceTimeEntry.time_entry_id).all()
+    }
+    entries_q = db.query(TimeEntry).filter(
+        TimeEntry.project_id == invoice.project_id,
+        TimeEntry.user_id == body.user_id,
+        TimeEntry.billable == True,  # noqa: E712
+        TimeEntry.status == "normal",
+    )
+    if invoice.period_start:
+        entries_q = entries_q.filter(TimeEntry.date >= invoice.period_start)
+    if invoice.period_end:
+        entries_q = entries_q.filter(TimeEntry.date <= invoice.period_end)
+    available = [e for e in entries_q.all() if e.id not in linked_ids]
+
+    if not available:
+        raise HTTPException(
+            status_code=400,
+            detail="No unbilled hours found for this employee on this project in the invoice's period.",
+        )
+
+    hours = sum(float(e.hours) for e in available)
+
+    assignment = db.query(EmployeeProject).filter(
+        EmployeeProject.project_id == invoice.project_id,
+        EmployeeProject.user_id == body.user_id,
+    ).first()
+    role = db.query(ProjectRole).filter(ProjectRole.id == assignment.role_id).first() if assignment and assignment.role_id else None
+    rate = float(role.hourly_rate_usd) if role else 0.0
+
+    existing_line = db.query(InvoiceLine).filter(
+        InvoiceLine.invoice_id == invoice_id,
+        InvoiceLine.user_id == body.user_id,
+    ).first()
+    if existing_line:
+        existing_line.hours = float(existing_line.hours) + hours
+        existing_line.amount = float(existing_line.hours) * float(existing_line.rate_snapshot)
+    else:
+        db.add(InvoiceLine(
+            id=str(uuid.uuid4()),
+            invoice_id=invoice_id,
+            user_id=body.user_id,
+            employee_name=employee.name,
+            role_name=role.name if role else None,
+            role_id=role.id if role else None,
+            hours=hours,
+            rate_snapshot=rate,
+            amount=hours * rate,
+        ))
+
+    for entry in available:
+        db.add(InvoiceTimeEntry(id=str(uuid.uuid4()), invoice_id=invoice_id, time_entry_id=entry.id))
 
     db.flush()
     db.refresh(invoice)

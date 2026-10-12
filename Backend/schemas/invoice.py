@@ -238,6 +238,10 @@ class TimeDetailWeekPatch(BaseModel):
     discount_value: float = 0
 
 
+class AddEmployeeToInvoiceBody(BaseModel):
+    user_id: str
+
+
 class OnHoldEntryPatch(BaseModel):
     line_id: str
     employee_name: str
