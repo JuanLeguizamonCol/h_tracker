@@ -470,6 +470,7 @@ export default function InvoiceEditPage() {
   const [billToCity, setBillToCity] = useState('');
   const [billToState, setBillToState] = useState('');
   const [billToZip, setBillToZip] = useState('');
+  const [hideDiscountColumn, setHideDiscountColumn] = useState(false);
   const [bankName, setBankName] = useState('');
   const [bankAba, setBankAba] = useState('');
   const [bankAccountName, setBankAccountName] = useState('');
@@ -559,6 +560,7 @@ export default function InvoiceEditPage() {
     setBillToCity(data.invoice.bill_to_city || billToDefaults.city);
     setBillToState(data.invoice.bill_to_state || billToDefaults.state);
     setBillToZip(data.invoice.bill_to_zip || billToDefaults.zip);
+    setHideDiscountColumn(!!(data.invoice as any).hide_discount_column);
     const defaultBank = getCompanyProfile(company).bank;
     setBankName(data.invoice.bank_name || defaultBank.bank_name);
     setBankAba(data.invoice.bank_aba || defaultBank.aba);
@@ -811,6 +813,7 @@ export default function InvoiceEditPage() {
           bill_to_city: billToCity || null,
           bill_to_state: billToState || null,
           bill_to_zip: billToZip || null,
+          hide_discount_column: hideDiscountColumn,
           bank_name: bankName || null,
           bank_aba: bankAba || null,
           bank_account_name: bankAccountName || null,
@@ -1520,7 +1523,14 @@ export default function InvoiceEditPage() {
                   Managed Services — hours shown for reference only
                 </Badge>
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap cursor-pointer">
+                  <Checkbox
+                    checked={hideDiscountColumn}
+                    onCheckedChange={v => { setHideDiscountColumn(!!v); setIsDirty(true); }}
+                  />
+                  Hide Discount column
+                </label>
                 {!isFlatBilling && !['paid', 'cancelled', 'voided'].includes(status) && data.project && (
                   <AddEmployeeCombobox
                     candidates={allEmployees.filter(e => e.is_active && !lines.some(l => l.user_id === e.id))}
@@ -1566,7 +1576,7 @@ export default function InvoiceEditPage() {
                             <>
                               <TableHead className="text-xs text-right w-28">Rate ($/hr)</TableHead>
                               <TableHead className="text-xs text-right w-28">Subtotal</TableHead>
-                              <TableHead className="text-xs w-56">Discount</TableHead>
+                              {!hideDiscountColumn && <TableHead className="text-xs w-56">Discount</TableHead>}
                               <TableHead className="text-xs text-right w-28">Total</TableHead>
                             </>
                           )}
@@ -1686,9 +1696,11 @@ export default function InvoiceEditPage() {
                                       )}
                                     </div>
                                   </TableCell>
-                                  <TableCell>
-                                    <span className="text-sm text-muted-foreground" title="Fixed fees take no discount.">—</span>
-                                  </TableCell>
+                                  {!hideDiscountColumn && (
+                                    <TableCell>
+                                      <span className="text-sm text-muted-foreground" title="Fixed fees take no discount.">—</span>
+                                    </TableCell>
+                                  )}
                                   <TableCell className="text-right font-semibold text-sm">
                                     ${total.toFixed(2)}
                                   </TableCell>
@@ -1731,18 +1743,20 @@ export default function InvoiceEditPage() {
                                   <TableCell className="text-right text-sm">
                                     ${subtotal.toFixed(2)}
                                   </TableCell>
-                                  <TableCell>
-                                    <div className="space-y-0.5">
-                                      <span className="text-sm tabular-nums" title="Sum of this professional's Time Detail discounts below — edit discounts there.">
-                                        {discountDollars > 0 ? `$${discountDollars.toFixed(2)}` : '—'}
-                                      </span>
-                                      {(discountDollars > 0) && (
-                                        <div className="text-xs text-muted-foreground">
-                                          {discountHours.toFixed(2)} hrs
-                                        </div>
-                                      )}
-                                    </div>
-                                  </TableCell>
+                                  {!hideDiscountColumn && (
+                                    <TableCell>
+                                      <div className="space-y-0.5">
+                                        <span className="text-sm tabular-nums" title="Sum of this professional's Time Detail discounts below — edit discounts there.">
+                                          {discountDollars > 0 ? `$${discountDollars.toFixed(2)}` : '—'}
+                                        </span>
+                                        {(discountDollars > 0) && (
+                                          <div className="text-xs text-muted-foreground">
+                                            {discountHours.toFixed(2)} hrs
+                                          </div>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                  )}
                                   <TableCell className="text-right font-semibold text-sm">
                                     ${total.toFixed(2)}
                                   </TableCell>
@@ -1925,7 +1939,7 @@ export default function InvoiceEditPage() {
                         <TableHead className="table-header text-right">Rate</TableHead>
                         <TableHead className="table-header text-right w-28">Hours</TableHead>
                         <TableHead className="table-header text-right">Subtotal</TableHead>
-                        {!isFlatBilling && <TableHead className="table-header w-56">Discount</TableHead>}
+                        {!isFlatBilling && !hideDiscountColumn && <TableHead className="table-header w-56">Discount</TableHead>}
                         <TableHead className="table-header text-right">Total</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1971,7 +1985,7 @@ export default function InvoiceEditPage() {
                               />
                             </TableCell>
                             <TableCell className="text-right tabular-nums">${subtotal.toFixed(2)}</TableCell>
-                            {!isFlatBilling && (
+                            {!isFlatBilling && !hideDiscountColumn && (
                               <TableCell>
                                 <div className="flex items-center gap-1">
                                   <Input
@@ -2022,7 +2036,7 @@ export default function InvoiceEditPage() {
                         <TableCell className="text-right tabular-nums">
                           ${timeDetailRows.reduce((s, r) => s + weekRowTotals(r, lines.find(l => l.id === r.line_id)?._rate ?? r.hourly_rate).subtotal, 0).toFixed(2)}
                         </TableCell>
-                        {!isFlatBilling && (
+                        {!isFlatBilling && !hideDiscountColumn && (
                           <TableCell className="text-right tabular-nums">
                             ${timeDetailRows.reduce((s, r) => s + weekRowTotals(r, lines.find(l => l.id === r.line_id)?._rate ?? r.hourly_rate).discountDollars, 0).toFixed(2)}
                           </TableCell>

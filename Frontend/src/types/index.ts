@@ -422,6 +422,7 @@ export interface Invoice {
   bank_aba?: string | null;
   bank_account_name?: string | null;
   bank_account_number?: string | null;
+  hide_discount_column?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -578,6 +579,7 @@ export interface InvoicePatch {
   bank_aba?: string | null;
   bank_account_name?: string | null;
   bank_account_number?: string | null;
+  hide_discount_column?: boolean;
   lines?: InvoiceLinePatch[];
   expenses?: InvoiceExpensePatch[];
   on_hold_entries?: OnHoldEntryPatch[];

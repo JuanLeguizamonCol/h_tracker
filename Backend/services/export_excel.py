@@ -101,6 +101,7 @@ def generate_invoice_xlsx(edit_data: dict) -> bytes:
     inv_label = f"INV-{inv_number}"
     status = invoice.get("status") or "draft"
     cap_amount = invoice.get("cap_amount")
+    hide_discount = bool(invoice.get("hide_discount_column"))
 
     wb = Workbook()
     wb.remove(wb.active)  # remove default sheet
@@ -148,8 +149,9 @@ def generate_invoice_xlsx(edit_data: dict) -> bytes:
 
     headers_time = [
         "Invoice", "Employee", "Title", "Role",
-        "Hours", "Rate (USD)", "Subtotal", "Disc. Type", "Disc. Value",
-        "Disc. ($)", "Total"
+        "Hours", "Rate (USD)", "Subtotal",
+        *([] if hide_discount else ["Disc. Type", "Disc. Value", "Disc. ($)"]),
+        "Total"
     ]
     _header_row(ws_time, 1, headers_time)
 
@@ -181,27 +183,33 @@ def generate_invoice_xlsx(edit_data: dict) -> bytes:
             hours,
             rate,
             subtotal,
-            disc_type,
-            disc_val,
-            disc_dollars,
+            *([] if hide_discount else [disc_type, disc_val, disc_dollars]),
             line_total,
         ], stripe=i % 2 == 0)
 
     # Totals row
     totals_row = len(lines) + 2
     ws_time.cell(row=totals_row, column=1, value="TOTALS").font = LABEL_FONT
-    for col, val in [(7, total_fees + total_discounts), (10, total_discounts), (11, total_fees)]:
+    total_cols = [(7, total_fees + total_discounts), (8, total_fees)] if hide_discount else \
+                 [(7, total_fees + total_discounts), (10, total_discounts), (11, total_fees)]
+    for col, val in total_cols:
         c = ws_time.cell(row=totals_row, column=col, value=_money(val))
         c.font = TOTAL_FONT
         c.number_format = MONEY_FMT
         c.alignment = RIGHT
         c.fill = LIGHT_BLUE_FILL
 
-    _set_col_widths(ws_time, {
-        "A": 16, "B": 22, "C": 20, "D": 22,
-        "E": 8, "F": 11, "G": 11, "H": 10,
-        "I": 10, "J": 11, "K": 11,
-    })
+    if hide_discount:
+        _set_col_widths(ws_time, {
+            "A": 16, "B": 22, "C": 20, "D": 22,
+            "E": 8, "F": 11, "G": 11, "H": 11,
+        })
+    else:
+        _set_col_widths(ws_time, {
+            "A": 16, "B": 22, "C": 20, "D": 22,
+            "E": 8, "F": 11, "G": 11, "H": 10,
+            "I": 10, "J": 11, "K": 11,
+        })
 
     # ─────────────────────────── Sheet: Expense_Details ──────────────────────
     ws_exp = wb.create_sheet("Expense_Details")
@@ -274,7 +282,7 @@ def generate_invoice_xlsx(edit_data: dict) -> bytes:
         ("Due Date", str(invoice.get("due_date") or "")),
         (None, None),
         ("Total Fees (gross)", _money(total_fees + total_discounts)),
-        ("Total Discounts", _money(total_discounts)),
+        *([] if hide_discount else [("Total Discounts", _money(total_discounts))]),
         ("Subtotal Fees (net)", _money(total_fees)),
     ]
     if cap_amount is not None:

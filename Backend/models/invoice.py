@@ -80,6 +80,10 @@ class Invoice(Base):
     bank_aba = Column(String, nullable=True)
     bank_account_name = Column(String, nullable=True)
     bank_account_number = Column(String, nullable=True)
+    # Per-invoice display preference — some clients don't want a Discount
+    # column at all, even showing "$0.00"/"—". Hides it in the PDF, Excel,
+    # and the on-screen editor; the underlying discount data is untouched.
+    hide_discount_column = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))

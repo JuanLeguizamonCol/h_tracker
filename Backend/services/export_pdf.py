@@ -355,38 +355,7 @@ _INVOICE_HTML_TEMPLATE = '''
     </tr>
   </table>
 
-  <!-- FEES TABLE con anchos HTML directos -->
-  <table width="100%" border="0" cellpadding="6" cellspacing="0">
-    <tr style="border-bottom:1pt solid #000;">
-      <th width="32%" align="left" style="border-bottom:1pt solid #000;">Fees:</th>
-      <th width="12%" align="center" style="border-bottom:1pt solid #000;">Hourly Rate</th>
-      <th width="10%" align="center" style="border-bottom:1pt solid #000;">Hours</th>
-      <th width="15%" align="right" style="border-bottom:1pt solid #000;">Subtotal</th>
-      <th width="15%" align="right" style="border-bottom:1pt solid #000;">Discount</th>
-      <th width="16%" align="right" style="border-bottom:1pt solid #000;">Total</th>
-    </tr>
-    {professional_rows}
-    <tr>
-      <td colspan="6" style="border-bottom:1.5pt solid #000; padding-top:10pt;"></td>
-    </tr>
-    <tr>
-      <td width="32%" align="left" style="padding-left:15pt; padding-top:10pt;">Total Fees Due</td>
-      <td width="12%"></td>
-      <td width="10%"></td>
-      <td width="15%" align="right" style="padding-top:10pt;">{total_fees}</td>
-      <td width="15%" align="right" style="padding-top:10pt;">{total_discount}</td>
-      <td width="16%" align="right" style="padding-top:10pt;">{total_after_discount}</td>
-    </tr>
-    {cap_row}
-    <tr>
-      <td width="32%"></td>
-      <td width="12%"></td>
-      <td width="10%"></td>
-      <td width="15%"></td>
-      <td width="15%" align="right" style="font-weight:bold; padding-top:15pt;">TOTAL DUE UPON RECEIPT</td>
-      <td width="16%" align="right" class="total-box" style="padding-top:15pt;">{total_due}</td>
-    </tr>
-  </table>
+  {fees_table}
 
   {to_detail_template}
 
@@ -445,7 +414,7 @@ _INVOICE_HTML_TEMPLATE = '''
 
 # ── Template data builder ─────────────────────────────────────────────────────
 
-def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
+def _build_professional_rows(lines: list, hide_discount: bool = False) -> tuple[str, float, float, float]:
     """
     Build HTML <tr> rows for the fees table.
     Returns (html_rows, total_subtotal, total_discount_dollars, total_after_discount).
@@ -454,6 +423,7 @@ def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
     total_subtotal = 0.0
     total_discount = 0.0
     total_net = 0.0
+    total_width = "31%" if hide_discount else "16%"
 
     for line in lines:
         hours = float(line.get("hours", 0) or 0)
@@ -473,14 +443,15 @@ def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
             name_cell = f"{name}" + (f"<br/><small style='color:#555'>{role}</small>" if role else "")
             total_subtotal += fee
             total_net += fee
+            discount_cell = "" if hide_discount else "<td width='15%' align='right'>—</td>"
             rows_html.append(
                 f"<tr>"
                 f"<td width='32%'>{name_cell}</td>"
                 f"<td width='12%' align='center'>{rate_label}</td>"
                 f"<td width='10%' align='center'>{hours:.2f}</td>"
                 f"<td width='15%' align='right'>{_format_currency(fee)}</td>"
-                f"<td width='15%' align='right'>—</td>"
-                f"<td width='16%' align='right'><b>{_format_currency(fee)}</b></td>"
+                f"{discount_cell}"
+                f"<td width='{total_width}' align='right'><b>{_format_currency(fee)}</b></td>"
                 f"</tr>"
             )
             continue
@@ -499,6 +470,7 @@ def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
         name_cell = f"{name}" + (f"<br/><small style='color:#555'>{role}</small>" if role else "")
 
         disc_label = _format_currency(disc_dollars) if disc_dollars > 0 else "—"
+        discount_cell = "" if hide_discount else f"<td width='15%' align='right'>{disc_label}</td>"
 
         rows_html.append(
             f"<tr>"
@@ -506,12 +478,64 @@ def _build_professional_rows(lines: list) -> tuple[str, float, float, float]:
             f"<td width='12%' align='center'>{_format_currency(rate)}</td>"
             f"<td width='10%' align='center'>{hours:.2f}</td>"
             f"<td width='15%' align='right'>{_format_currency(subtotal)}</td>"
-            f"<td width='15%' align='right'>{disc_label}</td>"
-            f"<td width='16%' align='right'><b>{_format_currency(net)}</b></td>"
+            f"{discount_cell}"
+            f"<td width='{total_width}' align='right'><b>{_format_currency(net)}</b></td>"
             f"</tr>"
         )
 
     return "".join(rows_html), total_subtotal, total_discount, total_net
+
+
+def _build_fees_table_html(
+    professional_rows: str, total_fees: str, total_discount: str, total_after_discount: str,
+    cap_row: str, total_due: str, hide_discount: bool,
+) -> str:
+    """The cover-page Fees table — header, line rows, and the three totals
+    rows (Total Fees Due / optional cap / TOTAL DUE). Built in Python (rather
+    than the surrounding fixed HTML template) so the Discount column can be
+    omitted entirely per-invoice, not just blanked out."""
+    total_width = "31%" if hide_discount else "16%"
+    discount_th = "" if hide_discount else '<th width="15%" align="right" style="border-bottom:1pt solid #000;">Discount</th>'
+    discount_fees_due_td = "" if hide_discount else f'<td width="15%" align="right" style="padding-top:10pt;">{total_discount}</td>'
+    return f'''
+  <table width="100%" border="0" cellpadding="6" cellspacing="0">
+    <tr style="border-bottom:1pt solid #000;">
+      <th width="32%" align="left" style="border-bottom:1pt solid #000;">Fees:</th>
+      <th width="12%" align="center" style="border-bottom:1pt solid #000;">Hourly Rate</th>
+      <th width="10%" align="center" style="border-bottom:1pt solid #000;">Hours</th>
+      <th width="15%" align="right" style="border-bottom:1pt solid #000;">Subtotal</th>
+      {discount_th}
+      <th width="{total_width}" align="right" style="border-bottom:1pt solid #000;">Total</th>
+    </tr>
+    {professional_rows}
+    <tr>
+      <td colspan="{5 if hide_discount else 6}" style="border-bottom:1.5pt solid #000; padding-top:10pt;"></td>
+    </tr>
+    <tr>
+      <td width="32%" align="left" style="padding-left:15pt; padding-top:10pt;">Total Fees Due</td>
+      <td width="12%"></td>
+      <td width="10%"></td>
+      <td width="15%" align="right" style="padding-top:10pt;">{total_fees}</td>
+      {discount_fees_due_td}
+      <td width="{total_width}" align="right" style="padding-top:10pt;">{total_after_discount}</td>
+    </tr>
+    {cap_row}
+    {f'''<tr>
+      <td width="32%"></td>
+      <td width="12%"></td>
+      <td width="10%"></td>
+      <td width="15%" align="right" style="font-weight:bold; padding-top:15pt;">TOTAL DUE UPON RECEIPT</td>
+      <td width="31%" align="right" class="total-box" style="padding-top:15pt;">{total_due}</td>
+    </tr>''' if hide_discount else f'''<tr>
+      <td width="32%"></td>
+      <td width="12%"></td>
+      <td width="10%"></td>
+      <td width="15%"></td>
+      <td width="15%" align="right" style="font-weight:bold; padding-top:15pt;">TOTAL DUE UPON RECEIPT</td>
+      <td width="16%" align="right" class="total-box" style="padding-top:15pt;">{total_due}</td>
+    </tr>'''}
+  </table>
+'''
 
 
 _FEE_PERIOD_ADJECTIVES = {"week": "weekly", "month": "monthly"}
@@ -542,18 +566,20 @@ def _flat_fee_label(edit_data: dict, fee: float) -> str:
     return f"{label}<br/><small style='color:#555'>{detail}</small>"
 
 
-def _build_flat_fee_rows(edit_data: dict, fee: float) -> tuple[str, float, float, float]:
+def _build_flat_fee_rows(edit_data: dict, fee: float, hide_discount: bool = False) -> tuple[str, float, float, float]:
     """A flat-fee invoice (Fixed Fee or Managed Services) bills invoice.fixed_fee_amount,
     not hours x rate — its lines carry a 0 rate and are only a record of hours worked
     (they still print in Attachment II). Same return shape as _build_professional_rows."""
+    discount_cell = "" if hide_discount else "<td width='15%' align='right'>—</td>"
+    total_width = "31%" if hide_discount else "16%"
     row = (
         "<tr>"
         f"<td width='32%'>{_flat_fee_label(edit_data, fee)}</td>"
         "<td width='12%' align='center'>—</td>"
         "<td width='10%' align='center'>—</td>"
         f"<td width='15%' align='right'>{_format_currency(fee)}</td>"
-        "<td width='15%' align='right'>—</td>"
-        f"<td width='16%' align='right'><b>{_format_currency(fee)}</b></td>"
+        f"{discount_cell}"
+        f"<td width='{total_width}' align='right'><b>{_format_currency(fee)}</b></td>"
         "</tr>"
     )
     return row, fee, 0.0, fee
@@ -569,7 +595,7 @@ def _format_week_of(d) -> str:
 def _build_time_detail_html(time_detail: list, client_name: str, invoice_number: str,
                             period_from: str, period_to: str, logo_img: str,
                             company_address: str, company_city_state_zip: str,
-                            company_phone: str) -> str:
+                            company_phone: str, hide_discount: bool = False) -> str:
     """Attachment II — weekly time detail. Its own page(s); returns "" when
     there's nothing to show. The header row is a <thead> so xhtml2pdf repeats it
     on every page the table spills onto."""
@@ -578,6 +604,7 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
 
     rows = []
     t_hours = t_sub = t_disc = t_net = 0.0
+    total_width = "23%" if hide_discount else "12%"
     for r in time_detail:
         hours = float(r.get("hours") or 0)
         subtotal = float(r.get("subtotal") or 0)
@@ -590,6 +617,7 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
         name = r.get("employee_name") or "—"
         title = r.get("title")
         prof = f"{name}, {title}" if title else name
+        discount_cell = "" if hide_discount else f"<td width='11%' align='right'>{_format_currency(discount) if discount > 0 else '—'}</td>"
         rows.append(
             "<tr>"
             f"<td width='12%' align='left'>{_format_week_of(r['week_start'])}</td>"
@@ -597,8 +625,8 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
             f"<td width='10%' align='right'>{_format_currency(float(r.get('hourly_rate') or 0))}</td>"
             f"<td width='9%' align='right'>{hours:.2f}</td>"
             f"<td width='12%' align='right'>{_format_currency(subtotal)}</td>"
-            f"<td width='11%' align='right'>{_format_currency(discount) if discount > 0 else '—'}</td>"
-            f"<td width='12%' align='right'>{_format_currency(net)}</td>"
+            f"{discount_cell}"
+            f"<td width='{total_width}' align='right'>{_format_currency(net)}</td>"
             "</tr>"
         )
 
@@ -641,13 +669,13 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
         <th width="10%" align="right">Rate</th>
         <th width="9%" align="right">Hours</th>
         <th width="12%" align="right">Subtotal</th>
-        <th width="11%" align="right">Discount</th>
-        <th width="12%" align="right">Total</th>
+        {'' if hide_discount else '<th width="11%" align="right">Discount</th>'}
+        <th width="{total_width}" align="right">Total</th>
       </tr>
     </thead>
     {"".join(rows)}
     <tr>
-      <td colspan="7" style="border-bottom:1.5pt solid #000; padding-top:8pt;"></td>
+      <td colspan="{6 if hide_discount else 7}" style="border-bottom:1.5pt solid #000; padding-top:8pt;"></td>
     </tr>
     <tr>
       <td></td>
@@ -655,7 +683,7 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
       <td></td>
       <td align="right" style="font-weight:bold; padding-top:8pt;">{t_hours:.2f}</td>
       <td align="right" style="padding-top:8pt;">{_format_currency(t_sub)}</td>
-      <td align="right" style="padding-top:8pt;">{_format_currency(t_disc)}</td>
+      {'' if hide_discount else f'<td align="right" style="padding-top:8pt;">{_format_currency(t_disc)}</td>'}
       <td align="right" class="total-box" style="padding-top:8pt;">{_format_currency(t_net)}</td>
     </tr>
   </table>
@@ -750,6 +778,7 @@ def generate_invoice_html(edit_data: dict) -> str:
     signature_img = f'<img src="{sig_uri}" alt="Signature"/>' if sig_uri else ""
 
     # ── Fee rows ──────────────────────────────────────────────────────────────
+    hide_discount = bool(invoice.get("hide_discount_column"))
     all_lines = list(lines)
     # Also include manual lines if present
     for ml in edit_data.get("manual_lines", []):
@@ -763,11 +792,11 @@ def generate_invoice_html(edit_data: dict) -> str:
 
     flat_fee = invoice.get("fixed_fee_amount")
     if flat_fee is not None:
-        professional_rows, total_fees, total_discount, total_net = _build_flat_fee_rows(edit_data, float(flat_fee))
+        professional_rows, total_fees, total_discount, total_net = _build_flat_fee_rows(edit_data, float(flat_fee), hide_discount)
     else:
-        professional_rows, total_fees, total_discount, total_net = _build_professional_rows(all_lines)
+        professional_rows, total_fees, total_discount, total_net = _build_professional_rows(all_lines, hide_discount)
     if not professional_rows:
-        professional_rows = "<tr><td colspan='6' style='text-align:center;color:#999'>No line items</td></tr>"
+        professional_rows = f"<tr><td colspan='{5 if hide_discount else 6}' style='text-align:center;color:#999'>No line items</td></tr>"
 
     # Total including expenses
     total_expenses = sum(float(e.get("amount_usd", 0) or 0) for e in expenses)
@@ -783,8 +812,8 @@ def generate_invoice_html(edit_data: dict) -> str:
             '<td width="12%"></td>'
             '<td width="10%"></td>'
             '<td width="15%"></td>'
-            '<td width="15%"></td>'
-            f'<td width="16%" align="right">{_format_currency(capped_fees)}</td>'
+            + ('' if hide_discount else '<td width="15%"></td>')
+            + f'<td width="{"31%" if hide_discount else "16%"}" align="right">{_format_currency(capped_fees)}</td>'
             '</tr>'
         )
     else:
@@ -794,6 +823,17 @@ def generate_invoice_html(edit_data: dict) -> str:
         edit_data.get("time_detail") or [], client_company, invoice_number,
         period_from or "—", period_to or "—",
         logo_img, company_address, company_city_state_zip, company_phone,
+        hide_discount,
+    )
+
+    fees_table = _build_fees_table_html(
+        professional_rows,
+        _format_currency(total_fees + total_discount),
+        _format_currency(total_discount),
+        _format_currency(total_net),
+        cap_row,
+        _format_currency(total_due_val),
+        hide_discount,
     )
 
     return _INVOICE_HTML_TEMPLATE.format(
@@ -821,12 +861,7 @@ def generate_invoice_html(edit_data: dict) -> str:
         signatory_name=signatory_name or "—",
         signatory_title=signatory_title or "—",
         # Fees
-        professional_rows=professional_rows,
-        total_fees=_format_currency(total_fees + total_discount),
-        total_discount=_format_currency(total_discount),
-        total_after_discount=_format_currency(total_net),
-        cap_row=cap_row,
-        total_due=_format_currency(total_due_val),
+        fees_table=fees_table,
         # ACH
         bank_name=bank["bank_name"],
         bank_aba=bank["aba"],

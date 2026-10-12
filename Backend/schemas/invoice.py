@@ -84,6 +84,7 @@ class InvoiceOut(BaseModel):
     bank_aba: Optional[str] = None
     bank_account_name: Optional[str] = None
     bank_account_number: Optional[str] = None
+    hide_discount_column: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -282,6 +283,7 @@ class InvoicePatch(BaseModel):
     bank_aba: Optional[str] = None
     bank_account_name: Optional[str] = None
     bank_account_number: Optional[str] = None
+    hide_discount_column: Optional[bool] = None
     lines: Optional[List[InvoiceLinePatch]] = None
     expenses: Optional[List[InvoiceExpensePatch]] = None
     on_hold_entries: Optional[List[OnHoldEntryPatch]] = None
