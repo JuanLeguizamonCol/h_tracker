@@ -1,13 +1,14 @@
-"""Reports router — detailed exports of worked hours.
+"""Reports router — detailed exports of worked hours, plus the employee
+performance report (Reports › Performance tab).
 
-Currently exposes a single endpoint that streams a fully-detailed Excel of the
-time entries matching the same filters used by the Reports page. Non-admin
-callers are transparently restricted to their own entries.
+The Excel export streams the time entries matching the same filters used by the
+Reports page; non-admin callers are transparently restricted to their own
+entries. The performance report is Manager/Admin only.
 """
 from typing import List, Optional
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -22,6 +23,8 @@ from utils.auth_jwt import get_current_employee
 from utils.roles import get_role
 from utils.section_access import require_section_view
 from services.export_excel import generate_time_entries_report_xlsx
+from services.employee_performance import employee_performance, default_window, month_end
+from schemas.employee_performance import EmployeePerformanceOut
 
 reports_router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -198,3 +201,27 @@ def export_time_entries_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@reports_router.get("/employee-performance", response_model=EmployeePerformanceOut,
+                    dependencies=[Depends(require_section_view('reports'))])
+def get_employee_performance(
+    start: Optional[date] = None,
+    end: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Monthly hours, utilization and completed-review scores per employee.
+    Defaults to the last 12 months (current month included); `start`/`end`
+    are snapped to whole months. Org-wide data, so Manager/Admin only."""
+    if not _is_manager_or_admin(current_employee, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Manager or admin access required")
+    today = date.today()
+    default_start, default_end = default_window(today)
+    start = (start or default_start).replace(day=1)
+    end = end or default_end
+    if end < start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="end must be on or after start")
+    if (end.year - start.year) * 12 + end.month - start.month >= 36:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The window can span at most 36 months.")
+    return employee_performance(db, start, month_end(end.year, end.month), today)

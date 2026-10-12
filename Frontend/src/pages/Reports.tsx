@@ -4,7 +4,7 @@ import {
   CalendarIcon, Search, Loader2, Filter, X,
   Clock, TrendingUp, Activity, BarChart2,
   Download, Gauge, AlertTriangle, TrendingDown, CheckCircle2,
-  ChevronRight, ChevronDown, ChevronLeft,
+  ChevronRight, ChevronDown, ChevronLeft, Award,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -32,6 +32,7 @@ import { MultiFilterSelect } from '@/components/MultiFilterSelect';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { PerformanceReport } from '@/components/PerformanceReport';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -350,6 +351,10 @@ export default function Reports() {
   const [matrixGranularity, setMatrixGranularity] = useState<MatrixGranularity>('week');
   const [projectMatrixGranularity, setProjectMatrixGranularity] = useState<MatrixGranularity>('week');
   const [isExporting, setIsExporting] = useState(false);
+  // Performance has its own month-based window and data, so the page-level
+  // filters (and their Excel export) only apply to the Hours/Utilization tabs.
+  const [reportTab, setReportTab] = useState<'hours' | 'utilization' | 'performance'>('hours');
+  const isPerformanceTab = reportTab === 'performance';
 
   const { data: projects = [] } = useProjects();
   const { data: clients = [] } = useClients();
@@ -1320,7 +1325,7 @@ export default function Reports() {
           <h1 className="text-2xl font-bold text-foreground">Employee Report</h1>
           <p className="text-muted-foreground text-sm">Cascading filters · Interactive charts</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        {!isPerformanceTab && <div className="flex items-center gap-2 flex-wrap">
           {hasActiveFilters && (
             <Button variant="outline" size="sm" onClick={clearAll} className="gap-1.5">
               <X className="h-3.5 w-3.5" />Clear All
@@ -1330,11 +1335,19 @@ export default function Reports() {
             {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             Export Excel
           </Button>
-        </div>
+        </div>}
       </div>
 
+      <Tabs value={reportTab} onValueChange={v => setReportTab(v as typeof reportTab)}>
+        <TabsList>
+          <TabsTrigger value="hours" className="gap-1.5"><Clock className="h-4 w-4" />Hours Report</TabsTrigger>
+          <TabsTrigger value="utilization" className="gap-1.5"><Gauge className="h-4 w-4" />Utilization Report</TabsTrigger>
+          {canManage && <TabsTrigger value="performance" className="gap-1.5"><Award className="h-4 w-4" />Performance</TabsTrigger>}
+        </TabsList>
+
+      {!isPerformanceTab && <>
       {/* ── Filters ───────────────────────────────────────────────────────── */}
-      <Card className="card-elevated">
+      <Card className="card-elevated mt-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Filter className="h-4 w-4" />Filters
@@ -1430,13 +1443,8 @@ export default function Reports() {
       </Card>
 
       {/* ── Skills Search (resource staffing) ────────────────────────────── */}
-      {canManage && <SkillsSearchPanel />}
-
-      <Tabs defaultValue="hours">
-        <TabsList>
-          <TabsTrigger value="hours" className="gap-1.5"><Clock className="h-4 w-4" />Hours Report</TabsTrigger>
-          <TabsTrigger value="utilization" className="gap-1.5"><Gauge className="h-4 w-4" />Utilization Report</TabsTrigger>
-        </TabsList>
+      {canManage && <div className="mt-6"><SkillsSearchPanel /></div>}
+      </>}
 
         <TabsContent value="hours" className="space-y-6 mt-4">
 
@@ -2171,6 +2179,12 @@ export default function Reports() {
             </div>
           )}
         </TabsContent>
+
+        {canManage && (
+          <TabsContent value="performance" className="mt-4">
+            <PerformanceReport />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

@@ -898,3 +898,67 @@ export interface ReviewAnalytics {
   year: number | null;
   reviews: AnalyticsReview[];
 }
+
+// ---------- Reports › Performance tab (GET /reports/employee-performance) ----------
+
+export interface PerformanceMonth {
+  key: string;        // "YYYY-MM"
+  label: string;      // "Nov 2025"
+  complete: boolean;  // finished month — only these count toward averages/capacity
+  workdays: number;
+}
+
+export interface EmployeeReviewScore {
+  id: string;
+  project_id: string;
+  project_name: string;
+  client_name: string | null;
+  review_date: string;
+  hours_in_window: number;
+  self: number | null;
+  manager: number | null;
+  joint: number | null;
+}
+
+export interface EmployeePerformanceRow {
+  employee_id: string;
+  name: string;
+  title: string | null;
+  location: string | null;
+  is_active: boolean;
+  max_weekly_hours: number;
+  monthly: Record<string, { total: number; billable: number }>;
+  total_hours: number;
+  billable_hours: number;
+  avg_monthly_hours: number | null;
+  billable_pct: number | null;
+  utilization_pct: number | null;
+  projects_count: number;
+  pto_hours: number;
+  reviews: EmployeeReviewScore[];
+  reviews_count: number;
+  /** Mean of the joint overall averages of reviews completed in the window. */
+  review_score: number | null;
+  self_manager_gap: number | null;
+  open_reviews: number;
+}
+
+export interface ProjectReviewScore {
+  project_id: string;
+  name: string;
+  client_name: string | null;
+  reviews_count: number;
+  employees_reviewed: number;
+  joint_avg: number | null;
+  self_avg: number | null;
+  manager_avg: number | null;
+  hours_in_window: number;
+}
+
+export interface EmployeePerformanceReport {
+  start: string;
+  end: string;
+  months: PerformanceMonth[];
+  employees: EmployeePerformanceRow[];
+  projects: ProjectReviewScore[];
+}

@@ -372,6 +372,21 @@ GET  /performance-reviews/{id}/export/xlsx     → XLSX "{Cliente} - {Empleado} 
 DEL  /performance-reviews/{id}                 → 204 (edit)
 ```
 
+### Reports
+```
+GET  /reports/time-entries/export/xlsx   → XLSX de horas con los mismos filtros de la página Reports
+GET  /reports/employee-performance       → tab "Performance" de Reports (Admin/Manager) ?start ?end
+```
+`/reports/employee-performance` (`services/employee_performance.py`): ventana por meses
+completos (default: mes actual + 11 anteriores; máx. 36). Por empleado: horas
+mensuales (total/billable), **promedio mensual** (solo meses completos en que estaba
+empleado — el mes en curso se muestra pero no promedia), billable %, **utilización**
+(billable ÷ capacidad = `max_weekly_hours` prorrateado por días hábiles), proyectos,
+PTO aprobado, **review score** (media de los `joint` de reviews completadas en la
+ventana — mismo criterio que la medición anual), gap self − manager y reviews
+abiertas. Más un roll-up de puntajes por proyecto. El tab es independiente de los
+filtros de fecha/empleado de los otros tabs de Reports.
+
 ### Health
 ```
 GET  /health                      → {status: "ok"}
@@ -395,7 +410,7 @@ GET  /health                      → {status: "ok"}
 /invoices/new          Nueva factura (desde time entries)
 /invoices/new/manual   Factura manual (sin time entries)
 /invoices/:id/edit     Editor completo de factura
-/reports               Reportes y análisis
+/reports               Reportes: Hours · Utilization · Performance (scorecard por empleado, horas mensuales, puntajes por proyecto; últimos 12 meses)
 /reviews               Evaluaciones: panel de proyectos + lista + Analytics (Admin/Manager); lista propia (empleados)
 /reviews/projects/:id  Equipo del proyecto → asignar autoevaluaciones
 /reviews/:id           Editor de evaluación (formato workbook) + export Excel
