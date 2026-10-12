@@ -486,9 +486,68 @@ def _build_professional_rows(lines: list, hide_discount: bool = False) -> tuple[
     return "".join(rows_html), total_subtotal, total_discount, total_net
 
 
+def _build_expenses_rows_html(expenses: list, hide_discount: bool) -> tuple[str, float]:
+    """Itemized expense rows (own "Expenses:" sub-header, same column widths
+    as the Fees section above it) plus a "Total Expenses" subtotal row —
+    reused inside the same fees table so TOTAL DUE UPON RECEIPT is never a
+    silent jump from Total Fees Due with no visible explanation. Returns
+    ("", 0.0) when there are no expenses, so invoices without any look
+    exactly as before."""
+    if not expenses:
+        return "", 0.0
+    total_width = "31%" if hide_discount else "16%"
+    colspan = 5 if hide_discount else 6
+    rows = [f'''
+    <tr>
+      <td colspan="{colspan}" style="padding-top:14pt;"></td>
+    </tr>
+    <tr style="border-bottom:1pt solid #000;">
+      <th width="32%" align="left" style="border-bottom:1pt solid #000;">Expenses:</th>
+      <th width="12%" align="center" style="border-bottom:1pt solid #000;">Date</th>
+      <th width="10%" align="center" style="border-bottom:1pt solid #000;"></th>
+      <th width="15%" align="right" style="border-bottom:1pt solid #000;">Category</th>
+      {'' if hide_discount else '<th width="15%" align="right" style="border-bottom:1pt solid #000;"></th>'}
+      <th width="{total_width}" align="right" style="border-bottom:1pt solid #000;">Amount</th>
+    </tr>''']
+    total_expenses = 0.0
+    for exp in expenses:
+        amount = float(exp.get("amount_usd", 0) or 0)
+        total_expenses += amount
+        who = exp.get("professional") or exp.get("vendor") or ""
+        desc = exp.get("description") or exp.get("vendor") or "—"
+        name_cell = f"{desc}" + (f"<br/><small style='color:#555'>{who}</small>" if who and who != desc else "")
+        date_label = _format_week_of(exp["date"]) if exp.get("date") else "—"
+        category = exp.get("category") or ""
+        blank_cell = "" if hide_discount else "<td width='15%'></td>"
+        rows.append(
+            "<tr>"
+            f"<td width='32%'>{name_cell}</td>"
+            f"<td width='12%' align='center'>{date_label}</td>"
+            f"<td width='10%' align='center'></td>"
+            f"<td width='15%' align='right'>{category}</td>"
+            f"{blank_cell}"
+            f"<td width='{total_width}' align='right'>{_format_currency(amount)}</td>"
+            "</tr>"
+        )
+    discount_gap_td = "" if hide_discount else "<td width='15%'></td>"
+    rows.append(f'''
+    <tr>
+      <td colspan="{colspan}" style="border-bottom:1.5pt solid #000; padding-top:6pt;"></td>
+    </tr>
+    <tr>
+      <td width="32%" align="left" style="padding-left:15pt; padding-top:10pt;">Total Expenses</td>
+      <td width="12%"></td>
+      <td width="10%"></td>
+      <td width="15%"></td>
+      {discount_gap_td}
+      <td width="{total_width}" align="right" style="padding-top:10pt;">{_format_currency(total_expenses)}</td>
+    </tr>''')
+    return "".join(rows), total_expenses
+
+
 def _build_fees_table_html(
     professional_rows: str, total_fees: str, total_discount: str, total_after_discount: str,
-    cap_row: str, total_due: str, hide_discount: bool,
+    cap_row: str, expenses_rows: str, total_due: str, hide_discount: bool,
 ) -> str:
     """The cover-page Fees table — header, line rows, and the three totals
     rows (Total Fees Due / optional cap / TOTAL DUE). Built in Python (rather
@@ -520,6 +579,7 @@ def _build_fees_table_html(
       <td width="{total_width}" align="right" style="padding-top:10pt;">{total_after_discount}</td>
     </tr>
     {cap_row}
+    {expenses_rows}
     {f'''<tr>
       <td width="32%"></td>
       <td width="12%"></td>
@@ -801,7 +861,7 @@ def generate_invoice_html(edit_data: dict) -> str:
         professional_rows = f"<tr><td colspan='{5 if hide_discount else 6}' style='text-align:center;color:#999'>No line items</td></tr>"
 
     # Total including expenses
-    total_expenses = sum(float(e.get("amount_usd", 0) or 0) for e in expenses)
+    expenses_rows, total_expenses = _build_expenses_rows_html(expenses, hide_discount)
     cap = invoice.get("cap_amount")
     capped_fees = min(total_net, float(cap)) if cap is not None else total_net
     total_due_val = capped_fees + total_expenses
@@ -834,6 +894,7 @@ def generate_invoice_html(edit_data: dict) -> str:
         _format_currency(total_discount),
         _format_currency(total_net),
         cap_row,
+        expenses_rows,
         _format_currency(total_due_val),
         hide_discount,
     )
