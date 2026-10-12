@@ -51,6 +51,15 @@ class Client(Base):
     billing_rate = Column(Numeric(10, 2), nullable=True)
     billing_currency = Column(String, nullable=True)
     billing_email = Column(String, nullable=True)
+    # Default ACH/bank instructions this client's invoices should bill to —
+    # e.g. an in-country or client-specific account that differs from the
+    # owner company's standard profile. Set once here (or from any of this
+    # client's invoices — see patch_invoice) and every new/existing invoice
+    # for them defaults to it instead of the generic company bank profile.
+    bank_name = Column(String, nullable=True)
+    bank_aba = Column(String, nullable=True)
+    bank_account_name = Column(String, nullable=True)
+    bank_account_number = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     # FreshSales CRM integration
     freshsales_id = Column(BigInteger, nullable=True, unique=True)

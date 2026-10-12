@@ -747,13 +747,15 @@ def generate_invoice_html(edit_data: dict) -> str:
     profile = COMPANY_PROFILES.get(owner_company, COMPANY_PROFILES["IPC"])
     default_bank = profile["bank"]
 
-    # Per-invoice ACH overrides — win when set, since Pegasus (PI) has no
-    # bank profile on file today and IPC's may need a one-off correction.
+    # Per-invoice ACH override wins when set; otherwise this client's own
+    # default banking instructions (set once, from any of their invoices or
+    # the Client panel — see patch_invoice); otherwise the owner company's
+    # generic profile, since Pegasus (PI) has no bank profile on file today.
     bank = {
-        "bank_name": invoice.get("bank_name") or default_bank["bank_name"],
-        "aba": invoice.get("bank_aba") or default_bank["aba"],
-        "account_name": invoice.get("bank_account_name") or default_bank["account_name"],
-        "account_number": invoice.get("bank_account_number") or default_bank["account_number"],
+        "bank_name": invoice.get("bank_name") or client.get("bank_name") or default_bank["bank_name"],
+        "aba": invoice.get("bank_aba") or client.get("bank_aba") or default_bank["aba"],
+        "account_name": invoice.get("bank_account_name") or client.get("bank_account_name") or default_bank["account_name"],
+        "account_number": invoice.get("bank_account_number") or client.get("bank_account_number") or default_bank["account_number"],
     }
 
     company_address = profile["address"]

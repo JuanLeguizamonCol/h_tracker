@@ -180,6 +180,10 @@ export interface Client {
   billing_rate: number | null;
   billing_currency: string | null;
   billing_email: string | null;
+  bank_name?: string | null;
+  bank_aba?: string | null;
+  bank_account_name?: string | null;
+  bank_account_number?: string | null;
   created_at: string;
   // FreshSales CRM
   freshsales_id: number | null;
@@ -496,6 +500,8 @@ export interface InvoiceEditData {
     manager_name?: string | null; job_title?: string | null;
     street_address_1?: string | null; street_address_2?: string | null;
     city?: string | null; state?: string | null; zip?: string | null;
+    bank_name?: string | null; bank_aba?: string | null;
+    bank_account_name?: string | null; bank_account_number?: string | null;
   } | null;
   project: {
     id: string; name: string; client_id: string;

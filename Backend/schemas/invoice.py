@@ -103,6 +103,10 @@ class InvoiceEditClient(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     zip: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_aba: Optional[str] = None
+    bank_account_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
 
 
 class InvoiceEditProject(BaseModel):

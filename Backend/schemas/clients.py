@@ -45,6 +45,11 @@ class ClientBase(BaseModel):
     billing_rate: Optional[float] = None
     billing_currency: Optional[str] = None
     billing_email: Optional[str] = None
+    # Default ACH/bank instructions — see models/clients.py.
+    bank_name: Optional[str] = None
+    bank_aba: Optional[str] = None
+    bank_account_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
     # FreshSales CRM fields
     freshsales_id: Optional[int] = None
     crm_synced_at: Optional[datetime] = None
@@ -97,6 +102,10 @@ class ClientUpdate(BaseModel):
     billing_rate: Optional[float] = None
     billing_currency: Optional[str] = None
     billing_email: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_aba: Optional[str] = None
+    bank_account_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
     freshsales_id: Optional[int] = None
     crm_synced_at: Optional[datetime] = None
     crm_created_at: Optional[datetime] = None

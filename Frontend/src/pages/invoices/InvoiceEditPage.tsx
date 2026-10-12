@@ -561,11 +561,14 @@ export default function InvoiceEditPage() {
     setBillToState(data.invoice.bill_to_state || billToDefaults.state);
     setBillToZip(data.invoice.bill_to_zip || billToDefaults.zip);
     setHideDiscountColumn(!!(data.invoice as any).hide_discount_column);
-    const defaultBank = getCompanyProfile(company).bank;
-    setBankName(data.invoice.bank_name || defaultBank.bank_name);
-    setBankAba(data.invoice.bank_aba || defaultBank.aba);
-    setBankAccountName(data.invoice.bank_account_name || defaultBank.account_name);
-    setBankAccountNumber(data.invoice.bank_account_number || defaultBank.account_number);
+    // Per-invoice override wins; otherwise this client's own default banking
+    // instructions (set once, here or on the Client panel); otherwise the
+    // owner company's generic profile.
+    const companyBank = getCompanyProfile(company).bank;
+    setBankName(data.invoice.bank_name || data.client?.bank_name || companyBank.bank_name);
+    setBankAba(data.invoice.bank_aba || data.client?.bank_aba || companyBank.aba);
+    setBankAccountName(data.invoice.bank_account_name || data.client?.bank_account_name || companyBank.account_name);
+    setBankAccountNumber(data.invoice.bank_account_number || data.client?.bank_account_number || companyBank.account_number);
     setIsDirty(false);
     setInitialized(true);
   }
@@ -1332,8 +1335,10 @@ export default function InvoiceEditPage() {
             <CardHeader>
               <CardTitle className="text-base">ACH Instructions (PDF)</CardTitle>
               <p className="text-xs text-muted-foreground">
-                Pre-filled from the owner company's bank profile — Pegasus (PI) has none on file
-                by default, so fill it in here for this invoice.
+                Pre-filled from this client's own bank details if they have any on file, otherwise
+                the owner company's profile — Pegasus (PI) has none by default. Editing a field here
+                also saves it as this client's default, so future invoices for them pick it up
+                automatically.
               </p>
             </CardHeader>
             <CardContent>

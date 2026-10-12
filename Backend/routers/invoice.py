@@ -407,6 +407,10 @@ def _build_edit_data(invoice_id: str, db: Session) -> dict:
             "city": client.city,
             "state": client.state,
             "zip": client.zip,
+            "bank_name": client.bank_name,
+            "bank_aba": client.bank_aba,
+            "bank_account_name": client.bank_account_name,
+            "bank_account_number": client.bank_account_number,
         } if client else None,
         "project": {
             "id": project.id, "name": project.name, "client_id": project.client_id,
@@ -774,10 +778,13 @@ def patch_invoice(
         if value is not None:
             setattr(invoice, field, value)
 
-    # Bill To fields mirror Client's own columns 1:1 (see models/invoice.py) —
-    # editing one here always writes through to the shared Client record too,
-    # so this panel and the Client edit form never drift apart.
-    _BILL_TO_TO_CLIENT_FIELD = {
+    # Bill To and bank fields mirror Client's own columns 1:1 (see
+    # models/invoice.py / models/clients.py) — editing one here always writes
+    # through to the shared Client record too, so this panel and the Client
+    # edit form never drift apart, and the next invoice for this client
+    # already defaults to the corrected info instead of needing the same fix
+    # again every time.
+    _INVOICE_TO_CLIENT_SYNC_FIELD = {
         "bill_to_contact": "manager_name",
         "bill_to_title": "job_title",
         "bill_to_company": "name",
@@ -786,13 +793,17 @@ def patch_invoice(
         "bill_to_city": "city",
         "bill_to_state": "state",
         "bill_to_zip": "zip",
+        "bank_name": "bank_name",
+        "bank_aba": "bank_aba",
+        "bank_account_name": "bank_account_name",
+        "bank_account_number": "bank_account_number",
     }
-    if any(getattr(patch_in, f) is not None for f in _BILL_TO_TO_CLIENT_FIELD):
+    if any(getattr(patch_in, f) is not None for f in _INVOICE_TO_CLIENT_SYNC_FIELD):
         project = db.query(Project).filter(Project.id == invoice.project_id).first()
         client = db.query(Client).filter(Client.id == project.client_id).first() if project else None
         if client:
-            for bill_to_field, client_field in _BILL_TO_TO_CLIENT_FIELD.items():
-                value = getattr(patch_in, bill_to_field)
+            for invoice_field, client_field in _INVOICE_TO_CLIENT_SYNC_FIELD.items():
+                value = getattr(patch_in, invoice_field)
                 if value is not None:
                     setattr(client, client_field, value)
 

@@ -50,6 +50,10 @@ type FormData = {
   billing_currency: string;
   billing_email: string;
   payment_terms: string;
+  bank_name: string;
+  bank_aba: string;
+  bank_account_name: string;
+  bank_account_number: string;
 };
 
 const EMPTY: FormData = {
@@ -58,6 +62,7 @@ const EMPTY: FormData = {
   manager_name: '', manager_email: '', manager_phone: '', job_title: '',
   referral_source: '', referred_by: '', acquisition_date: '', contract_start_date: '', contract_end_date: '',
   billing_rate: '', billing_currency: 'USD', billing_email: '', payment_terms: '',
+  bank_name: '', bank_aba: '', bank_account_name: '', bank_account_number: '',
 };
 
 function clientToForm(c: Client): FormData {
@@ -90,6 +95,10 @@ function clientToForm(c: Client): FormData {
     billing_currency: c.billing_currency || 'USD',
     billing_email: c.billing_email || '',
     payment_terms: c.payment_terms || '',
+    bank_name: c.bank_name || '',
+    bank_aba: c.bank_aba || '',
+    bank_account_name: c.bank_account_name || '',
+    bank_account_number: c.bank_account_number || '',
   };
 }
 
@@ -123,6 +132,10 @@ function toPayload(f: FormData): Partial<Client> & { name: string } {
     billing_currency: f.billing_currency || null,
     billing_email: f.billing_email || null,
     payment_terms: f.payment_terms || null,
+    bank_name: f.bank_name || null,
+    bank_aba: f.bank_aba || null,
+    bank_account_name: f.bank_account_name || null,
+    bank_account_number: f.bank_account_number || null,
   };
 }
 
@@ -454,6 +467,27 @@ export default function ClientFormPage() {
         <Field label="Billing Email" full>
           <Input value={form.billing_email} onChange={e => set('billing_email', e.target.value)} placeholder="billing@company.com" type="email" />
         </Field>
+      </Section>
+
+      {/* ACH / Bank Details */}
+      <Section title="ACH Instructions">
+        <Field label="Bank">
+          <Input value={form.bank_name} onChange={e => set('bank_name', e.target.value)} placeholder="e.g. Capital One" />
+        </Field>
+        <Field label="ABA / Routing">
+          <Input value={form.bank_aba} onChange={e => set('bank_aba', e.target.value)} />
+        </Field>
+        <Field label="Account Name">
+          <Input value={form.bank_account_name} onChange={e => set('bank_account_name', e.target.value)} />
+        </Field>
+        <Field label="Account Number">
+          <Input value={form.bank_account_number} onChange={e => set('bank_account_number', e.target.value)} />
+        </Field>
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          Left blank, invoices for this client fall back to the owner company's standard bank profile.
+          Set here once this client needs their own ACH instructions — every invoice for them,
+          including future ones, picks it up automatically.
+        </p>
       </Section>
     </div>
   );
