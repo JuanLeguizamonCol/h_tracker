@@ -513,9 +513,12 @@ def _build_expenses_rows_html(expenses: list, hide_discount: bool) -> tuple[str,
     for exp in expenses:
         amount = float(exp.get("amount_usd", 0) or 0)
         total_expenses += amount
-        who = exp.get("professional") or exp.get("vendor") or ""
-        desc = exp.get("description") or exp.get("vendor") or "—"
-        name_cell = f"{desc}" + (f"<br/><small style='color:#555'>{who}</small>" if who and who != desc else "")
+        # Same name-cell format as the Fees rows above: person's name bold,
+        # with whatever description/vendor text is available as the subtitle
+        # underneath — never a bare "—" when there's simply no description.
+        who = exp.get("professional") or exp.get("vendor") or "—"
+        desc = exp.get("description") or (exp.get("vendor") if exp.get("professional") else "") or ""
+        name_cell = f"{who}" + (f"<br/><small style='color:#555'>{desc}</small>" if desc and desc != who else "")
         date_label = _format_week_of(exp["date"]) if exp.get("date") else "—"
         category = exp.get("category") or ""
         blank_cell = "" if hide_discount else "<td width='15%'></td>"
