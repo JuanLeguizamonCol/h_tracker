@@ -363,6 +363,8 @@ _INVOICE_HTML_TEMPLATE = '''
 
 {time_detail_html}
 
+{expense_detail_html}
+
 <!-- LAST PAGE: ACH INSTRUCTIONS (own page, after everything else) -->
 <div class="page-last">
 
@@ -487,65 +489,113 @@ def _build_professional_rows(lines: list, hide_discount: bool = False) -> tuple[
 
 
 def _build_expenses_rows_html(expenses: list, hide_discount: bool) -> tuple[str, float]:
-    """Itemized expense rows (own "Expenses:" sub-header, same column widths
-    as the Fees section above it) plus a "Total Expenses" subtotal row —
-    reused inside the same fees table so TOTAL DUE UPON RECEIPT is never a
-    silent jump from Total Fees Due with no visible explanation. Returns
-    ("", 0.0) when there are no expenses, so invoices without any look
-    exactly as before."""
+    """A single "Expenses" subtotal line, same row style as "Total Fees Due"
+    right above it — keeps TOTAL DUE UPON RECEIPT on the same page instead of
+    pushing it down (or onto a second page) with an itemized list. The
+    itemized breakdown prints separately, on its own attachment page — see
+    _build_expense_detail_html. Returns ("", 0.0) when there are no
+    expenses, so invoices without any look exactly as before."""
     if not expenses:
         return "", 0.0
     total_width = "31%" if hide_discount else "16%"
-    colspan = 5 if hide_discount else 6
-    rows = [f'''
-    <tr>
-      <td colspan="{colspan}" style="padding-top:14pt;"></td>
-    </tr>
-    <tr style="border-bottom:1pt solid #000;">
-      <th width="32%" align="left" style="border-bottom:1pt solid #000;">Expenses:</th>
-      <th width="12%" align="center" style="border-bottom:1pt solid #000;">Date</th>
-      <th width="10%" align="center" style="border-bottom:1pt solid #000;"></th>
-      <th width="15%" align="right" style="border-bottom:1pt solid #000;">Category</th>
-      {'' if hide_discount else '<th width="15%" align="right" style="border-bottom:1pt solid #000;"></th>'}
-      <th width="{total_width}" align="right" style="border-bottom:1pt solid #000;">Amount</th>
-    </tr>''']
-    total_expenses = 0.0
-    for exp in expenses:
-        amount = float(exp.get("amount_usd", 0) or 0)
-        total_expenses += amount
-        # Same name-cell format as the Fees rows above: person's name bold,
-        # with whatever description/vendor text is available as the subtitle
-        # underneath — never a bare "—" when there's simply no description.
-        who = exp.get("professional") or exp.get("vendor") or "—"
-        desc = exp.get("description") or (exp.get("vendor") if exp.get("professional") else "") or ""
-        name_cell = f"{who}" + (f"<br/><small style='color:#555'>{desc}</small>" if desc and desc != who else "")
-        date_label = _format_week_of(exp["date"]) if exp.get("date") else "—"
-        category = exp.get("category") or ""
-        blank_cell = "" if hide_discount else "<td width='15%'></td>"
-        rows.append(
-            "<tr>"
-            f"<td width='32%'>{name_cell}</td>"
-            f"<td width='12%' align='center'>{date_label}</td>"
-            f"<td width='10%' align='center'></td>"
-            f"<td width='15%' align='right'>{category}</td>"
-            f"{blank_cell}"
-            f"<td width='{total_width}' align='right'>{_format_currency(amount)}</td>"
-            "</tr>"
-        )
+    total_expenses = sum(float(exp.get("amount_usd", 0) or 0) for exp in expenses)
     discount_gap_td = "" if hide_discount else "<td width='15%'></td>"
-    rows.append(f'''
+    row = f'''
     <tr>
-      <td colspan="{colspan}" style="border-bottom:1.5pt solid #000; padding-top:6pt;"></td>
-    </tr>
-    <tr>
-      <td width="32%" align="left" style="padding-left:15pt; padding-top:10pt;">Total Expenses</td>
+      <td width="32%" align="left" style="padding-left:15pt; padding-top:6pt;">Expenses</td>
       <td width="12%"></td>
       <td width="10%"></td>
       <td width="15%"></td>
       {discount_gap_td}
-      <td width="{total_width}" align="right" style="padding-top:10pt;">{_format_currency(total_expenses)}</td>
-    </tr>''')
-    return "".join(rows), total_expenses
+      <td width="{total_width}" align="right" style="padding-top:6pt;">{_format_currency(total_expenses)}</td>
+    </tr>'''
+    return row, total_expenses
+
+
+def _build_expense_detail_html(expenses: list, client_name: str, invoice_number: str,
+                                period_from: str, period_to: str, logo_img: str,
+                                company_address: str, company_city_state_zip: str,
+                                company_phone: str, reset_template_after: bool = True) -> str:
+    """Attachment — Expense Detail. Its own page(s), same layout as Attachment
+    II (Time Detail); returns "" when there's nothing to show."""
+    if not expenses:
+        return ""
+
+    rows = []
+    t_amount = 0.0
+    for exp in expenses:
+        amount = float(exp.get("amount_usd", 0) or 0)
+        t_amount += amount
+        who = exp.get("professional") or exp.get("vendor") or "—"
+        desc = exp.get("description") or (exp.get("vendor") if exp.get("professional") else "") or ""
+        name_cell = f"{who}" + (f"<br/><small style='color:#555'>{desc}</small>" if desc and desc != who else "")
+        date_label = _format_week_of(exp["date"]) if exp.get("date") else "—"
+        rows.append(
+            "<tr>"
+            f"<td width='12%' align='left'>{date_label}</td>"
+            f"<td width='34%' align='left'>{name_cell}</td>"
+            f"<td width='19%' align='left'>{exp.get('category') or ''}</td>"
+            f"<td width='19%' align='left'>{exp.get('payment_source') or ''}</td>"
+            f"<td width='16%' align='right'>{_format_currency(amount)}</td>"
+            "</tr>"
+        )
+
+    return f'''
+<div id="detail_header_content">
+  <table width="100%" border="0" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="left" valign="top" class="logo-img">{logo_img}</td>
+      <td align="right" valign="top" class="address-cell">
+        {company_address}<br/>
+        {company_city_state_zip}<br/>
+        {company_phone}
+      </td>
+    </tr>
+  </table>
+</div>
+<div class="page">
+  <div class="attachment-title">Attachment<br/>Expense Detail</div>
+
+  <table width="100%" border="0" cellpadding="2" cellspacing="0" style="margin-bottom:14pt;">
+    <tr>
+      <td width="20%" align="left" style="font-weight:bold;">Client:</td>
+      <td width="40%" align="left">{client_name}</td>
+      <td width="10%" align="left">From</td>
+      <td width="30%" align="right"><i>{period_from}</i></td>
+    </tr>
+    <tr>
+      <td align="left" style="font-weight:bold;">Invoice Number:</td>
+      <td align="left">{invoice_number}</td>
+      <td align="left">To</td>
+      <td align="right"><i>{period_to}</i></td>
+    </tr>
+  </table>
+
+  <table class="detail-table" repeat="1" width="100%" border="0" cellpadding="3" cellspacing="0">
+    <thead>
+      <tr>
+        <th width="12%" align="left">Date</th>
+        <th width="34%" align="left">Professional</th>
+        <th width="19%" align="left">Category</th>
+        <th width="19%" align="left">Payment Source</th>
+        <th width="16%" align="right">Amount</th>
+      </tr>
+    </thead>
+    {"".join(rows)}
+    <tr>
+      <td colspan="5" style="border-bottom:1.5pt solid #000; padding-top:8pt;"></td>
+    </tr>
+    <tr>
+      <td></td>
+      <td align="right" style="font-weight:bold; padding-top:8pt;">Total</td>
+      <td></td>
+      <td></td>
+      <td align="right" class="total-box" style="padding-top:8pt;">{_format_currency(t_amount)}</td>
+    </tr>
+  </table>
+  {'<pdf:nexttemplate name="main"/>' if reset_template_after else ''}
+</div>
+'''
 
 
 def _build_fees_table_html(
@@ -658,10 +708,14 @@ def _format_week_of(d) -> str:
 def _build_time_detail_html(time_detail: list, client_name: str, invoice_number: str,
                             period_from: str, period_to: str, logo_img: str,
                             company_address: str, company_city_state_zip: str,
-                            company_phone: str, hide_discount: bool = False) -> str:
+                            company_phone: str, hide_discount: bool = False,
+                            reset_template_after: bool = True) -> str:
     """Attachment II — weekly time detail. Its own page(s); returns "" when
     there's nothing to show. The header row is a <thead> so xhtml2pdf repeats it
-    on every page the table spills onto."""
+    on every page the table spills onto. `reset_template_after` switches the
+    page template back to "main" (normal margins) once this attachment ends —
+    set False when another "detail"-template attachment (Expense Detail)
+    follows right after, so the repeating header carries over to it too."""
     if not time_detail:
         return ""
 
@@ -750,7 +804,7 @@ def _build_time_detail_html(time_detail: list, client_name: str, invoice_number:
       <td align="right" class="total-box" style="padding-top:8pt;">{_format_currency(t_net)}</td>
     </tr>
   </table>
-  <pdf:nexttemplate name="main"/>
+  {'<pdf:nexttemplate name="main"/>' if reset_template_after else ''}
 </div>
 '''
 
@@ -884,11 +938,17 @@ def generate_invoice_html(edit_data: dict) -> str:
     else:
         cap_row = ""
 
+    expense_detail_html = _build_expense_detail_html(
+        expenses, client_company, invoice_number,
+        period_from or "—", period_to or "—",
+        logo_img, company_address, company_city_state_zip, company_phone,
+    )
     time_detail_html = _build_time_detail_html(
         edit_data.get("time_detail") or [], client_company, invoice_number,
         period_from or "—", period_to or "—",
         logo_img, company_address, company_city_state_zip, company_phone,
         hide_discount,
+        reset_template_after=not bool(expense_detail_html),
     )
 
     fees_table = _build_fees_table_html(
@@ -904,7 +964,8 @@ def generate_invoice_html(edit_data: dict) -> str:
 
     return _INVOICE_HTML_TEMPLATE.format(
         time_detail_html=time_detail_html,
-        to_detail_template='<pdf:nexttemplate name="detail"/>' if time_detail_html else "",
+        expense_detail_html=expense_detail_html,
+        to_detail_template='<pdf:nexttemplate name="detail"/>' if (time_detail_html or expense_detail_html) else "",
         # Header / logo + company
         logo_img=logo_img,
         company_address=company_address,
