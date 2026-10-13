@@ -74,7 +74,11 @@ def test_normalize_scores_validates():
         svc.normalize_scores({"nope": {"score": 3}})
     with pytest.raises(ValueError):
         svc.normalize_scores({"written_1": {"score": 6}})
-    assert svc.normalize_scores({"written_1": {"score": None, "notes": "  "}}) == {}
+    # A bare {score: None, notes: None} is kept, not dropped — it's an
+    # explicit N/A (see ScorePicker/naSelected in PerformanceReviewPage.tsx),
+    # distinguishable from a sub-criterion the user never touched at all
+    # (which never appears in the payload in the first place).
+    assert svc.normalize_scores({"written_1": {"score": None, "notes": "  "}}) == {"written_1": {"score": None, "notes": None}}
     assert svc.normalize_scores({"written_1": {"score": None, "notes": " ok "}}) == {"written_1": {"score": None, "notes": "ok"}}
 
 

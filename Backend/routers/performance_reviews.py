@@ -170,8 +170,9 @@ def bulk_assign_self_assessments(
             period_end=data.period_end,
         ), current_employee.id)
         out = _out(db, review, current_employee, True)
-        notify_review_created(out, _email_of(db, employee_id))
+        notify_review_created(db, out, _email_of(db, employee_id))
         created.append(out)
+    db.commit()
     return {"created": created, "skipped_employee_ids": skipped}
 
 
@@ -217,7 +218,8 @@ def create_review(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Period end must be on or after the start.")
     review = svc.create_review(db, data, current_employee.id)
     out = _out(db, review, current_employee, True)
-    notify_review_created(out, _email_of(db, review.employee_id))
+    notify_review_created(db, out, _email_of(db, review.employee_id))
+    db.commit()
     return out
 
 

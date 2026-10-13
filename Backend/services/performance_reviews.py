@@ -192,7 +192,17 @@ def compute_averages(scores: Dict[str, dict]) -> Tuple[List[dict], Optional[floa
 
 
 def normalize_scores(raw: Dict[str, dict]) -> Dict[str, dict]:
-    """Validates keys/ranges and drops empty entries. Raises ValueError."""
+    """Validates keys/ranges. Raises ValueError.
+
+    Keeps every entry the caller sends, including a bare
+    {"score": None, "notes": None} — that's an explicit "marked N/A, no
+    notes" (see ScorePicker/naSelected in PerformanceReviewPage.tsx), not an
+    empty/untouched item: the frontend only ever includes a sub-criterion key
+    here once the user has actually interacted with it. Dropping it would
+    silently revert an explicit N/A back to "never rated" on the next load,
+    which looked indistinguishable in the UI anyway — the actual bug this
+    comment used to paper over.
+    """
     clean: Dict[str, dict] = {}
     for key, entry in (raw or {}).items():
         if key not in SUB_CRITERION_KEYS:
@@ -201,8 +211,6 @@ def normalize_scores(raw: Dict[str, dict]) -> Dict[str, dict]:
         notes = (entry.get("notes") or "").strip() or None
         if score is not None and not (SCORE_MIN <= int(score) <= SCORE_MAX):
             raise ValueError(f"Scores must be between {SCORE_MIN} and {SCORE_MAX}.")
-        if score is None and notes is None:
-            continue
         clean[key] = {"score": int(score) if score is not None else None, "notes": notes}
     return clean
 

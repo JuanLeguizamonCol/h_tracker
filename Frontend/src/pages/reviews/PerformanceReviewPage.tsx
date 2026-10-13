@@ -89,9 +89,14 @@ function toDraft(r: PerformanceReview): Draft {
 }
 
 function normScores(scores: Scores): string {
+  // No "both null -> drop" filter here: a {score: null, notes: null} entry
+  // is an explicit N/A (see ScorePicker/naSelected above), and its mere
+  // presence as a key is the only signal that distinguishes it from an
+  // untouched sub-criterion. Filtering it out made marking something N/A
+  // (with no score and no notes) invisible to the dirty-check below, so it
+  // never made it into the save payload at all.
   const clean = Object.entries(scores)
     .map(([k, v]) => [k, v.score ?? null, (v.notes ?? '').trim() || null] as const)
-    .filter(([, s, n]) => s !== null || n !== null)
     .sort(([a], [b]) => a.localeCompare(b));
   return JSON.stringify(clean);
 }
@@ -118,8 +123,13 @@ function fmtAvg(v: number | null | undefined) {
   return v == null ? '—' : Number.isInteger(v) ? v.toFixed(1) : String(v);
 }
 
-function ScorePicker({ value, onChange, min, max, disabled, activeClass }: {
+function ScorePicker({ value, onChange, min, max, disabled, activeClass, naSelected }: {
   value: number | null; onChange: (v: number | null) => void; min: number; max: number; disabled: boolean; activeClass: string;
+  // Whether N/A was *explicitly* chosen for this item, as opposed to it
+  // simply never having been rated — both look like `value == null`, so
+  // without this the N/A button appears "already selected" on every
+  // untouched item and clicking it shows no visible change.
+  naSelected: boolean;
 }) {
   const options = Array.from({ length: max - min + 1 }, (_, i) => min + i);
   return (
@@ -148,10 +158,11 @@ function ScorePicker({ value, onChange, min, max, disabled, activeClass }: {
         onClick={() => onChange(null)}
         className={cn(
           'h-8 px-2 rounded-md border text-xs transition-colors',
-          value == null ? 'bg-muted text-foreground' : 'bg-background text-muted-foreground hover:bg-muted',
+          naSelected ? `${activeClass} text-white` : 'bg-background text-muted-foreground hover:bg-muted',
           disabled && 'opacity-50 cursor-not-allowed',
         )}
-        title="Not rated — excluded from the average"
+        aria-pressed={naSelected}
+        title="Not applicable — excluded from the average"
       >
         N/A
       </button>
@@ -570,6 +581,12 @@ export default function PerformanceReviewPage() {
                     <span className={cn('font-medium', meta.text)}>{meta.label}</span> — {meta.who}.
                     {!editable && visible(k) && ' Read-only at this stage.'}
                   </p>
+                  {k === 'joint' && canComplete && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-md px-3 py-2">
+                      Save keeps your scores, but this review only counts toward Analytics once you click
+                      <span className="font-semibold"> Complete Review</span> above.
+                    </p>
+                  )}
                   {!visible(k) ? (
                     <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
                       <Lock className="h-5 w-5" /> {lockedReason(k)}
@@ -591,6 +608,10 @@ export default function PerformanceReviewPage() {
                           <div className="divide-y">
                             {criterion.sub_criteria.map(sub => {
                               const entry = draft[field][sub.key] ?? { score: null, notes: null };
+                              // Present in the draft map at all (loaded from the server, or
+                              // touched this session) means the user has actually looked at
+                              // it — vs. simply never having been rated yet.
+                              const touched = sub.key in draft[field];
                               const selfScore = draft.self_scores[sub.key]?.score;
                               const managerScore = draft.manager_scores[sub.key]?.score;
                               return (
@@ -605,7 +626,8 @@ export default function PerformanceReviewPage() {
                                     )}
                                   </div>
                                   <ScorePicker value={entry.score} onChange={v => setScore(k, sub.key, { score: v })}
-                                    min={template.score_min} max={template.score_max} disabled={!editable} activeClass={meta.ring} />
+                                    min={template.score_min} max={template.score_max} disabled={!editable} activeClass={meta.ring}
+                                    naSelected={touched && entry.score == null} />
                                   {editable ? (
                                     <Textarea value={entry.notes ?? ''} onChange={e => setScore(k, sub.key, { notes: e.target.value })}
                                       placeholder="Notes (optional)" rows={2} className="resize-y" />
