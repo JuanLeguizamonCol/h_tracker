@@ -188,11 +188,13 @@ function isDateLocked(dateStr: string): boolean {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Timesheet() {
-  const { employee } = useAuth();
+  const { employee, isAdmin } = useAuth();
   // When an Admin has granted ME a temporary override, closed-month cells
   // unlock just for my own session — see Backend/utils/time_entry_lock.py.
+  // Admins themselves are always exempt from the monthly close, so they
+  // never need an override to log/edit/delete hours in a closed period.
   const { data: lockOverrideStatus } = useMyLockOverrideStatus();
-  const hasActiveLockOverride = !!lockOverrideStatus?.is_active;
+  const hasActiveLockOverride = isAdmin || !!lockOverrideStatus?.is_active;
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isSaving, setIsSaving] = useState(false);
   const [rows, setRows] = useState<ProjectRow[]>([]);

@@ -18,10 +18,13 @@ from utils.time_entry_lock import is_period_locked, lock_date_for, has_active_lo
 time_entries_router = APIRouter(prefix="/time-entries", tags=["time-entries"])
 
 
-def _assert_period_open(db: Session, employee_id: str, entry_date) -> None:
-    """Monthly close — hard block, no role is exempt, UNLESS an Admin has
-    granted employee_id a currently-active TimeEntryLockOverride. See
-    utils/time_entry_lock.py."""
+def _assert_period_open(db: Session, employee_id: str, entry_date, actor_role: str | None = None) -> None:
+    """Monthly close — hard block for everyone except Admins, who can always
+    log/edit/delete hours for any period, past or present. Non-admins can
+    still be exempted for a specific closed period via a currently-active
+    TimeEntryLockOverride. See utils/time_entry_lock.py."""
+    if actor_role == "admin":
+        return
     if is_period_locked(entry_date) and not has_active_lock_override(db, employee_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -42,9 +45,10 @@ def create_new_time_entry(
 ):
     # Employees can only log hours for themselves. Managers/admins may enter
     # entries for anyone (e.g. corrections).
-    if get_role(db, current_employee.id) not in ("admin", "manager") and entry_in.user_id != current_employee.id:
+    actor_role = get_role(db, current_employee.id)
+    if actor_role not in ("admin", "manager") and entry_in.user_id != current_employee.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only log time for yourself")
-    _assert_period_open(db, entry_in.user_id, entry_in.date)
+    _assert_period_open(db, entry_in.user_id, entry_in.date, actor_role)
     # Business Development projects are prospective work — no hours are
     # loggable against them until the project actually moves to Active.
     project = db.query(Project).filter(Project.id == entry_in.project_id).first()
@@ -108,14 +112,15 @@ def update_time_entry_detail(
     existing = get_time_entry(db, entry_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
-    if get_role(db, current_employee.id) not in ("admin", "manager") and existing.user_id != current_employee.id:
+    actor_role = get_role(db, current_employee.id)
+    if actor_role not in ("admin", "manager") and existing.user_id != current_employee.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own time entries")
     # Locked if EITHER the entry's current date or (when it's being moved) its
     # new date falls in a closed period — no editing an already-closed entry,
     # and no moving an open entry's hours into a closed one either.
-    _assert_period_open(db, existing.user_id, existing.date)
+    _assert_period_open(db, existing.user_id, existing.date, actor_role)
     if entry_in.date is not None:
-        _assert_period_open(db, existing.user_id, entry_in.date)
+        _assert_period_open(db, existing.user_id, entry_in.date, actor_role)
     entry = update_time_entry(db, entry_id, entry_in)
     return entry
 
@@ -130,7 +135,8 @@ def delete_time_entry_detail(
     existing = get_time_entry(db, entry_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
-    if get_role(db, current_employee.id) not in ("admin", "manager") and existing.user_id != current_employee.id:
+    actor_role = get_role(db, current_employee.id)
+    if actor_role not in ("admin", "manager") and existing.user_id != current_employee.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only delete your own time entries")
-    _assert_period_open(db, existing.user_id, existing.date)
+    _assert_period_open(db, existing.user_id, existing.date, actor_role)
     delete_time_entry(db, entry_id)

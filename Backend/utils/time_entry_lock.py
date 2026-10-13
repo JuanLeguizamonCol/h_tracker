@@ -1,20 +1,23 @@
 """Monthly close for time entries.
 
-Once a calendar month closes, its hours can never be logged, edited, or
-deleted again, by anyone — no role is exempt (see routers/time_entries.py).
-Default rule: a month closes on the 6th of the following month, giving a
-5-day grace window to finish logging/correcting the prior month.
+Once a calendar month closes, its hours can no longer be logged, edited, or
+deleted — except by an Admin, who is always exempt and can log/edit/delete
+hours for any period, past or present (see
+routers/time_entries.py::_assert_period_open). Default rule: a month closes
+on the 6th of the following month, giving a 5-day grace window for everyone
+else to finish logging/correcting the prior month.
 
 Does NOT affect invoice-side editing — an invoice line's weekly hours
 (InvoiceLineWeek, Admin-only) are a separate table from time_entries and are
 billing corrections (e.g. holding hours back), not a record of when work
 happened, so they stay editable regardless of this lock.
 
-The one way around the lock: an Admin can grant a specific employee a 2-hour
-override (TimeEntryLockOverride, routers/time_entry_lock_overrides.py). While
-it's active, that employee — and only that employee — can log/edit/delete
-entries in any closed period. Nobody else is affected, and it expires on its
-own; there's no way to extend one, only grant a fresh one.
+For non-admins, the one way around the lock: an Admin can grant a specific
+employee a 2-hour override (TimeEntryLockOverride,
+routers/time_entry_lock_overrides.py). While it's active, that employee — and
+only that employee — can log/edit/delete entries in any closed period.
+Nobody else is affected, and it expires on its own; there's no way to extend
+one, only grant a fresh one.
 """
 from datetime import date, datetime, timezone
 
