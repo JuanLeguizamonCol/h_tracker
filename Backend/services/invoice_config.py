@@ -49,7 +49,7 @@ COMPANY_PROFILES: dict[str, dict] = {
     "IPC": {
         "name":           "Impact Point Co.",
         "legal_name":     "Impact Point Co., LLC",
-        "address":        "104 Crandon Blvd., Suite #404",
+        "address":        "104 Crandon Blvd., Suite #100",
         "city_state_zip": "Key Biscayne, FL, 33149",
         "phone":          "+1 (786) 208 - 0588",
         "logo_file":      os.path.join(LOGOS_DIR, "logo_ipc.png"),

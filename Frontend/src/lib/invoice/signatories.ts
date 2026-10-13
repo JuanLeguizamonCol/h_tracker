@@ -37,7 +37,7 @@ export const COMPANY_PROFILES: Record<CompanyCode, CompanyProfile> = {
   IPC: {
     name:           'Impact Point Co.',
     legal_name:     'Impact Point Co., LLC',
-    address:        '104 Crandon Blvd., Suite #404',
+    address:        '104 Crandon Blvd., Suite #100',
     city_state_zip: 'Key Biscayne, FL, 33149',
     phone:          '+1 (786) 208 - 0588',
     bank: {
