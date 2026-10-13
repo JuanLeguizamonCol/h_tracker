@@ -845,16 +845,35 @@ def generate_invoice_html(edit_data: dict) -> str:
     default_address = _compose_address(client.get("street_address_1"), client.get("street_address_2")) or client.get("address") or ""
     default_city_state_zip = _compose_city_state_zip(client.get("city"), client.get("state"), client.get("zip"))
 
-    bill_to_address = _compose_address(invoice.get("bill_to_street_address_1"), invoice.get("bill_to_street_address_2"))
-    bill_to_city_state_zip = _compose_city_state_zip(
-        invoice.get("bill_to_city"), invoice.get("bill_to_state"), invoice.get("bill_to_zip")
+    # The invoice's own Bill To fields are saved together, as a whole panel,
+    # every time (see InvoiceEditPage.tsx) — so once ANY of them has been
+    # saved at all, the invoice's values win outright, blank ones included.
+    # A per-field `invoice_value or client_value` fallback would silently
+    # re-substitute the client's default back in the moment a field is
+    # cleared to blank (since "" is falsy) — exactly the bug this guards
+    # against. Only a never-touched invoice (every column still NULL) falls
+    # back to the client record.
+    _bill_to_fields = (
+        "bill_to_company", "bill_to_contact", "bill_to_title",
+        "bill_to_street_address_1", "bill_to_street_address_2",
+        "bill_to_city", "bill_to_state", "bill_to_zip",
     )
+    has_bill_to_override = any(invoice.get(f) is not None for f in _bill_to_fields)
 
-    client_company = invoice.get("bill_to_company") or default_company
-    client_contact = invoice.get("bill_to_contact") or default_contact
-    client_title = invoice.get("bill_to_title") or default_title
-    client_address = bill_to_address or default_address
-    client_city_state_zip = bill_to_city_state_zip or default_city_state_zip
+    if has_bill_to_override:
+        client_company = invoice.get("bill_to_company") or ""
+        client_contact = invoice.get("bill_to_contact") or ""
+        client_title = invoice.get("bill_to_title") or ""
+        client_address = _compose_address(invoice.get("bill_to_street_address_1"), invoice.get("bill_to_street_address_2"))
+        client_city_state_zip = _compose_city_state_zip(
+            invoice.get("bill_to_city"), invoice.get("bill_to_state"), invoice.get("bill_to_zip")
+        )
+    else:
+        client_company = default_company
+        client_contact = default_contact
+        client_title = default_title
+        client_address = default_address
+        client_city_state_zip = default_city_state_zip
 
     # Salutation: contact name + colon  →  "Dear John Smith:"
     greeting = f"{client_contact}:"
@@ -864,16 +883,30 @@ def generate_invoice_html(edit_data: dict) -> str:
     profile = COMPANY_PROFILES.get(owner_company, COMPANY_PROFILES["IPC"])
     default_bank = profile["bank"]
 
-    # Per-invoice ACH override wins when set; otherwise this client's own
-    # default banking instructions (set once, from any of their invoices or
-    # the Client panel — see patch_invoice); otherwise the owner company's
-    # generic profile, since Pegasus (PI) has no bank profile on file today.
-    bank = {
-        "bank_name": invoice.get("bank_name") or client.get("bank_name") or default_bank["bank_name"],
-        "aba": invoice.get("bank_aba") or client.get("bank_aba") or default_bank["aba"],
-        "account_name": invoice.get("bank_account_name") or client.get("bank_account_name") or default_bank["account_name"],
-        "account_number": invoice.get("bank_account_number") or client.get("bank_account_number") or default_bank["account_number"],
-    }
+    # Per-invoice ACH override wins when set (as a whole panel, saved
+    # together — see the Bill To comment above for why this is an
+    # `is not None` check and not a per-field `or` fallback); otherwise this
+    # client's own default banking instructions (set once, from any of their
+    # invoices or the Client panel — see patch_invoice); otherwise the owner
+    # company's generic profile, since Pegasus (PI) has no bank profile on
+    # file today.
+    _bank_fields = ("bank_name", "bank_aba", "bank_account_name", "bank_account_number")
+    if any(invoice.get(f) is not None for f in _bank_fields):
+        bank = {
+            "bank_name": invoice.get("bank_name") or "",
+            "aba": invoice.get("bank_aba") or "",
+            "account_name": invoice.get("bank_account_name") or "",
+            "account_number": invoice.get("bank_account_number") or "",
+        }
+    elif any(client.get(f) is not None for f in _bank_fields):
+        bank = {
+            "bank_name": client.get("bank_name") or "",
+            "aba": client.get("bank_aba") or "",
+            "account_name": client.get("bank_account_name") or "",
+            "account_number": client.get("bank_account_number") or "",
+        }
+    else:
+        bank = dict(default_bank)
 
     company_address = profile["address"]
     company_city_state_zip = profile["city_state_zip"]
