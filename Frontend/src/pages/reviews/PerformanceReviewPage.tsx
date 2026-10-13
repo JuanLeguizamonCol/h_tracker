@@ -430,6 +430,32 @@ export default function PerformanceReviewPage() {
         </div>
       </div>
 
+      {/* Self / Manager / Joint — the primary navigation for this whole page,
+          not a control tucked inside a card: everything below (project
+          details, average score, notes, scoring) follows whichever one is
+          selected here. */}
+      <Tabs value={tab} onValueChange={v => setTab(v as EvaluationKey)}>
+        <TabsList className="w-full h-auto justify-start gap-6 rounded-none border-b bg-transparent p-0">
+          {EVALUATIONS.map(k => (
+            <TabsTrigger
+              key={k}
+              value={k}
+              className={cn(
+                'gap-2 rounded-none border-b-2 border-transparent bg-transparent px-1 pb-3 pt-1 text-base font-semibold text-muted-foreground shadow-none transition-colors',
+                'data-[state=active]:bg-transparent data-[state=active]:shadow-none',
+                EVALUATION_META[k].activeTab,
+              )}
+            >
+              <span className={cn('h-2.5 w-2.5 rounded-full', EVALUATION_META[k].dot)} />
+              {EVALUATION_META[k].label}
+              {!visible(k) && <Lock className="h-3.5 w-3.5" />}
+              {visible(k) && averages[k].overall != null && (
+                <span className="tabular-nums text-muted-foreground font-normal">· {fmtAvg(averages[k].overall)}</span>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
       <Card className="card-elevated">
         <CardContent className="p-4"><StageStepper status={review.status} /></CardContent>
       </Card>
@@ -559,18 +585,6 @@ export default function PerformanceReviewPage() {
           </p>
         </CardHeader>
         <CardContent>
-          <Tabs value={tab} onValueChange={v => setTab(v as EvaluationKey)}>
-            <TabsList className="h-auto flex-wrap">
-              {EVALUATIONS.map(k => (
-                <TabsTrigger key={k} value={k} className="gap-2">
-                  <span className={cn('h-2.5 w-2.5 rounded-full', EVALUATION_META[k].dot)} />
-                  {EVALUATION_META[k].label}
-                  {!visible(k) && <Lock className="h-3 w-3" />}
-                  {visible(k) && averages[k].overall != null && <span className="tabular-nums text-muted-foreground">· {fmtAvg(averages[k].overall)}</span>}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-
             {EVALUATIONS.map(k => {
               const field = SCORE_FIELD[k];
               const editable = canEdit[k];
@@ -643,9 +657,9 @@ export default function PerformanceReviewPage() {
                 </TabsContent>
               );
             })}
-          </Tabs>
         </CardContent>
       </Card>
+      </Tabs>
 
       {isDirty && (
         <div className="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-lg border bg-background px-4 py-3 shadow-lg">

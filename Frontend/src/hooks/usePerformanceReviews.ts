@@ -12,10 +12,19 @@ export const REVIEW_STATUS_BADGE: Record<PerformanceReviewStatus, { label: strin
   completed: { label: 'Completed', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' },
 };
 
-export const EVALUATION_META: Record<EvaluationKey, { label: string; short: string; who: string; dot: string; text: string; ring: string }> = {
-  self: { label: 'Self evaluation', short: 'Self', who: 'by the employee', dot: 'bg-sky-500', text: 'text-sky-700 dark:text-sky-400', ring: 'bg-sky-600 border-sky-600' },
-  manager: { label: 'Manager evaluation', short: 'Manager', who: 'by the project manager', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400', ring: 'bg-amber-600 border-amber-600' },
-  joint: { label: 'Joint evaluation', short: 'Joint', who: 'agreed together — official', dot: 'bg-emerald-600', text: 'text-emerald-700 dark:text-emerald-400', ring: 'bg-emerald-600 border-emerald-600' },
+export const EVALUATION_META: Record<EvaluationKey, { label: string; short: string; who: string; dot: string; text: string; ring: string; activeTab: string }> = {
+  self: {
+    label: 'Self evaluation', short: 'Self', who: 'by the employee', dot: 'bg-sky-500', text: 'text-sky-700 dark:text-sky-400', ring: 'bg-sky-600 border-sky-600',
+    activeTab: 'data-[state=active]:border-sky-600 dark:data-[state=active]:border-sky-400 data-[state=active]:text-sky-700 dark:data-[state=active]:text-sky-400',
+  },
+  manager: {
+    label: 'Manager evaluation', short: 'Manager', who: 'by the project manager', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400', ring: 'bg-amber-600 border-amber-600',
+    activeTab: 'data-[state=active]:border-amber-600 dark:data-[state=active]:border-amber-400 data-[state=active]:text-amber-700 dark:data-[state=active]:text-amber-400',
+  },
+  joint: {
+    label: 'Joint evaluation', short: 'Joint', who: 'agreed together — official', dot: 'bg-emerald-600', text: 'text-emerald-700 dark:text-emerald-400', ring: 'bg-emerald-600 border-emerald-600',
+    activeTab: 'data-[state=active]:border-emerald-600 dark:data-[state=active]:border-emerald-400 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-400',
+  },
 };
 
 export function useReviewTemplate() {
