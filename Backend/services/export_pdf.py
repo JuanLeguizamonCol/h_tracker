@@ -943,7 +943,8 @@ def generate_invoice_html(edit_data: dict) -> str:
         period_from or "—", period_to or "—",
         logo_img, company_address, company_city_state_zip, company_phone,
     )
-    time_detail_html = _build_time_detail_html(
+    hide_time_detail = bool(invoice.get("hide_time_detail_page"))
+    time_detail_html = "" if hide_time_detail else _build_time_detail_html(
         edit_data.get("time_detail") or [], client_company, invoice_number,
         period_from or "—", period_to or "—",
         logo_img, company_address, company_city_state_zip, company_phone,

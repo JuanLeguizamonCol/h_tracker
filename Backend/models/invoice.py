@@ -84,6 +84,11 @@ class Invoice(Base):
     # column at all, even showing "$0.00"/"—". Hides it in the PDF, Excel,
     # and the on-screen editor; the underlying discount data is untouched.
     hide_discount_column = Column(Boolean, nullable=False, default=False)
+    # Skips the "Time Detail" (Attachment II — weekly hours per employee)
+    # page(s) from the PDF export for clients who only want the summary.
+    # PDF-only; the on-screen Time Detail panel (where weekly hours/discounts
+    # are actually edited) is unaffected, and the underlying data is untouched.
+    hide_time_detail_page = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))

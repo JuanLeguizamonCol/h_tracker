@@ -471,6 +471,7 @@ export default function InvoiceEditPage() {
   const [billToState, setBillToState] = useState('');
   const [billToZip, setBillToZip] = useState('');
   const [hideDiscountColumn, setHideDiscountColumn] = useState(false);
+  const [hideTimeDetailPage, setHideTimeDetailPage] = useState(false);
   const [bankName, setBankName] = useState('');
   const [bankAba, setBankAba] = useState('');
   const [bankAccountName, setBankAccountName] = useState('');
@@ -561,6 +562,7 @@ export default function InvoiceEditPage() {
     setBillToState(data.invoice.bill_to_state || billToDefaults.state);
     setBillToZip(data.invoice.bill_to_zip || billToDefaults.zip);
     setHideDiscountColumn(!!(data.invoice as any).hide_discount_column);
+    setHideTimeDetailPage(!!(data.invoice as any).hide_time_detail_page);
     // Per-invoice override wins; otherwise this client's own default banking
     // instructions (set once, here or on the Client panel); otherwise the
     // owner company's generic profile.
@@ -817,6 +819,7 @@ export default function InvoiceEditPage() {
           bill_to_state: billToState || null,
           bill_to_zip: billToZip || null,
           hide_discount_column: hideDiscountColumn,
+          hide_time_detail_page: hideTimeDetailPage,
           bank_name: bankName || null,
           bank_aba: bankAba || null,
           bank_account_name: bankAccountName || null,
@@ -1927,12 +1930,22 @@ export default function InvoiceEditPage() {
           {/* Time Detail — Attachment II (own page(s) of the PDF) */}
           {timeDetailRows.length > 0 && (
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Time Detail (Attachment II)</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Hours and discount are edited per week per professional here — this drives that
-                  professional's totals above, and prints on its own page(s) after the fees summary in the PDF.
-                </p>
+              <CardHeader className="flex flex-row items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-base">Time Detail (Attachment II)</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Hours and discount are edited per week per professional here — this drives that
+                    professional's totals above, and (unless hidden below) prints on its own page(s)
+                    after the fees summary in the PDF.
+                  </p>
+                </div>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap cursor-pointer shrink-0">
+                  <Checkbox
+                    checked={hideTimeDetailPage}
+                    onCheckedChange={v => { setHideTimeDetailPage(!!v); setIsDirty(true); }}
+                  />
+                  Hide from PDF
+                </label>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
