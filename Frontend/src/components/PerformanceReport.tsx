@@ -2,17 +2,23 @@ import { Fragment, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, startOfMonth, subMonths, startOfYear } from 'date-fns';
 import {
-  ArrowDown, ArrowUp, ChevronDown, ChevronRight, ClipboardCheck, Clock, Gauge, Loader2, Search, Star, UserX,
+  ArrowDown, ArrowUp, ChevronDown, ChevronRight, ClipboardCheck, Clock, Download, Gauge, Loader2, Search, Star, UserX,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useEmployeePerformance } from '@/hooks/useEmployeePerformance';
+import { useExportReportTable } from '@/hooks/useReportExport';
 import { EmployeePerformanceRow } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { MultiFilterSelect } from '@/components/MultiFilterSelect';
 import { cn } from '@/lib/utils';
+
+const NO_LOCATION = '__none__';
 
 // Reports › Performance. Deliberately independent of the page-level filters
 // (those are about time entries in an arbitrary date range): this view always
@@ -90,15 +96,34 @@ export function PerformanceReport() {
 
   const [search, setSearch] = useState('');
   const [activeOnly, setActiveOnly] = useState(true);
+  const [employeeIds, setEmployeeIds] = useState<string[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'name', dir: 'asc' });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const months = useMemo(() => data?.months ?? [], [data]);
 
+  // Same multi-select pattern as the Hours/Utilization tabs — lets you pull
+  // up several people (or a whole location) at once instead of one at a time.
+  const availableEmployees = useMemo(
+    () => [...(data?.employees ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [data],
+  );
+  const availableLocations = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const r of data?.employees ?? []) {
+      const key = r.location?.trim() || NO_LOCATION;
+      if (!seen.has(key)) seen.set(key, r.location?.trim() || 'No location');
+    }
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
+  }, [data]);
+
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     const list = (data?.employees ?? []).filter(r =>
       (!activeOnly || r.is_active) &&
+      (employeeIds.length === 0 || employeeIds.includes(r.employee_id)) &&
+      (locations.length === 0 || locations.includes(r.location?.trim() || NO_LOCATION)) &&
       (!term || [r.name, r.title, r.location].some(v => v?.toLowerCase().includes(term))
         || r.reviews.some(rv => rv.project_name.toLowerCase().includes(term))),
     );
@@ -112,7 +137,7 @@ export function PerformanceReport() {
       if (bv == null) return -1;
       return (av - bv) * dir;
     });
-  }, [data, search, activeOnly, sort]);
+  }, [data, search, activeOnly, employeeIds, locations, sort]);
 
   const kpis = useMemo(() => {
     const withHours = rows.filter(r => r.total_hours > 0);
@@ -134,6 +159,83 @@ export function PerformanceReport() {
     if (hours <= 0) return {};
     const alpha = 0.10 + Math.min(hours / maxMonthCell, 1) * 0.75;
     return { backgroundColor: `rgba(37, 99, 235, ${alpha.toFixed(2)})`, color: alpha > 0.5 ? '#fff' : undefined };
+  };
+
+  const exportTable = useExportReportTable();
+  const handleExport = async () => {
+    const filtersSummary = [
+      `Period: ${rangeLabel || `${range.start} to ${range.end}`}`,
+      `Active only: ${activeOnly ? 'Yes' : 'No'}`,
+      employeeIds.length > 0 ? `Employees: ${availableEmployees.filter(e => employeeIds.includes(e.employee_id)).map(e => e.name).join(', ')}` : 'Employees: All',
+      locations.length > 0 ? `Locations: ${availableLocations.filter(l => locations.includes(l.value)).map(l => l.label).join(', ')}` : 'Locations: All',
+      search ? `Search: "${search}"` : '',
+    ].filter(Boolean);
+
+    try {
+      await exportTable.mutateAsync({
+        filename: `performance-report_${range.start}_${range.end}`,
+        filters_summary: filtersSummary,
+        sheets: [
+          {
+            title: 'Scorecard',
+            columns: [
+              { key: 'name', label: 'Employee' },
+              { key: 'title', label: 'Title' },
+              { key: 'location', label: 'Location' },
+              { key: 'review_score', label: 'Review Score', format: 'number' },
+              { key: 'reviews_count', label: 'Reviews', format: 'number' },
+              { key: 'avg_monthly_hours', label: 'Avg Hrs / Month', format: 'number' },
+              { key: 'billable_pct', label: 'Billable %', format: 'percent' },
+              { key: 'utilization_pct', label: 'Utilization %', format: 'percent' },
+              { key: 'projects_count', label: 'Projects', format: 'number' },
+              { key: 'pto_hours', label: 'Time Off (h)', format: 'number' },
+              { key: 'self_manager_gap', label: 'Self - Manager Gap', format: 'number' },
+            ],
+            rows: rows.map(r => ({
+              name: r.name, title: r.title || '', location: r.location || '',
+              review_score: r.review_score, reviews_count: r.reviews_count,
+              avg_monthly_hours: r.avg_monthly_hours, billable_pct: r.billable_pct,
+              utilization_pct: r.utilization_pct, projects_count: r.projects_count,
+              pto_hours: r.pto_hours, self_manager_gap: r.self_manager_gap,
+            })),
+          },
+          {
+            title: 'Monthly Hours',
+            columns: [
+              { key: 'name', label: 'Employee' },
+              ...months.map(m => ({ key: m.key, label: m.label, format: 'number' as const })),
+              { key: 'avg_per_month', label: 'Avg / Month', format: 'number' as const },
+              { key: 'total', label: 'Total', format: 'number' as const },
+            ],
+            rows: rows.map(r => ({
+              name: r.name,
+              ...Object.fromEntries(months.map(m => [m.key, r.monthly[m.key]?.total ?? 0])),
+              avg_per_month: r.avg_monthly_hours,
+              total: r.total_hours,
+            })),
+          },
+          {
+            title: 'Scores by Project',
+            columns: [
+              { key: 'name', label: 'Project' },
+              { key: 'client_name', label: 'Client' },
+              { key: 'employees_reviewed', label: 'Employees', format: 'number' },
+              { key: 'hours_in_window', label: 'Hours (period)', format: 'number' },
+              { key: 'self_avg', label: 'Self', format: 'number' },
+              { key: 'manager_avg', label: 'Manager', format: 'number' },
+              { key: 'joint_avg', label: 'Joint (official)', format: 'number' },
+            ],
+            rows: (data?.projects ?? []).map(p => ({
+              name: p.name, client_name: p.client_name || '', employees_reviewed: p.employees_reviewed,
+              hours_in_window: p.hours_in_window, self_avg: p.self_avg, manager_avg: p.manager_avg, joint_avg: p.joint_avg,
+            })),
+          },
+        ],
+      });
+      toast.success('Performance report exported.');
+    } catch {
+      toast.error('Failed to export report.');
+    }
   };
 
   const toggleSort = (key: SortKey) =>
@@ -190,15 +292,45 @@ export function PerformanceReport() {
                 </div>
               </>
             )}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Employee</Label>
+              <MultiFilterSelect
+                label="Employee" allLabel="All Employees"
+                selected={employeeIds}
+                options={availableEmployees.map(e => ({ value: e.employee_id, label: e.name }))}
+                onChange={setEmployeeIds}
+                onClear={() => setEmployeeIds([])}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Location</Label>
+              <MultiFilterSelect
+                label="Location" allLabel="All Locations"
+                selected={locations}
+                options={availableLocations}
+                onChange={setLocations}
+                onClear={() => setLocations([])}
+              />
+            </div>
             <div className="flex items-center gap-2 pb-1.5">
               <Switch id="perf-active" checked={activeOnly} onCheckedChange={setActiveOnly} />
               <Label htmlFor="perf-active" className="text-sm font-normal text-muted-foreground">Active employees only</Label>
             </div>
             {isFetching && !isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mb-2" />}
           </div>
-          <div className="relative w-full lg:max-w-xs">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Employee, title, location, project..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+          <div className="flex items-end gap-2 w-full lg:w-auto">
+            <div className="relative w-full lg:max-w-xs">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Employee, title, location, project..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+            </div>
+            <Button
+              variant="outline" size="sm" className="gap-1.5 shrink-0"
+              disabled={exportTable.isPending || rows.length === 0}
+              onClick={handleExport}
+            >
+              {exportTable.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export Excel
+            </Button>
           </div>
         </CardContent>
       </Card>

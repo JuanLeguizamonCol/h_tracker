@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -22,7 +23,7 @@ from models.project_roles import ProjectRole
 from utils.auth_jwt import get_current_employee
 from utils.roles import get_role
 from utils.section_access import require_section_view
-from services.export_excel import generate_time_entries_report_xlsx
+from services.export_excel import generate_time_entries_report_xlsx, generate_generic_table_xlsx
 from services.employee_performance import employee_performance, default_window, month_end
 from schemas.employee_performance import EmployeePerformanceOut
 
@@ -225,3 +226,44 @@ def get_employee_performance(
     if (end.year - start.year) * 12 + end.month - start.month >= 36:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The window can span at most 36 months.")
     return employee_performance(db, start, month_end(end.year, end.month), today)
+
+
+# ── Generic "export what's on screen" xlsx ──────────────────────────────────
+# Used by Reports tabs with no bespoke export of their own (Utilization,
+# Performance): the frontend sends the rows/columns it's already showing
+# (post-filter), so the download is a literal match of the on-screen table
+# rather than a second, independently-computed aggregation.
+
+class ExportTableColumn(BaseModel):
+    key: str
+    label: str
+    format: str = "text"  # "text" | "number" | "money" | "percent"
+
+
+class ExportTableSheet(BaseModel):
+    title: str
+    columns: List[ExportTableColumn]
+    rows: List[dict]
+
+
+class ExportTableRequest(BaseModel):
+    filename: str
+    sheets: List[ExportTableSheet]
+    filters_summary: Optional[List[str]] = None
+
+
+@reports_router.post("/export-table/xlsx", dependencies=[Depends(require_section_view('reports'))])
+def export_table_xlsx(body: ExportTableRequest):
+    total_rows = sum(len(s.rows) for s in body.sheets)
+    if total_rows > 20000:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Too many rows for one export.")
+    xlsx_bytes = generate_generic_table_xlsx(
+        [s.model_dump() for s in body.sheets],
+        body.filters_summary,
+    )
+    filename = body.filename if body.filename.endswith(".xlsx") else f"{body.filename}.xlsx"
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

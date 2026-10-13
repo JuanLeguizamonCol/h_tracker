@@ -39,14 +39,15 @@ export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-async function apiFetchBlob(path: string): Promise<Blob> {
+async function apiFetchBlob(path: string, init?: RequestInit): Promise<Blob> {
   const token = getStoredToken();
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (init?.body) headers['Content-Type'] = 'application/json';
 
   // Exports (PDF/XLSX) must always be freshly generated — never served from
   // the browser's HTTP cache, which would silently mask a fix on the backend.
-  const response = await fetch(apiUrl(path), { headers, cache: 'no-store' });
+  const response = await fetch(apiUrl(path), { ...init, headers, cache: 'no-store' });
   if (response.status === 401) {
     clearStoredToken();
     window.location.href = '/auth';
@@ -112,6 +113,20 @@ export const api = {
   upload: <T>(path: string, formData: FormData) => apiUpload<T>(path, formData),
   download: (path: string, filename: string) =>
     apiFetchBlob(path).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }),
+  // Same as `download`, but POSTs a body instead of relying on query params —
+  // for exports whose payload (e.g. the rows currently on screen) is too
+  // large or structured to fit comfortably in a URL.
+  downloadPost: (path: string, body: unknown, filename: string) =>
+    apiFetchBlob(path, { method: 'POST', body: JSON.stringify(body) }).then(blob => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

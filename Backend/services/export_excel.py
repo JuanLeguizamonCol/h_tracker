@@ -972,3 +972,91 @@ def generate_invoices_report_xlsx(invoices_data: list) -> bytes:
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def generate_generic_table_xlsx(
+    sheets: list[dict],
+    filters_summary: list[str] | None = None,
+) -> bytes:
+    """Styled export for a Reports tab with no bespoke xlsx builder of its
+    own (currently: Utilization, Performance). The frontend sends exactly
+    the rows/columns it's showing on screen — already filtered — so the
+    download is always a literal match of what the user is looking at,
+    instead of a second, independently-computed aggregation that could
+    drift from the UI's own math over time. `filters_summary` (applied
+    filters, as display text) is repeated at the top of every sheet.
+
+    sheets: [{"title": str, "columns": [...], "rows": [...]}, ...] — one
+      workbook sheet per entry (e.g. Performance exports Scorecard / Monthly
+      Hours / Scores by Project as three sheets in one file).
+    columns: [{"key": str, "label": str, "format": "text"|"number"|"money"|"percent"}]
+      (format defaults to "text" when omitted)
+    rows: [{col_key: value, ...}, ...] — value is whatever that column's
+      format expects (a plain number for "number"/"money"/"percent", a
+      string otherwise).
+    """
+    wb = Workbook()
+    wb.remove(wb.active)
+    used_titles: set[str] = set()
+    white_fill = PatternFill("solid", fgColor=WHITE)
+
+    for sheet in sheets:
+        title = (sheet.get("title") or "Report")[:31]
+        base_title, n = title, 2
+        while title in used_titles:
+            title = f"{base_title[:28]} {n}"
+            n += 1
+        used_titles.add(title)
+        columns = sheet.get("columns", [])
+        rows = sheet.get("rows", [])
+
+        ws = wb.create_sheet(title)
+        ws.sheet_view.showGridLines = False
+
+        r = 1
+        if columns:
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(columns))
+        ws.cell(row=r, column=1, value=title).font = TITLE_FONT
+        r += 1
+
+        if filters_summary:
+            for line in filters_summary:
+                ws.cell(row=r, column=1, value=line).font = GREY_FONT
+                r += 1
+            r += 1
+
+        header_row = r
+        _header_row(ws, header_row, [col.get("label", col.get("key", "")) for col in columns])
+        r += 1
+
+        for i, row in enumerate(rows):
+            fill = STRIPE_FILL if i % 2 == 1 else white_fill
+            for col_idx, col in enumerate(columns, 1):
+                val = row.get(col["key"])
+                cell = ws.cell(row=r, column=col_idx, value=val)
+                cell.font = BODY_FONT
+                cell.fill = fill
+                cell.border = _thin_border()
+                fmt = col.get("format", "text")
+                if fmt == "money":
+                    cell.number_format = MONEY_FMT
+                    cell.alignment = RIGHT
+                elif fmt == "percent":
+                    cell.number_format = '0.0"%"'
+                    cell.alignment = RIGHT
+                elif fmt == "number":
+                    cell.number_format = '#,##0.00' if isinstance(val, float) else '#,##0'
+                    cell.alignment = RIGHT
+                else:
+                    cell.alignment = LEFT
+            r += 1
+
+        _set_col_widths(ws, {
+            get_column_letter(i): max(12, min(32, len(col.get("label", "")) + 4))
+            for i, col in enumerate(columns, 1)
+        })
+        ws.freeze_panes = ws.cell(row=header_row + 1, column=1).coordinate
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

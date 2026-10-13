@@ -19,6 +19,7 @@ import { useClients } from '@/hooks/useClients';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useAllTimeEntriesByDateRange, useTimeEntriesByDateRange } from '@/hooks/useTimeEntries';
 import { useStaffing } from '@/hooks/useAssignedProjects';
+import { useExportReportTable } from '@/hooks/useReportExport';
 import { useSkillSearch, useSkillCatalog } from '@/hooks/useSkills';
 import { TimeEntry } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -1112,6 +1113,42 @@ export default function Reports() {
     return { overloaded, underloaded, balanced, avgUtilizationPct, total: utilizationData.length };
   }, [utilizationData]);
 
+  const exportUtilization = useExportReportTable();
+  const handleExportUtilization = async () => {
+    try {
+      await exportUtilization.mutateAsync({
+        filename: `utilization-report_${format(f.startDate, 'yyyy-MM-dd')}_${format(f.endDate, 'yyyy-MM-dd')}`,
+        filters_summary: [
+          `Date range: ${format(f.startDate, 'yyyy-MM-dd')} to ${format(f.endDate, 'yyyy-MM-dd')}`,
+          `Weekly capacity: ${WEEKLY_CAPACITY_HOURS}h`,
+          f.employeeId.length > 0 ? `Employees: ${availableEmployees.filter(e => f.employeeId.includes(e.id)).map(e => e.name).join(', ')}` : 'Employees: All',
+          f.location.length > 0 ? `Locations: ${availableLocations.filter(l => f.location.includes(l.value)).map(l => l.label).join(', ')}` : 'Locations: All',
+        ],
+        sheets: [{
+          title: 'Utilization Detail',
+          columns: [
+            { key: 'name', label: 'Person' },
+            { key: 'avg_hours', label: 'Avg Hours/Week', format: 'number' },
+            { key: 'utilization_pct', label: 'Utilization %', format: 'percent' },
+            { key: 'status', label: 'Status' },
+            { key: 'client_hours', label: 'Client Hrs', format: 'number' },
+            { key: 'internal_hours', label: 'Internal Hrs', format: 'number' },
+            { key: 'total_hours', label: 'Total Hours', format: 'number' },
+            { key: 'overloaded_weeks', label: `Weeks Over ${WEEKLY_CAPACITY_HOURS}h`, format: 'number' },
+          ],
+          rows: utilizationData.map(d => ({
+            name: d.name, avg_hours: d.avgWeeklyHours, utilization_pct: d.utilizationPct,
+            status: STATUS_LABELS[d.status], client_hours: d.clientHours, internal_hours: d.internalHours,
+            total_hours: d.totalHours, overloaded_weeks: d.overloadedWeeks,
+          })),
+        }],
+      });
+      toast.success('Utilization report exported.');
+    } catch {
+      toast.error('Failed to export report.');
+    }
+  };
+
   // ── Staffing rows scoped to the Filters card ────────────────────────────────
   // The two Staffing-based sections below (projected occupancy, projected vs
   // actual) used to read `staffing` directly — the org-wide plan, completely
@@ -1331,10 +1368,15 @@ export default function Reports() {
               <X className="h-3.5 w-3.5" />Clear All
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handleExportExcel} disabled={isExporting} className="gap-1.5">
-            {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            Export Excel
-          </Button>
+          {/* Utilization has its own "Export Excel" button on its summary table
+              below — this one is the detailed time-entries export, Hours-only
+              so the two don't sit side by side looking like duplicates. */}
+          {reportTab === 'hours' && (
+            <Button variant="outline" size="sm" onClick={handleExportExcel} disabled={isExporting} className="gap-1.5">
+              {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              Export Excel
+            </Button>
+          )}
         </div>}
       </div>
 
@@ -1939,12 +1981,22 @@ export default function Reports() {
           </div>
 
           <Card className="card-elevated">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Utilization Detail</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Sorted by average weekly hours · Total = Client + Internal (vacation, holidays, meetings, etc. — counted in full, broken out for visibility)
-                {` · ${weeksInSelectedRange.toFixed(1)} week${weeksInSelectedRange !== 1 ? 's' : ''} in the selected range`}
-              </p>
+            <CardHeader className="pb-2 flex flex-row items-start justify-between gap-4">
+              <div>
+                <CardTitle className="text-base">Utilization Detail</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Sorted by average weekly hours · Total = Client + Internal (vacation, holidays, meetings, etc. — counted in full, broken out for visibility)
+                  {` · ${weeksInSelectedRange.toFixed(1)} week${weeksInSelectedRange !== 1 ? 's' : ''} in the selected range`}
+                </p>
+              </div>
+              <Button
+                variant="outline" size="sm" className="gap-1.5 shrink-0"
+                disabled={exportUtilization.isPending || utilizationData.length === 0}
+                onClick={handleExportUtilization}
+              >
+                {exportUtilization.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                Export Excel
+              </Button>
             </CardHeader>
             <CardContent>
               <div className="max-h-[420px] overflow-auto">
