@@ -190,12 +190,6 @@ function isDateLocked(dateStr: string): boolean {
 
 export default function Timesheet() {
   const { employee, isAdmin } = useAuth();
-  // When an Admin has granted ME a temporary override, closed-month cells
-  // unlock just for my own session — see Backend/utils/time_entry_lock.py.
-  // Admins themselves are always exempt from the monthly close, so they
-  // never need an override to log/edit/delete hours in a closed period.
-  const { data: lockOverrideStatus } = useMyLockOverrideStatus();
-  const hasActiveLockOverride = isAdmin || !!lockOverrideStatus?.is_active;
   // Who this session is currently logging hours AS — defaults to the signed-in
   // employee. When an Admin has delegated me for someone else (see
   // Backend/models/time_entry_delegates.py), I can switch to logging theirs
@@ -203,6 +197,16 @@ export default function Timesheet() {
   const { data: delegateTargets = [] } = useMyTimeEntryDelegateTargets();
   const [actingAsUserId, setActingAsUserId] = useState<string | null>(null);
   const activeUserId = actingAsUserId || employee?.id;
+  // When an Admin has granted ME a temporary override, closed-month cells
+  // unlock just for my own hours — see Backend/utils/time_entry_lock.py.
+  // Admins themselves are always exempt. This must NOT carry over while
+  // acting as a delegate target: the backend checks the override on the
+  // TARGET's own employee_id, not the delegate's, so my own override says
+  // nothing about whether Jose's closed months are open — applying it to
+  // his cells anyway would show them as editable client-side and then 403
+  // on save, which is exactly what happened before this fix.
+  const { data: lockOverrideStatus } = useMyLockOverrideStatus();
+  const hasActiveLockOverride = isAdmin || (!actingAsUserId && !!lockOverrideStatus?.is_active);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isSaving, setIsSaving] = useState(false);
   const [rows, setRows] = useState<ProjectRow[]>([]);
@@ -636,7 +640,23 @@ export default function Timesheet() {
         toast.success("Saved — you're all set.");
       }
     } catch (error) {
-      toast.error('Something went wrong while saving. Please try again.');
+      // The client-side lock check is UX only (see isDateLocked above) — if
+      // it ever disagrees with the server (e.g. the override being checked
+      // doesn't apply to who these hours are actually for), surface the
+      // server's real reason instead of a generic message that hides it.
+      let message = 'Something went wrong while saving. Please try again.';
+      if (error instanceof Error) {
+        const match = error.message.match(/^API error \d+: (.*)$/s);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[1]);
+            if (typeof parsed?.detail === 'string') message = parsed.detail;
+          } catch {
+            // Not JSON — leave the generic message.
+          }
+        }
+      }
+      toast.error(message);
       console.error(error);
     } finally {
       setIsSaving(false);
