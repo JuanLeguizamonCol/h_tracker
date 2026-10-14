@@ -14,6 +14,7 @@ from services.time_entries import (
 )
 from schemas.time_entries import TimeEntryCreate, TimeEntryUpdate, TimeEntryOut
 from utils.time_entry_lock import is_period_locked, lock_date_for, has_active_lock_override
+from utils.time_entry_delegate import is_active_delegate_for
 
 time_entries_router = APIRouter(prefix="/time-entries", tags=["time-entries"])
 
@@ -43,10 +44,16 @@ def create_new_time_entry(
     db: Session = Depends(get_db),
     current_employee: Employee = Depends(get_current_employee),
 ):
-    # Employees can only log hours for themselves. Managers/admins may enter
-    # entries for anyone (e.g. corrections).
+    # Employees can only log hours for themselves, unless an Admin has
+    # granted them a TimeEntryDelegate for this specific person (e.g. an
+    # assistant entering hours for someone who doesn't use the tracker).
+    # Managers/admins may enter entries for anyone (e.g. corrections).
     actor_role = get_role(db, current_employee.id)
-    if actor_role not in ("admin", "manager") and entry_in.user_id != current_employee.id:
+    if (
+        actor_role not in ("admin", "manager")
+        and entry_in.user_id != current_employee.id
+        and not is_active_delegate_for(db, current_employee.id, entry_in.user_id)
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only log time for yourself")
     _assert_period_open(db, entry_in.user_id, entry_in.date, actor_role)
     # Business Development projects are prospective work — no hours are
@@ -74,9 +81,11 @@ def list_time_entries(
     # Employees can only ever see their own time entries — regardless of what
     # user_id is passed — so History/reporting can't be used to browse
     # someone else's hours by calling the API directly. Managers/admins can
-    # see anyone's (or everyone's, when user_id is omitted).
+    # see anyone's (or everyone's, when user_id is omitted); a delegate may
+    # also see the one specific person they're delegated for.
     if get_role(db, current_employee.id) not in ("admin", "manager"):
-        user_id = current_employee.id
+        if user_id != current_employee.id and not (user_id and is_active_delegate_for(db, current_employee.id, user_id)):
+            user_id = current_employee.id
     return get_time_entries(
         db,
         user_id=user_id,
@@ -97,7 +106,11 @@ def get_time_entry_detail(
     entry = get_time_entry(db, entry_id)
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
-    if get_role(db, current_employee.id) not in ("admin", "manager") and entry.user_id != current_employee.id:
+    if (
+        get_role(db, current_employee.id) not in ("admin", "manager")
+        and entry.user_id != current_employee.id
+        and not is_active_delegate_for(db, current_employee.id, entry.user_id)
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only view your own time entries")
     return entry
 
@@ -113,7 +126,11 @@ def update_time_entry_detail(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
     actor_role = get_role(db, current_employee.id)
-    if actor_role not in ("admin", "manager") and existing.user_id != current_employee.id:
+    if (
+        actor_role not in ("admin", "manager")
+        and existing.user_id != current_employee.id
+        and not is_active_delegate_for(db, current_employee.id, existing.user_id)
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own time entries")
     # Locked if EITHER the entry's current date or (when it's being moved) its
     # new date falls in a closed period — no editing an already-closed entry,
@@ -136,7 +153,11 @@ def delete_time_entry_detail(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
     actor_role = get_role(db, current_employee.id)
-    if actor_role not in ("admin", "manager") and existing.user_id != current_employee.id:
+    if (
+        actor_role not in ("admin", "manager")
+        and existing.user_id != current_employee.id
+        and not is_active_delegate_for(db, current_employee.id, existing.user_id)
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only delete your own time entries")
     _assert_period_open(db, existing.user_id, existing.date, actor_role)
     delete_time_entry(db, entry_id)

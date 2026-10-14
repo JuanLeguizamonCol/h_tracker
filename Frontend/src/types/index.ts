@@ -34,6 +34,21 @@ export interface TimeEntryLockOverride {
   is_active: boolean;
 }
 
+// Admin-granted, open-ended permission for one employee to also log/edit/
+// delete time entries for one specific other employee — see
+// Backend/models/time_entry_delegates.py / routers/time_entry_delegates.py.
+export interface TimeEntryDelegate {
+  id: string;
+  delegate_user_id: string;
+  delegate_name: string;
+  target_user_id: string;
+  target_name: string;
+  granted_by: string;
+  granted_at: string;
+  revoked_at: string | null;
+  is_active: boolean;
+}
+
 export interface Employee {
   id: string;
   user_id: string;

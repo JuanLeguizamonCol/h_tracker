@@ -1,12 +1,13 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { format, startOfWeek, addDays } from 'date-fns';
-import { CalendarIcon, ChevronLeft, ChevronRight, Save, Loader2, MessageSquare, Plus, X, Search, MapPin, Receipt, Lock } from 'lucide-react';
+import { CalendarIcon, ChevronLeft, ChevronRight, Save, Loader2, MessageSquare, Plus, X, Search, MapPin, Receipt, Lock, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useActiveProjects } from '@/hooks/useProjects';
 import { useClients } from '@/hooks/useClients';
 import { useAssignedProjectsWithDetails, useAssignedProjects } from '@/hooks/useAssignedProjects';
 import { useTimeEntriesByWeek, useCreateTimeEntry, useUpdateTimeEntry, useDeleteTimeEntry } from '@/hooks/useTimeEntries';
 import { useMyLockOverrideStatus } from '@/hooks/useTimeEntryLockOverrides';
+import { useMyTimeEntryDelegateTargets } from '@/hooks/useTimeEntryDelegates';
 import { useCreateProjectExpense } from '@/hooks/useProjectExpenses';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -195,6 +196,13 @@ export default function Timesheet() {
   // never need an override to log/edit/delete hours in a closed period.
   const { data: lockOverrideStatus } = useMyLockOverrideStatus();
   const hasActiveLockOverride = isAdmin || !!lockOverrideStatus?.is_active;
+  // Who this session is currently logging hours AS — defaults to the signed-in
+  // employee. When an Admin has delegated me for someone else (see
+  // Backend/models/time_entry_delegates.py), I can switch to logging theirs
+  // instead — scoped to exactly that person, not a general "view as" mode.
+  const { data: delegateTargets = [] } = useMyTimeEntryDelegateTargets();
+  const [actingAsUserId, setActingAsUserId] = useState<string | null>(null);
+  const activeUserId = actingAsUserId || employee?.id;
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isSaving, setIsSaving] = useState(false);
   const [rows, setRows] = useState<ProjectRow[]>([]);
@@ -219,9 +227,9 @@ export default function Timesheet() {
 
   const { data: allProjects = [], isLoading: projectsLoading } = useActiveProjects();
   const { data: clients = [] } = useClients();
-  const { data: assignedProjects = [], isLoading: assignmentsLoading } = useAssignedProjectsWithDetails(employee?.id);
-  const { data: rawAssignments = [] } = useAssignedProjects(employee?.id);
-  const { data: weekEntries = [], isLoading: entriesLoading } = useTimeEntriesByWeek(weekStart, employee?.id);
+  const { data: assignedProjects = [], isLoading: assignmentsLoading } = useAssignedProjectsWithDetails(activeUserId);
+  const { data: rawAssignments = [] } = useAssignedProjects(activeUserId);
+  const { data: weekEntries = [], isLoading: entriesLoading } = useTimeEntriesByWeek(weekStart, activeUserId);
 
   const createTimeEntry = useCreateTimeEntry();
   const updateTimeEntry = useUpdateTimeEntry();
@@ -258,8 +266,12 @@ export default function Timesheet() {
   // Initialize (or re-initialize) rows when data for the current week arrives
   useEffect(() => {
     if (isLoading) return;
-    if (prevWeekKeyRef.current === weekKey) return;
-    prevWeekKeyRef.current = weekKey;
+    // Keyed by week + who we're acting as, so switching "log hours for"
+    // without also changing the week still rebuilds from that person's data
+    // instead of leaving the previous person's rows on screen.
+    const resetKey = `${weekKey}::${activeUserId}`;
+    if (prevWeekKeyRef.current === resetKey) return;
+    prevWeekKeyRef.current = resetKey;
 
     // Keyed by project + billable type, NOT project alone — a project can carry
     // both billable and non-billable hours at once, and merging them into a
@@ -325,7 +337,7 @@ export default function Timesheet() {
     });
     setDayLocations(locationByDate);
     setDirtyLocationDays(new Set());
-  }, [isLoading, weekKey, weekEntries, availableProjects, weekStart, employee?.location]);
+  }, [isLoading, weekKey, activeUserId, weekEntries, availableProjects, weekStart, employee?.location]);
 
   const weekDates = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -575,7 +587,7 @@ export default function Timesheet() {
           } else if (dayEntry.dirty && dayEntry.hours > 0) {
             promises.push(
               createTimeEntry.mutateAsync({
-                user_id: employee.id,
+                user_id: activeUserId!,
                 project_id: row.projectId,
                 date: dateStr,
                 hours: dayEntry.hours,
@@ -675,6 +687,27 @@ export default function Timesheet() {
           </Button>
         </div>
       </div>
+
+      {/* "Log hours for..." switcher — only shown when an Admin has delegated
+          me for at least one other specific person (see
+          Backend/models/time_entry_delegates.py). Switching does not change
+          who's signed in — it only changes whose hours this page reads/writes. */}
+      {delegateTargets.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Users className="h-4 w-4 text-muted-foreground shrink-0" />
+          <Select value={activeUserId} onValueChange={v => setActingAsUserId(v === employee?.id ? null : v)}>
+            <SelectTrigger className="w-[260px]">
+              <SelectValue placeholder="Log hours for..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={employee?.id ?? ''}>Me ({employee?.name})</SelectItem>
+              {delegateTargets.map(t => (
+                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* Week Navigator + Add Project */}
       <div className="flex flex-wrap items-center gap-2">
