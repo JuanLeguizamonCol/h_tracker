@@ -788,15 +788,32 @@ export interface InvoiceTimeEntry {
 
 export type PerformanceReviewStatus = 'self_assessment' | 'in_review' | 'joint_review' | 'completed';
 
-/** The three evaluations of every review — only `joint` is official. */
+/** The three evaluation "slots" of every review — only `joint` is official.
+ * `manager` can be ANY of the N assigned reviewers' rows, selected in the UI
+ * (see ReviewerSelector in PerformanceReviewPage.tsx) — it is not a distinct
+ * evaluation of its own the way self/joint are. */
 export type EvaluationKey = 'self' | 'manager' | 'joint';
 
 export interface ReviewEvaluation {
-  /** False while the caller may not see it yet (self/manager are blind until the joint stage). */
+  /** False while the caller may not see it yet (self/reviewer rows are blind
+   * to each other until Final Submission). */
   visible: boolean;
   scores: Record<string, ReviewScore>;
   criteria_averages: { key: string; label: string; average: number | null }[];
   overall_average: number | null;
+  /** Only populated for "self" — one free-text comment per criterion,
+   * replacing per-item scores (the self evaluation no longer scores anything). */
+  section_comments?: Record<string, string> | null;
+}
+
+/** One assigned reviewer's own, independent evaluation. */
+export interface ReviewerEvaluation extends ReviewEvaluation {
+  reviewer_id: string;
+  reviewer_name: string | null;
+  strengths_notes: string | null;
+  improvement_notes: string | null;
+  development_notes: string | null;
+  submitted: boolean;
 }
 
 export interface ReviewScore {
@@ -824,9 +841,16 @@ export interface PerformanceReview {
   client_name: string | null;
   employee_id: string;
   employee_name: string;
-  reviewer_id: string | null;
-  reviewer_name: string | null;
   review_date: string;
+  /** Deadline for the SELF stage only — null means no deadline. Reviewer and
+   * Final Submission stages never have one. */
+  self_due_date: string | null;
+  /** True once self_due_date has passed and it still hasn't been submitted —
+   * the employee can no longer edit/submit it (Admin/Manager always can). */
+  self_locked: boolean;
+  /** Which REVIEW_TEMPLATE-equivalent format this review uses — only
+   * "standard" exists today (see useEvaluationFormats). */
+  evaluation_format: string;
   period_start: string | null;
   period_end: string | null;
   duration_hours: number | null;
@@ -835,30 +859,36 @@ export interface PerformanceReview {
   self_strengths: string | null;
   self_improvement: string | null;
   self_development: string | null;
-  reviewer_strengths_notes: string | null;
-  reviewer_improvement_notes: string | null;
-  reviewer_development_notes: string | null;
   joint_notes: string | null;
-  evaluations: Record<EvaluationKey, ReviewEvaluation>;
+  evaluations: {
+    self: ReviewEvaluation;
+    reviewers: ReviewerEvaluation[];
+    joint: ReviewEvaluation;
+  };
   /** Official score = the joint evaluation's overall average. */
   overall_average: number | null;
   status: PerformanceReviewStatus;
   self_submitted_at: string | null;
-  manager_submitted_at: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export type PerformanceReviewPatch = Partial<Pick<PerformanceReview,
-  | 'reviewer_id' | 'review_date' | 'period_start' | 'period_end' | 'duration_hours'
+  | 'review_date' | 'self_due_date' | 'evaluation_format' | 'period_start' | 'period_end' | 'duration_hours'
   | 'project_description' | 'employee_role'
   | 'self_strengths' | 'self_improvement' | 'self_development'
-  | 'reviewer_strengths_notes' | 'reviewer_improvement_notes' | 'reviewer_development_notes'
   | 'joint_notes'>> & {
-  self_scores?: Record<string, ReviewScore>;
-  manager_scores?: Record<string, ReviewScore>;
+  reviewer_ids?: string[];
+  self_section_comments?: Record<string, string>;
   joint_scores?: Record<string, ReviewScore>;
+  reviewer_evaluation?: {
+    reviewer_id?: string;
+    scores?: Record<string, ReviewScore>;
+    strengths_notes?: string | null;
+    improvement_notes?: string | null;
+    development_notes?: string | null;
+  };
 };
 
 export interface ReviewProject {
@@ -891,8 +921,8 @@ export interface ReviewTeamMember {
     id: string;
     status: PerformanceReviewStatus;
     review_date: string;
-    reviewer_id: string | null;
-    reviewer_name: string | null;
+    reviewer_ids: string[];
+    reviewer_names: string[];
     overall_average: number | null;
   }[];
 }
@@ -910,10 +940,11 @@ export interface AnalyticsReview {
   project_id: string;
   project_name: string;
   client_name: string | null;
-  reviewer_name: string | null;
+  reviewer_names: string[];
   review_date: string;
   duration_hours: number | null;
   self: AnalyticsEvaluationScores;
+  /** Cross-reviewer average — not any one reviewer's individual scores. */
   manager: AnalyticsEvaluationScores;
   joint: AnalyticsEvaluationScores;
 }

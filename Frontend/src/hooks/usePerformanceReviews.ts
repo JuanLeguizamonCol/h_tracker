@@ -8,7 +8,7 @@ import {
 export const REVIEW_STATUS_BADGE: Record<PerformanceReviewStatus, { label: string; className: string }> = {
   self_assessment: { label: 'Self-assessment', className: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300' },
   in_review: { label: 'Manager review', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
-  joint_review: { label: 'Joint review', className: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300' },
+  joint_review: { label: 'Final Submission', className: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300' },
   completed: { label: 'Completed', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' },
 };
 
@@ -18,11 +18,11 @@ export const EVALUATION_META: Record<EvaluationKey, { label: string; short: stri
     activeTab: 'data-[state=active]:border-sky-600 dark:data-[state=active]:border-sky-400 data-[state=active]:text-sky-700 dark:data-[state=active]:text-sky-400',
   },
   manager: {
-    label: 'Manager evaluation', short: 'Manager', who: 'by the project manager', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400', ring: 'bg-amber-600 border-amber-600',
+    label: 'Manager evaluation', short: 'Manager', who: 'by each assigned reviewer, independently', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400', ring: 'bg-amber-600 border-amber-600',
     activeTab: 'data-[state=active]:border-amber-600 dark:data-[state=active]:border-amber-400 data-[state=active]:text-amber-700 dark:data-[state=active]:text-amber-400',
   },
   joint: {
-    label: 'Joint evaluation', short: 'Joint', who: 'agreed together — official', dot: 'bg-emerald-600', text: 'text-emerald-700 dark:text-emerald-400', ring: 'bg-emerald-600 border-emerald-600',
+    label: 'Final Submission', short: 'Final', who: 'agreed together — official', dot: 'bg-emerald-600', text: 'text-emerald-700 dark:text-emerald-400', ring: 'bg-emerald-600 border-emerald-600',
     activeTab: 'data-[state=active]:border-emerald-600 dark:data-[state=active]:border-emerald-400 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-400',
   },
 };
@@ -31,6 +31,16 @@ export function useReviewTemplate() {
   return useQuery({
     queryKey: ['performance-reviews', 'template'],
     queryFn: () => api.get<ReviewTemplate>('/performance-reviews/template'),
+    staleTime: Infinity,
+  });
+}
+
+/** Which evaluation formats a review can be assigned under — only one today
+ * ("standard"); more are coming later, this is the selector's data source. */
+export function useEvaluationFormats() {
+  return useQuery({
+    queryKey: ['performance-reviews', 'formats'],
+    queryFn: () => api.get<{ key: string; label: string }[]>('/performance-reviews/formats'),
     staleTime: Infinity,
   });
 }
@@ -149,7 +159,8 @@ export function useAssignSelfAssessments() {
   return useMutation({
     mutationFn: (data: {
       project_id: string; employee_ids: string[]; review_date: string;
-      reviewer_id?: string | null; period_start?: string | null; period_end?: string | null;
+      self_due_date?: string | null; evaluation_format?: string;
+      reviewer_ids?: string[]; period_start?: string | null; period_end?: string | null;
     }) => api.post<{ created: PerformanceReview[]; skipped_employee_ids: string[] }>('/performance-reviews/bulk', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });

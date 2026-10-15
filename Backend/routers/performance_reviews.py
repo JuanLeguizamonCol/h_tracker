@@ -36,7 +36,8 @@ def _load_visible(db: Session, review_id: str, employee: Employee) -> tuple[Perf
     if not review:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
     manage = _can_manage(db, employee)
-    if not (manage or employee.id in (review.employee_id, review.reviewer_id)):
+    reviewer_ids = {r.reviewer_id for r in review.reviewers}
+    if not (manage or employee.id == review.employee_id or employee.id in reviewer_ids):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this review.")
     return review, manage
 
@@ -54,6 +55,13 @@ def _email_of(db: Session, employee_id: Optional[str]) -> Optional[str]:
 @performance_reviews_router.get("/template", response_model=ReviewTemplateOut)
 def get_template():
     return svc.template_out()
+
+
+@performance_reviews_router.get("/formats")
+def get_evaluation_formats():
+    """Which evaluation formats a review can be assigned under — only one
+    today ("standard"); more are coming (see EVALUATION_FORMATS)."""
+    return [{"key": k, "label": v} for k, v in svc.EVALUATION_FORMATS.items()]
 
 
 @performance_reviews_router.get("/logged-hours")
@@ -148,8 +156,12 @@ def bulk_assign_self_assessments(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one employee.")
     if data.period_start and data.period_end and data.period_end < data.period_start:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Period end must be on or after the start.")
-    if data.reviewer_id and not db.query(Employee.id).filter(Employee.id == data.reviewer_id).first():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reviewer not found.")
+    reviewer_ids = list(dict.fromkeys(data.reviewer_ids or []))
+    if reviewer_ids:
+        found_reviewers = {i for (i,) in db.query(Employee.id).filter(Employee.id.in_(reviewer_ids)).all()}
+        missing_reviewers = [i for i in reviewer_ids if i not in found_reviewers]
+        if missing_reviewers:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Reviewer not found: {missing_reviewers[0]}")
     employee_ids = list(dict.fromkeys(data.employee_ids))
     found = {i for (i,) in db.query(Employee.id).filter(Employee.id.in_(employee_ids)).all()}
     missing = [i for i in employee_ids if i not in found]
@@ -164,8 +176,10 @@ def bulk_assign_self_assessments(
         review = svc.create_review(db, PerformanceReviewCreate(
             project_id=data.project_id,
             employee_id=employee_id,
-            reviewer_id=data.reviewer_id,
+            reviewer_ids=reviewer_ids,
             review_date=data.review_date,
+            self_due_date=data.self_due_date,
+            evaluation_format=data.evaluation_format,
             period_start=data.period_start,
             period_end=data.period_end,
         ), current_employee.id)
@@ -210,10 +224,14 @@ def create_review(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Performance reviews are turned off for this project.")
     if not db.query(Employee.id).filter(Employee.id == data.employee_id).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee not found.")
-    if data.reviewer_id and not db.query(Employee.id).filter(Employee.id == data.reviewer_id).first():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reviewer not found.")
-    if data.reviewer_id and data.reviewer_id == data.employee_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An employee can't review themselves.")
+    reviewer_ids = list(dict.fromkeys(data.reviewer_ids or []))
+    if reviewer_ids:
+        found_reviewers = {i for (i,) in db.query(Employee.id).filter(Employee.id.in_(reviewer_ids)).all()}
+        missing_reviewers = [i for i in reviewer_ids if i not in found_reviewers]
+        if missing_reviewers:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Reviewer not found: {missing_reviewers[0]}")
+        if data.employee_id in reviewer_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An employee can't review themselves.")
     if data.period_start and data.period_end and data.period_end < data.period_start:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Period end must be on or after the start.")
     review = svc.create_review(db, data, current_employee.id)
@@ -249,12 +267,25 @@ def update_review(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"You can't edit these fields at this stage: {', '.join(sorted(forbidden))}",
         )
-    if changes.get("reviewer_id") and changes["reviewer_id"] == review.employee_id:
+    if changes.get("reviewer_ids") and review.employee_id in changes["reviewer_ids"]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An employee can't review themselves.")
     if "review_date" in changes and changes["review_date"] is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Review date is required.")
+
+    reviewer_evaluation = changes.pop("reviewer_evaluation", None)
+    if reviewer_evaluation is not None:
+        target_reviewer_id = reviewer_evaluation.get("reviewer_id")
+        if target_reviewer_id and not manage and target_reviewer_id != current_employee.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own evaluation.")
+        if not target_reviewer_id:
+            target_reviewer_id = current_employee.id
+
     try:
         review = svc.update_review(db, review, changes)
+        if reviewer_evaluation is not None:
+            svc.apply_reviewer_evaluation(db, review, target_reviewer_id, reviewer_evaluation)
+            db.commit()
+            db.refresh(review)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return _out(db, review, current_employee, manage)
@@ -269,25 +300,32 @@ def transition_review(
 ):
     review, manage = _load_visible(db, review_id, current_employee)
     is_reviewee = review.employee_id == current_employee.id
-    is_reviewer = review.reviewer_id == current_employee.id
+    reviewer_ids = {r.reviewer_id for r in review.reviewers}
+    is_reviewer = current_employee.id in reviewer_ids
 
     # Every review walks the same stages in order — Admin/Manager can act on
-    # anyone's behalf at each stage, but can't skip one.
+    # anyone's behalf at each stage, but can't skip one. With N reviewers,
+    # "submit_manager" submits only the CALLING reviewer's own evaluation —
+    # the stage only advances to joint_review once every assigned reviewer
+    # has done this (see services/performance_reviews.py::transition_review).
     if body.action == "submit_self":
         if not (manage or is_reviewee):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the employee can submit their self-assessment.")
         if review.status != "self_assessment":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The self-assessment was already submitted.")
+        if not manage and svc.self_assessment_locked(review):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"The self-assessment deadline ({review.self_due_date.isoformat()}) has passed. Ask an Admin to extend it.",
+            )
     elif body.action == "submit_manager":
         if not (manage or is_reviewer):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the reviewer can submit the manager evaluation.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an assigned reviewer can submit a reviewer evaluation.")
         if review.status != "in_review":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The manager evaluation can only be submitted after the self-assessment and before the joint review.")
-        if svc.compute_averages(review.manager_scores or {})[1] is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Score at least one item of the manager evaluation first.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A reviewer evaluation can only be submitted after the self-assessment and before the joint review.")
     elif body.action == "complete":
         if not (manage or is_reviewer):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the reviewer can complete this review.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an assigned reviewer can complete this review.")
         if review.status != "joint_review":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A review can only be completed from the joint review stage.")
         if svc.compute_averages(review.joint_scores or {})[1] is None:
@@ -300,12 +338,20 @@ def transition_review(
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='action must be "submit_self", "submit_manager", "complete" or "reopen"')
 
-    review = svc.transition_review(db, review, body.action)
+    was_in_review = review.status == "in_review"
+    try:
+        review = svc.transition_review(db, review, body.action, actor_id=current_employee.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     out = _out(db, review, current_employee, manage)
     if body.action == "submit_self":
-        notify_self_assessment_submitted(out, _email_of(db, review.reviewer_id))
-    elif body.action == "submit_manager":
-        notify_joint_review_ready(out, _email_of(db, review.employee_id), _email_of(db, review.reviewer_id))
+        for reviewer_id in reviewer_ids:
+            notify_self_assessment_submitted(out, _email_of(db, reviewer_id))
+    elif body.action == "submit_manager" and was_in_review and review.status == "joint_review":
+        # Only fires once the LAST reviewer's submission actually opened the
+        # joint stage — not on every individual reviewer's submission.
+        reviewer_emails = [_email_of(db, rid) for rid in reviewer_ids]
+        notify_joint_review_ready(out, _email_of(db, review.employee_id), *reviewer_emails)
     elif body.action == "complete":
         notify_review_completed(out, _email_of(db, review.employee_id))
     return out

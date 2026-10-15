@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2, Send, Users, Info } from 'lucide-react';
+import { ArrowLeft, Loader2, Send, Users, Info, X } from 'lucide-react';
 import {
-  useReviewProjects, useToggleProjectReviews, useProjectReviewTeam, useAssignSelfAssessments, REVIEW_STATUS_BADGE,
+  useReviewProjects, useToggleProjectReviews, useProjectReviewTeam, useAssignSelfAssessments, useEvaluationFormats,
+  REVIEW_STATUS_BADGE,
 } from '@/hooks/usePerformanceReviews';
 import { useEmployees } from '@/hooks/useEmployees';
 import { ReviewTeamMember } from '@/types';
@@ -19,6 +20,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const todayIso = () => format(new Date(), 'yyyy-MM-dd');
 const formatDate = (iso: string) => format(new Date(`${iso}T00:00:00`), 'MMM d, yyyy');
@@ -35,16 +37,19 @@ function AssignDialog({ open, onOpenChange, projectId, managerName, members, onA
   onAssigned: () => void;
 }) {
   const { data: employees = [] } = useEmployees();
+  const { data: formats = [] } = useEvaluationFormats();
   const assign = useAssignSelfAssessments();
   const [reviewDate, setReviewDate] = useState(todayIso());
-  const [reviewerId, setReviewerId] = useState<string | null>(null);
+  const [selfDueDate, setSelfDueDate] = useState('');
+  const [evaluationFormat, setEvaluationFormat] = useState('standard');
+  const [reviewerIds, setReviewerIds] = useState<string[]>([]);
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
 
   const reviewerOptions = useMemo(
-    () => employees.filter(e => e.is_active).sort((a, b) => a.name.localeCompare(b.name))
+    () => employees.filter(e => e.is_active && !reviewerIds.includes(e.id)).sort((a, b) => a.name.localeCompare(b.name))
       .map(e => ({ id: e.id, label: e.name, sublabel: e.title ?? undefined })),
-    [employees],
+    [employees, reviewerIds],
   );
 
   async function handleAssign() {
@@ -55,7 +60,9 @@ function AssignDialog({ open, onOpenChange, projectId, managerName, members, onA
         project_id: projectId,
         employee_ids: members.map(m => m.employee_id),
         review_date: reviewDate,
-        reviewer_id: reviewerId,
+        self_due_date: selfDueDate || null,
+        evaluation_format: evaluationFormat,
+        reviewer_ids: reviewerIds,
         period_start: periodStart || null,
         period_end: periodEnd || null,
       });
@@ -85,19 +92,54 @@ function AssignDialog({ open, onOpenChange, projectId, managerName, members, onA
             {members.map(m => <Badge key={m.employee_id} variant="secondary">{m.name}</Badge>)}
           </div>
           <div className="space-y-1.5">
-            <Label>Reviewer</Label>
+            <Label>Reviewers</Label>
+            {reviewerIds.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {reviewerIds.map(id => {
+                  const emp = employees.find(e => e.id === id);
+                  return (
+                    <Badge key={id} variant="secondary" className="gap-1.5 pr-1 font-normal">
+                      {emp?.name ?? id}
+                      <button type="button" className="hover:text-destructive" title="Remove"
+                        onClick={() => setReviewerIds(ids => ids.filter(x => x !== id))}>
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  );
+                })}
+              </div>
+            )}
             <SearchableCombobox
               options={reviewerOptions}
-              value={reviewerId}
-              onChange={setReviewerId}
-              placeholder={managerName ? `Project manager (${managerName})` : 'Project manager / owner'}
-              clearable
+              value={null}
+              onChange={id => { if (id) setReviewerIds(ids => [...ids, id]); }}
+              placeholder={managerName ? `Add a reviewer — project manager (${managerName})` : 'Add a reviewer...'}
             />
-            <p className="text-xs text-muted-foreground">Leave empty to use the project manager. Nobody is assigned as their own reviewer.</p>
+            <p className="text-xs text-muted-foreground">Leave empty to use the project manager. Nobody is assigned as their own reviewer. Add more than one to collect independent evaluations from each.</p>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Date of review</Label>
+              <Input type="date" className="w-44" value={reviewDate} onChange={e => setReviewDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Self-assessment due by <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input type="date" className="w-44" value={selfDueDate} onChange={e => setSelfDueDate(e.target.value)} />
+            </div>
+          </div>
+          {selfDueDate && (
+            <p className="text-xs text-muted-foreground -mt-2">
+              After this date the employee can no longer edit or submit their self-assessment — only an Admin can extend it.
+            </p>
+          )}
           <div className="space-y-1.5">
-            <Label>Date of review</Label>
-            <Input type="date" className="w-44" value={reviewDate} onChange={e => setReviewDate(e.target.value)} />
+            <Label>Evaluation format</Label>
+            <Select value={evaluationFormat} onValueChange={setEvaluationFormat}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {formats.map(f => <SelectItem key={f.key} value={f.key}>{f.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -271,7 +313,7 @@ export default function ProjectReviewsPage() {
                             </div>
                           ) : <span className="text-sm text-muted-foreground">Not assigned</span>}
                         </TableCell>
-                        <TableCell>{latest?.reviewer_name ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                        <TableCell>{latest?.reviewer_names.length ? latest.reviewer_names.join(', ') : <span className="text-muted-foreground">—</span>}</TableCell>
                         <TableCell className="text-center tabular-nums font-semibold">
                           {latest?.overall_average != null ? latest.overall_average.toFixed(2) : '—'}
                         </TableCell>

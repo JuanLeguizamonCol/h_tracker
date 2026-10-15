@@ -10,7 +10,7 @@ from config.database import Base
 import models  # noqa: F401 - registers every model on Base.metadata
 from models.clients import Client
 from models.employees import Employee
-from models.performance_reviews import PerformanceReview
+from models.performance_reviews import PerformanceReview, PerformanceReviewReviewer
 from models.projects import Project
 from models.pto_requests import PtoRequest
 from models.time_entries import TimeEntry
@@ -48,12 +48,14 @@ def db():
         PtoRequest(id="pto", user_id="ana", category="vacation", start_date=date(2026, 7, 6), end_date=date(2026, 7, 10), hours=40, status="approved"),
         PtoRequest(id="pto2", user_id="ana", category="vacation", start_date=date(2026, 7, 13), end_date=date(2026, 7, 13), hours=8, status="pending"),
         PerformanceReview(id="r1", project_id="p1", employee_id="ana", review_date=date(2026, 9, 30), status="completed",
-                          self_scores=_scores({"written_1": 5}), manager_scores=_scores({"written_1": 3}), joint_scores=_scores({"written_1": 4})),
+                          self_scores=_scores({"written_1": 5}), joint_scores=_scores({"written_1": 4})),
         PerformanceReview(id="r2", project_id="p2", employee_id="ana", review_date=date(2026, 10, 1), status="completed",
-                          self_scores={}, manager_scores={}, joint_scores=_scores({"written_1": 3})),
+                          self_scores={}, joint_scores=_scores({"written_1": 3})),
         PerformanceReview(id="r3", project_id="p2", employee_id="ana", review_date=date(2026, 10, 2), status="in_review",
-                          self_scores={}, manager_scores={}, joint_scores={}),
+                          self_scores={}, joint_scores={}),
     ])
+    session.flush()
+    session.add(PerformanceReviewReviewer(id="rr1", review_id="r1", reviewer_id="new", scores=_scores({"written_1": 3})))
     session.commit()
     yield session
     session.close()

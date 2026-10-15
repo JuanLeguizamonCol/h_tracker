@@ -173,7 +173,7 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
     const term = search.trim().toLowerCase();
     return reviews.filter(r =>
       (statusFilter === 'all' || r.status === statusFilter) &&
-      (!term || [r.employee_name, r.project_name, r.client_name, r.reviewer_name].some(v => v?.toLowerCase().includes(term))),
+      (!term || [r.employee_name, r.project_name, r.client_name, ...r.evaluations.reviewers.map(rr => rr.reviewer_name)].some(v => v?.toLowerCase().includes(term))),
     );
   }, [reviews, statusFilter, search]);
 
@@ -203,13 +203,16 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
 
   function roleOf(r: PerformanceReview): string | null {
     if (r.employee_id === employee?.id) {
-      if (r.status === 'self_assessment') return 'Your self evaluation is pending';
-      if (r.status === 'joint_review') return 'Joint review in progress';
+      if (r.status === 'self_assessment') return r.self_locked ? 'Self evaluation deadline passed' : 'Your self evaluation is pending';
+      if (r.status === 'joint_review') return 'Final Submission in progress';
       return 'You (reviewee)';
     }
-    if (r.reviewer_id === employee?.id) {
-      if (r.status === 'self_assessment' || r.status === 'in_review') return 'Your manager evaluation is pending';
-      if (r.status === 'joint_review') return 'Joint review — record the agreed scores';
+    const ownRow = r.evaluations.reviewers.find(rr => rr.reviewer_id === employee?.id);
+    if (ownRow) {
+      if (r.status === 'self_assessment') return 'Waiting for the self evaluation';
+      if (r.status === 'in_review' && !ownRow.submitted) return 'Your evaluation is pending';
+      if (r.status === 'in_review' && ownRow.submitted) return 'Submitted — waiting on other reviewers';
+      if (r.status === 'joint_review') return 'Final Submission — record the agreed scores';
       return 'You (reviewer)';
     }
     return null;
@@ -223,7 +226,7 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
             <TabsTrigger value="all">All ({counts.all})</TabsTrigger>
             <TabsTrigger value="self_assessment">Self-assessment ({counts.self_assessment})</TabsTrigger>
             <TabsTrigger value="in_review">Manager review ({counts.in_review})</TabsTrigger>
-            <TabsTrigger value="joint_review">Joint review ({counts.joint_review})</TabsTrigger>
+            <TabsTrigger value="joint_review">Final Submission ({counts.joint_review})</TabsTrigger>
             <TabsTrigger value="completed">Completed ({counts.completed})</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -249,7 +252,7 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
                     <TableHead>Reviewer</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Hours</TableHead>
-                    <TableHead className="text-center">Joint score</TableHead>
+                    <TableHead className="text-center">Final score</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-24" />
                   </TableRow>
@@ -268,7 +271,11 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
                           <div>{r.project_name}</div>
                           {r.client_name && <div className="text-xs text-muted-foreground">{r.client_name}</div>}
                         </TableCell>
-                        <TableCell>{r.reviewer_name ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                        <TableCell>
+                          {r.evaluations.reviewers.length
+                            ? r.evaluations.reviewers.map(rr => rr.reviewer_name).join(', ')
+                            : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
                         <TableCell className="whitespace-nowrap">{formatDate(r.review_date)}</TableCell>
                         <TableCell className="text-right tabular-nums">{r.duration_hours != null ? r.duration_hours.toLocaleString() : '—'}</TableCell>
                         <TableCell className="text-center tabular-nums font-semibold">{r.overall_average != null ? r.overall_average.toFixed(2) : '—'}</TableCell>
@@ -319,7 +326,7 @@ export default function PerformanceReviews() {
         <h1 className="text-2xl font-bold text-foreground">Performance Reviews</h1>
         <p className="text-muted-foreground">
           {canManage
-            ? 'Each review has a self, a manager and a joint evaluation — only the joint one counts toward the annual score'
+            ? 'Each review has a self evaluation, one per reviewer, and a Final Submission — only the Final Submission counts toward the annual score'
             : 'Your project self-assessments and the reviews assigned to you'}
         </p>
       </div>

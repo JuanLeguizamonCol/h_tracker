@@ -191,11 +191,11 @@ export default function ReviewAnalytics() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Completed reviews" value={String(kpis.reviews)} icon={ClipboardCheck} />
         <KpiCard label="Employees evaluated" value={String(kpis.employees)} icon={Users} />
-        <KpiCard label="Average annual score" value={kpis.avg != null ? kpis.avg.toFixed(2) : '—'} hint="Mean of employees' joint averages" icon={Star} />
+        <KpiCard label="Average annual score" value={kpis.avg != null ? kpis.avg.toFixed(2) : '—'} hint="Mean of employees' Final Submission averages" icon={Star} />
         <KpiCard
           label="Self vs manager gap"
           value={kpis.gap != null ? `${kpis.gap > 0 ? '+' : ''}${kpis.gap.toFixed(2)}` : '—'}
-          hint={kpis.gap == null ? undefined : kpis.gap > 0 ? 'Employees rate themselves higher' : kpis.gap < 0 ? 'Managers rate higher' : 'Aligned'}
+          hint={kpis.gap == null ? "Self no longer scores — always empty" : kpis.gap > 0 ? 'Employees rate themselves higher' : kpis.gap < 0 ? 'Managers rate higher' : 'Aligned'}
           icon={Scale}
         />
       </div>
@@ -204,7 +204,7 @@ export default function ReviewAnalytics() {
         <Card className="card-elevated">
           <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
             <ClipboardCheck className="h-8 w-8" />
-            <p className="text-sm">No completed reviews{year ? ` in ${year}` : ''} yet — only completed reviews (joint evaluation agreed) count here.</p>
+            <p className="text-sm">No completed reviews{year ? ` in ${year}` : ''} yet — only completed reviews (Final Submission agreed) count here.</p>
           </CardContent>
         </Card>
       ) : view === 'items' ? (
@@ -277,8 +277,8 @@ export default function ReviewAnalytics() {
             <CardTitle className="text-base">{view === 'employees' ? 'Annual Score by Employee' : 'Average by Project'}</CardTitle>
             <p className="text-xs text-muted-foreground">
               {view === 'employees'
-                ? 'Joint evaluation averages per criterion · Annual score = mean of the employee\'s completed reviews in the year · Click an employee to see each project review'
-                : 'Joint evaluation averages per criterion across the project\'s reviewed employees · Click a project to see each employee'}
+                ? 'Final Submission averages per criterion · Annual score = mean of the employee\'s completed reviews in the year · Click an employee to see each project review'
+                : 'Final Submission averages per criterion across the project\'s reviewed employees · Click a project to see each employee'}
               {' · '}Darker cells mean higher scores
             </p>
           </CardHeader>

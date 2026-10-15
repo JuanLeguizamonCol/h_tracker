@@ -3,9 +3,10 @@
 The criteria and sub-criteria are fixed (REVIEW_TEMPLATE, copied verbatim from
 the firm's review workbook) and served to the frontend via
 GET /performance-reviews/template, so the panel and the .xlsx export always
-render the same rows. Every review carries three evaluations of that template
-(self, manager, joint - see SCORE_SETS); each stores scores per sub-criterion
-key in its own JSON column, and averages are always derived, never stored:
+render the same rows. Every review carries a self evaluation, one independent
+evaluation per assigned reviewer (PerformanceReviewReviewer — any number of
+them), and a joint evaluation; each stores scores per sub-criterion key in its
+own JSON column, and averages are always derived, never stored:
   - criterion average = mean of its rated sub-criteria (unrated ones skipped)
   - overall average   = mean of the rated criterion averages
 """
@@ -13,10 +14,10 @@ from typing import Dict, List, Optional, Tuple
 from datetime import date, datetime, timezone
 import uuid
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from models.performance_reviews import PerformanceReview
+from models.performance_reviews import PerformanceReview, PerformanceReviewReviewer, DEFAULT_EVALUATION_FORMAT
 from models.employees import Employee
 from models.projects import Project
 from models.clients import Client
@@ -26,8 +27,8 @@ SCORE_MIN = 1
 SCORE_MAX = 5
 
 # `label` heads the criterion's section; `short_label` is what the "Average
-# Score" summary block shows. Sub-criterion keys are persisted in
-# PerformanceReview.{self,manager,joint}_scores — never rename one, only append.
+# Score" summary block shows. Sub-criterion keys are persisted in the scores
+# JSON columns — never rename one, only append.
 REVIEW_TEMPLATE: List[dict] = [
     {
         "key": "written",
@@ -92,68 +93,88 @@ REVIEW_TEMPLATE: List[dict] = [
 
 SUB_CRITERION_KEYS = {sub_key for c in REVIEW_TEMPLATE for sub_key, _ in c["sub_criteria"]}
 
-# The three evaluations every review carries, each scoring the same template.
-# Only the joint one is official: it's what `overall_average` reports and what
-# the annual measurement (analytics) averages across an employee's reviews.
-SCORE_SETS = ("self", "manager", "joint")
-SCORE_COLUMNS = {"self": "self_scores", "manager": "manager_scores", "joint": "joint_scores"}
+# Review formats — only one exists today; REVIEW_TEMPLATE doesn't branch on it
+# yet, but every review already carries the chosen key (set at assignment
+# time, see evaluation_format) so a second format can slot in later without
+# another migration.
+EVALUATION_FORMATS = {"standard": "Impact Point Standard"}
 
 # Lifecycle order — see models/performance_reviews.py::REVIEW_STATUSES.
 _STAGE = {"self_assessment": 0, "in_review": 1, "joint_review": 2, "completed": 3}
 
-# Who may change which fields, and when (see routers/performance_reviews.py):
-#   - the reviewee: project details + self-assessment text + self scores, while `self_assessment`
-#   - the reviewer: manager scores + reviewer notes until submitted (in parallel with the self);
-#                   joint scores + joint notes while `joint_review`
-#   - Admin/Manager (Reviews edit access): everything, any time
+# Who may change which top-level fields, and when (see
+# routers/performance_reviews.py):
+#   - the reviewee: project details + self-assessment text (incl. the
+#     per-section comments), while `self_assessment` AND before self_due_date
+#   - a reviewer: their own evaluation (via the nested `reviewer_evaluation` patch) — but only
+#                 once the self evaluation has been SUBMITTED (status == in_review), until THEY
+#                 submit it; joint scores + joint notes once the review reaches `joint_review`
+#                 (any assigned reviewer, not just one)
+#   - Admin/Manager (Reviews edit access): everything, any time, including the reviewer roster,
+#     and they always bypass the self-assessment deadline
 EMPLOYEE_FIELDS = {
     "project_description", "employee_role",
-    "self_strengths", "self_improvement", "self_development", "self_scores",
-}
-REVIEWER_FIELDS = {
-    "manager_scores", "reviewer_strengths_notes", "reviewer_improvement_notes", "reviewer_development_notes",
+    "self_strengths", "self_improvement", "self_development", "self_section_comments",
 }
 JOINT_FIELDS = {"joint_scores", "joint_notes"}
-ADMIN_FIELDS = EMPLOYEE_FIELDS | REVIEWER_FIELDS | JOINT_FIELDS | {
-    "reviewer_id", "review_date", "period_start", "period_end", "duration_hours",
+ADMIN_FIELDS = EMPLOYEE_FIELDS | JOINT_FIELDS | {
+    "reviewer_evaluation", "reviewer_ids", "review_date", "self_due_date", "evaluation_format",
+    "period_start", "period_end", "duration_hours",
 }
+
+
+def _reviewer_row(review: PerformanceReview, reviewer_id: Optional[str]) -> Optional[PerformanceReviewReviewer]:
+    if not reviewer_id:
+        return None
+    return next((r for r in review.reviewers if r.reviewer_id == reviewer_id), None)
+
+
+def self_assessment_locked(review: PerformanceReview, today: Optional[date] = None) -> bool:
+    """True once the self-assessment deadline has passed and it still hasn't
+    been submitted — the employee can no longer edit or submit it (Admin/
+    Manager can always edit regardless; see editable_fields/ADMIN_FIELDS)."""
+    if review.status != "self_assessment" or review.self_due_date is None:
+        return False
+    return (today or date.today()) > review.self_due_date
 
 
 def editable_fields(review: PerformanceReview, viewer_id: str, viewer_can_manage: bool) -> set:
     if viewer_can_manage:
         return set(ADMIN_FIELDS)
     allowed = set()
-    if review.employee_id == viewer_id and review.status == "self_assessment":
+    if review.employee_id == viewer_id and review.status == "self_assessment" and not self_assessment_locked(review):
         allowed |= EMPLOYEE_FIELDS
-    if review.reviewer_id == viewer_id:
-        # Blind to each other, so the manager can score in parallel with the
-        # employee's self evaluation — only *submitting* it waits for the self.
-        if review.status in ("self_assessment", "in_review"):
-            allowed |= REVIEWER_FIELDS
+    own_row = _reviewer_row(review, viewer_id)
+    if own_row is not None:
+        # A reviewer can't start until the self evaluation has been
+        # submitted — blind to it either way, but no longer "in parallel".
+        # Once started, blind to every other reviewer too — only
+        # *submitting* locks their own row; it doesn't wait for the others.
+        if review.status == "in_review" and own_row.submitted_at is None:
+            allowed.add("reviewer_evaluation")
         elif review.status == "joint_review":
             allowed |= JOINT_FIELDS
     return allowed
 
 
 def visibility(review: PerformanceReview, viewer_id: str, viewer_can_manage: bool) -> Dict[str, bool]:
-    """Self and manager evaluations are blind to each other until the joint
-    stage, so neither anchors on the other's scores:
-      - reviewee: own self always; manager + joint from `joint_review` on
-      - reviewer: own manager always; self text once submitted; self scores +
-        joint from `joint_review` on
+    """Self, each reviewer, and joint are blind to each other until the joint
+    stage (which only opens once every assigned reviewer has submitted):
+      - reviewee: own self always; joint from `joint_review` on — but NEVER
+        any individual reviewer's row, at any stage
+      - a reviewer: own row always; self + other reviewers' rows + joint from
+        `joint_review` on
       - Admin/Manager: everything
     """
     if viewer_can_manage:
-        return {"self": True, "self_text": True, "manager": True, "joint": True}
+        return {"self": True, "joint": True, "together": True}
     stage = _STAGE.get(review.status, 0)
     is_reviewee = review.employee_id == viewer_id
-    is_reviewer = review.reviewer_id == viewer_id
     together = stage >= _STAGE["joint_review"]
     return {
         "self": is_reviewee or together,
-        "self_text": is_reviewee or stage >= _STAGE["in_review"],
-        "manager": is_reviewer or together,
         "joint": together,
+        "together": together,
     }
 
 
@@ -198,10 +219,7 @@ def normalize_scores(raw: Dict[str, dict]) -> Dict[str, dict]:
     {"score": None, "notes": None} — that's an explicit "marked N/A, no
     notes" (see ScorePicker/naSelected in PerformanceReviewPage.tsx), not an
     empty/untouched item: the frontend only ever includes a sub-criterion key
-    here once the user has actually interacted with it. Dropping it would
-    silently revert an explicit N/A back to "never rated" on the next load,
-    which looked indistinguishable in the UI anyway — the actual bug this
-    comment used to paper over.
+    here once the user has actually interacted with it.
     """
     clean: Dict[str, dict] = {}
     for key, entry in (raw or {}).items():
@@ -213,6 +231,31 @@ def normalize_scores(raw: Dict[str, dict]) -> Dict[str, dict]:
             raise ValueError(f"Scores must be between {SCORE_MIN} and {SCORE_MAX}.")
         clean[key] = {"score": int(score) if score is not None else None, "notes": notes}
     return clean
+
+
+def manager_evaluation_scores(reviewer_scores: List[Dict[str, dict]]) -> Dict[str, dict]:
+    """The cross-reviewer average per sub-criterion — in the same
+    {key: {"score": float}} shape compute_averages expects — pooling every
+    reviewer who rated that item (one who left it N/A/untouched doesn't pull
+    the average toward 0, they're just excluded for that item). This is the
+    one, single definition of "the manager evaluation" once a review can have
+    N reviewers: used both to pre-fill the joint evaluation (rounded to a
+    whole 1–5 score there, since joint scores must be integers — reviewers
+    then adjust it by hand) and for the Analytics/Reports "manager" figures
+    (kept as the precise float average there) — both read this same function
+    so they can never numerically disagree with each other.
+    """
+    by_key: Dict[str, List[float]] = {}
+    for scores in reviewer_scores:
+        for k, v in (scores or {}).items():
+            score = v.get("score")
+            if score is not None:
+                by_key.setdefault(k, []).append(float(score))
+    return {k: {"score": round(sum(vals) / len(vals), 2), "notes": None} for k, vals in by_key.items()}
+
+
+def _clamp_int_score(value: float) -> int:
+    return max(SCORE_MIN, min(SCORE_MAX, round(value)))
 
 
 def logged_hours(
@@ -230,7 +273,9 @@ def logged_hours(
 
 
 def _lookups(db: Session, reviews: List[PerformanceReview]) -> Tuple[dict, dict]:
-    emp_ids = {r.employee_id for r in reviews} | {r.reviewer_id for r in reviews if r.reviewer_id}
+    emp_ids = {r.employee_id for r in reviews}
+    for r in reviews:
+        emp_ids |= {rr.reviewer_id for rr in r.reviewers}
     name_by_id = dict(db.query(Employee.id, Employee.name).filter(Employee.id.in_(emp_ids)).all()) if emp_ids else {}
     project_ids = {r.project_id for r in reviews}
     project_by_id = {}
@@ -245,22 +290,51 @@ def _lookups(db: Session, reviews: List[PerformanceReview]) -> Tuple[dict, dict]
     return name_by_id, project_by_id
 
 
-def _set_out(scores: Optional[Dict[str, dict]], visible: bool) -> dict:
+def _set_out(scores: Optional[Dict[str, dict]], visible: bool, section_comments: Optional[Dict[str, str]] = None) -> dict:
     scores = (scores or {}) if visible else {}
     criteria, overall = compute_averages(scores)
-    return {"visible": visible, "scores": scores, "criteria_averages": criteria, "overall_average": overall}
+    out = {"visible": visible, "scores": scores, "criteria_averages": criteria, "overall_average": overall}
+    if section_comments is not None:
+        out["section_comments"] = section_comments if visible else {}
+    return out
 
 
-def to_out_dict(review: PerformanceReview, name_by_id: dict, project_by_id: dict, visible: Optional[Dict[str, bool]] = None) -> dict:
-    visible = visible or {"self": True, "self_text": True, "manager": True, "joint": True}
+def to_out_dict(
+    review: PerformanceReview, name_by_id: dict, project_by_id: dict,
+    viewer_id: Optional[str] = None, viewer_can_manage: bool = False,
+) -> dict:
+    vis = visibility(review, viewer_id, viewer_can_manage)
+    together = vis["together"]
+    is_reviewee = review.employee_id == viewer_id
     project_name, client_name = project_by_id.get(review.project_id, ("Unknown", None))
+
+    reviewers_out = []
+    for rr in review.reviewers:
+        # The reviewee NEVER sees an individual reviewer's row — only the
+        # joint ("Final Submission") result, even once reviewers can see
+        # each other's at `together`.
+        row_visible = viewer_can_manage or (rr.reviewer_id == viewer_id) or (together and not is_reviewee)
+        scores = rr.scores if row_visible else {}
+        criteria, overall = compute_averages(scores)
+        reviewers_out.append({
+            "reviewer_id": rr.reviewer_id,
+            "reviewer_name": name_by_id.get(rr.reviewer_id),
+            "visible": row_visible,
+            "scores": scores,
+            "criteria_averages": criteria,
+            "overall_average": overall,
+            "strengths_notes": rr.strengths_notes if row_visible else None,
+            "improvement_notes": rr.improvement_notes if row_visible else None,
+            "development_notes": rr.development_notes if row_visible else None,
+            "submitted": rr.submitted_at is not None,
+        })
+
     evaluations = {
-        "self": _set_out(review.self_scores, visible["self"]),
-        "manager": _set_out(review.manager_scores, visible["manager"]),
-        "joint": _set_out(review.joint_scores, visible["joint"]),
+        "self": _set_out(review.self_scores, vis["self"], review.self_section_comments),
+        "reviewers": reviewers_out,
+        "joint": _set_out(review.joint_scores, vis["joint"]),
     }
-    self_text = visible["self_text"]
-    manager = visible["manager"]
+    self_visible = vis["self"]
     return {
         "id": review.id,
         "project_id": review.project_id,
@@ -268,27 +342,24 @@ def to_out_dict(review: PerformanceReview, name_by_id: dict, project_by_id: dict
         "client_name": client_name,
         "employee_id": review.employee_id,
         "employee_name": name_by_id.get(review.employee_id, "Unknown"),
-        "reviewer_id": review.reviewer_id,
-        "reviewer_name": name_by_id.get(review.reviewer_id) if review.reviewer_id else None,
         "review_date": review.review_date,
+        "self_due_date": review.self_due_date,
+        "self_locked": self_assessment_locked(review),
+        "evaluation_format": review.evaluation_format or DEFAULT_EVALUATION_FORMAT,
         "period_start": review.period_start,
         "period_end": review.period_end,
         "duration_hours": float(review.duration_hours) if review.duration_hours is not None else None,
         "project_description": review.project_description,
         "employee_role": review.employee_role,
-        "self_strengths": review.self_strengths if self_text else None,
-        "self_improvement": review.self_improvement if self_text else None,
-        "self_development": review.self_development if self_text else None,
-        "reviewer_strengths_notes": review.reviewer_strengths_notes if manager else None,
-        "reviewer_improvement_notes": review.reviewer_improvement_notes if manager else None,
-        "reviewer_development_notes": review.reviewer_development_notes if manager else None,
-        "joint_notes": review.joint_notes if visible["joint"] else None,
+        "self_strengths": review.self_strengths if self_visible else None,
+        "self_improvement": review.self_improvement if self_visible else None,
+        "self_development": review.self_development if self_visible else None,
+        "joint_notes": review.joint_notes if vis["joint"] else None,
         "evaluations": evaluations,
         # The official score — joint only.
         "overall_average": evaluations["joint"]["overall_average"],
         "status": review.status,
         "self_submitted_at": review.self_submitted_at,
-        "manager_submitted_at": review.manager_submitted_at,
         "completed_at": review.completed_at,
         "created_at": review.created_at,
         "updated_at": review.updated_at,
@@ -308,7 +379,12 @@ def list_reviews(
 ) -> List[PerformanceReview]:
     q = db.query(PerformanceReview)
     if visible_to:
-        q = q.filter((PerformanceReview.employee_id == visible_to) | (PerformanceReview.reviewer_id == visible_to))
+        reviewer_subq = (
+            db.query(PerformanceReviewReviewer.review_id)
+            .filter(PerformanceReviewReviewer.reviewer_id == visible_to)
+            .subquery()
+        )
+        q = q.filter(or_(PerformanceReview.employee_id == visible_to, PerformanceReview.id.in_(reviewer_subq)))
     if project_id:
         q = q.filter(PerformanceReview.project_id == project_id)
     if employee_id:
@@ -320,47 +396,76 @@ def list_reviews(
 
 def serialize(db: Session, reviews: List[PerformanceReview], viewer_id: str, viewer_can_manage: bool) -> List[dict]:
     name_by_id, project_by_id = _lookups(db, reviews)
-    return [
-        to_out_dict(r, name_by_id, project_by_id, visibility(r, viewer_id, viewer_can_manage))
-        for r in reviews
-    ]
+    return [to_out_dict(r, name_by_id, project_by_id, viewer_id, viewer_can_manage) for r in reviews]
 
 
 def create_review(db: Session, data, created_by: str) -> PerformanceReview:
     project = db.query(Project).filter(Project.id == data.project_id).first()
-    # First of: requested reviewer, project manager, project owner — skipping
-    # the employee themselves (e.g. when the manager is the one being reviewed).
-    candidates = [data.reviewer_id, project.manager_id if project else None, project.owner_id if project else None]
-    reviewer_id = next((c for c in candidates if c and c != data.employee_id), None)
+    # Requested reviewers, deduped, never including the employee themselves.
+    reviewer_ids = list(dict.fromkeys(
+        rid for rid in (data.reviewer_ids or []) if rid and rid != data.employee_id
+    ))
+    if not reviewer_ids:
+        # Default: project manager, then owner — same fallback as before N
+        # reviewers existed, just yielding a list of (at most) one.
+        candidates = [project.manager_id if project else None, project.owner_id if project else None]
+        default_reviewer = next((c for c in candidates if c and c != data.employee_id), None)
+        if default_reviewer:
+            reviewer_ids = [default_reviewer]
+
     duration = data.duration_hours
     if duration is None:
         duration = logged_hours(db, data.employee_id, data.project_id, data.period_start, data.period_end)
+
     review = PerformanceReview(
         id=str(uuid.uuid4()),
         project_id=data.project_id,
         employee_id=data.employee_id,
-        reviewer_id=reviewer_id,
         created_by=created_by,
         review_date=data.review_date,
+        self_due_date=getattr(data, "self_due_date", None),
+        evaluation_format=getattr(data, "evaluation_format", None) or DEFAULT_EVALUATION_FORMAT,
         period_start=data.period_start,
         period_end=data.period_end,
         duration_hours=duration,
         project_description=data.project_description or (project.description if project else None),
         self_scores={},
-        manager_scores={},
+        self_section_comments={},
         joint_scores={},
         status="self_assessment",
     )
     db.add(review)
+    db.flush()
+    for reviewer_id in reviewer_ids:
+        db.add(PerformanceReviewReviewer(review_id=review.id, reviewer_id=reviewer_id, scores={}))
     db.commit()
     db.refresh(review)
     return review
 
 
 def update_review(db: Session, review: PerformanceReview, changes: dict) -> PerformanceReview:
-    for column in SCORE_COLUMNS.values():
-        if column in changes:
-            changes[column] = normalize_scores({k: dict(v) for k, v in (changes[column] or {}).items()})
+    """Applies top-level field changes — NOT `reviewer_evaluation` (see
+    apply_reviewer_evaluation, which needs viewer context the router resolves
+    before calling it)."""
+    if "reviewer_ids" in changes:
+        new_ids = list(dict.fromkeys(
+            rid for rid in (changes.pop("reviewer_ids") or []) if rid and rid != review.employee_id
+        ))
+        existing = {rr.reviewer_id: rr for rr in review.reviewers}
+        for reviewer_id in new_ids:
+            if reviewer_id not in existing:
+                db.add(PerformanceReviewReviewer(review_id=review.id, reviewer_id=reviewer_id, scores={}))
+        for reviewer_id, row in existing.items():
+            if reviewer_id not in new_ids:
+                db.delete(row)
+    if "joint_scores" in changes:
+        changes["joint_scores"] = normalize_scores({k: dict(v) for k, v in (changes["joint_scores"] or {}).items()})
+    if "self_section_comments" in changes:
+        criterion_keys = {c["key"] for c in REVIEW_TEMPLATE}
+        changes["self_section_comments"] = {
+            k: (v or "").strip() for k, v in (changes["self_section_comments"] or {}).items()
+            if k in criterion_keys and (v or "").strip()
+        }
     for field, value in changes.items():
         setattr(review, field, value)
     db.commit()
@@ -368,21 +473,52 @@ def update_review(db: Session, review: PerformanceReview, changes: dict) -> Perf
     return review
 
 
-def transition_review(db: Session, review: PerformanceReview, action: str) -> PerformanceReview:
+def apply_reviewer_evaluation(db: Session, review: PerformanceReview, reviewer_id: str, patch: dict) -> None:
+    """Applies one reviewer's own scores/notes patch to their row. Raises
+    ValueError if `reviewer_id` isn't actually assigned to this review."""
+    row = _reviewer_row(review, reviewer_id)
+    if row is None:
+        raise ValueError("That person isn't an assigned reviewer on this review.")
+    if patch.get("scores") is not None:
+        row.scores = normalize_scores({k: dict(v) for k, v in patch["scores"].items()})
+    if patch.get("strengths_notes") is not None:
+        row.strengths_notes = patch["strengths_notes"]
+    if patch.get("improvement_notes") is not None:
+        row.improvement_notes = patch["improvement_notes"]
+    if patch.get("development_notes") is not None:
+        row.development_notes = patch["development_notes"]
+    db.add(row)
+
+
+def transition_review(db: Session, review: PerformanceReview, action: str, actor_id: Optional[str] = None) -> PerformanceReview:
+    """Raises ValueError for an action the actor can't take right now (the
+    router turns that into a 400); authorization for WHO may call an action
+    at all is checked by the router before this runs."""
     now = datetime.now(timezone.utc)
     if action == "submit_self":
         review.status = "in_review"
         review.self_submitted_at = now
     elif action == "submit_manager":
-        review.status = "joint_review"
-        review.manager_submitted_at = now
-        # The joint session starts from the manager's scores and adjusts them.
-        if not review.joint_scores:
-            review.joint_scores = {
-                k: {"score": v.get("score"), "notes": None}
-                for k, v in (review.manager_scores or {}).items()
-                if v.get("score") is not None
-            }
+        row = _reviewer_row(review, actor_id)
+        if row is None:
+            raise ValueError("You're not an assigned reviewer on this review.")
+        if row.submitted_at is not None:
+            raise ValueError("You've already submitted your evaluation.")
+        if compute_averages(row.scores)[1] is None:
+            raise ValueError("Rate at least one item before submitting.")
+        row.submitted_at = now
+        db.add(row)
+        db.flush()
+        db.refresh(review)
+        if review.reviewers and all(r.submitted_at is not None for r in review.reviewers):
+            review.status = "joint_review"
+            # The joint session starts from the reviewers' average and adjusts
+            # it — only seeded once, so re-entering joint_review (e.g. after a
+            # reopen + a newly added reviewer submits) never overwrites
+            # whatever's already been agreed there.
+            if not review.joint_scores:
+                avg = manager_evaluation_scores([r.scores for r in review.reviewers])
+                review.joint_scores = {k: {"score": _clamp_int_score(v["score"]), "notes": None} for k, v in avg.items()}
     elif action == "complete":
         review.status = "completed"
         review.completed_at = now
@@ -391,8 +527,10 @@ def transition_review(db: Session, review: PerformanceReview, action: str) -> Pe
             review.status = "joint_review"
             review.completed_at = None
         elif review.status == "joint_review":
+            # Per design: reopening does NOT clear what individual reviewers
+            # already submitted — it just reopens the stage (e.g. so an admin
+            # can fix something, or a newly-added reviewer can submit too).
             review.status = "in_review"
-            review.manager_submitted_at = None
         else:
             review.status = "self_assessment"
             review.self_submitted_at = None
@@ -408,9 +546,9 @@ def delete_review(db: Session, review: PerformanceReview) -> None:
 
 def review_export_data(db: Session, review: PerformanceReview) -> dict:
     """Everything the .xlsx export needs, with names resolved (unfiltered —
-    callers check access first)."""
+    callers check access first, so this always renders as fully visible)."""
     name_by_id, project_by_id = _lookups(db, [review])
-    data = to_out_dict(review, name_by_id, project_by_id)
+    data = to_out_dict(review, name_by_id, project_by_id, viewer_id=None, viewer_can_manage=True)
     emp = db.query(Employee).filter(Employee.id == review.employee_id).first()
     if emp and emp.first_name and emp.last_name:
         data["employee_display_name"] = f"{emp.last_name.strip()}, {emp.first_name.strip()}"
@@ -423,7 +561,10 @@ def analytics(db: Session, year: Optional[int] = None) -> dict:
     """Completed reviews (optionally of one review-date year) with every
     evaluation's criterion averages and item scores — the Analytics tab builds
     its employee / project / item matrices from this. The annual measurement
-    per employee is the plain mean of their reviews' joint overall averages."""
+    per employee is the plain mean of their reviews' joint overall averages.
+    "manager" here is the cross-reviewer average (manager_evaluation_scores) —
+    the same figure used to seed joint, kept consistent with it and with the
+    Reports → Performance tab (services/employee_performance.py)."""
     completed = db.query(PerformanceReview).filter(PerformanceReview.status == "completed")
     years = sorted({d.year for (d,) in completed.with_entities(PerformanceReview.review_date).all()}, reverse=True)
     reviews = completed.order_by(PerformanceReview.review_date).all()
@@ -442,6 +583,7 @@ def analytics(db: Session, year: Optional[int] = None) -> dict:
     rows = []
     for r in reviews:
         project_name, client_name = project_by_id.get(r.project_id, ("Unknown", None))
+        manager_scores = manager_evaluation_scores([rr.scores for rr in r.reviewers])
         rows.append({
             "id": r.id,
             "employee_id": r.employee_id,
@@ -449,11 +591,11 @@ def analytics(db: Session, year: Optional[int] = None) -> dict:
             "project_id": r.project_id,
             "project_name": project_name,
             "client_name": client_name,
-            "reviewer_name": name_by_id.get(r.reviewer_id) if r.reviewer_id else None,
+            "reviewer_names": [name_by_id.get(rr.reviewer_id, "Unknown") for rr in r.reviewers],
             "review_date": r.review_date,
             "duration_hours": float(r.duration_hours) if r.duration_hours is not None else None,
             "self": _set(r.self_scores),
-            "manager": _set(r.manager_scores),
+            "manager": _set(manager_scores),
             "joint": _set(r.joint_scores),
         })
     return {"years": years, "year": year, "reviews": rows}
@@ -543,22 +685,29 @@ def project_team(db: Session, project_id: str) -> List[dict]:
         .all()
     )
     reviews = list_reviews(db, project_id=project_id)
-    emp_ids = set(role_by_emp) | set(hours_by_emp) | {r.employee_id for r in reviews}
-    if not emp_ids:
+    # Team roster = staffed or logged hours or already has a review here —
+    # reviewer ids are looked up separately below just to resolve names for
+    # the review summaries, NOT added to the roster itself (being someone's
+    # reviewer doesn't make you a member of their project team).
+    team_ids = set(role_by_emp) | set(hours_by_emp) | {r.employee_id for r in reviews}
+    if not team_ids:
         return []
-    employees = db.query(Employee).filter(Employee.id.in_(emp_ids)).all()
-    reviewer_ids = {r.reviewer_id for r in reviews if r.reviewer_id}
-    reviewer_names = dict(db.query(Employee.id, Employee.name).filter(Employee.id.in_(reviewer_ids)).all()) if reviewer_ids else {}
+    name_ids = set(team_ids)
+    for r in reviews:
+        name_ids |= {rr.reviewer_id for rr in r.reviewers}
+    name_by_id = dict(db.query(Employee.id, Employee.name).filter(Employee.id.in_(name_ids)).all())
+    employees = db.query(Employee).filter(Employee.id.in_(team_ids)).all()
 
     reviews_by_emp: Dict[str, List[dict]] = {}
     for r in reviews:  # already newest first
         _, overall = compute_averages(r.joint_scores or {})
+        reviewer_ids = [rr.reviewer_id for rr in r.reviewers]
         reviews_by_emp.setdefault(r.employee_id, []).append({
             "id": r.id,
             "status": r.status,
             "review_date": r.review_date,
-            "reviewer_id": r.reviewer_id,
-            "reviewer_name": reviewer_names.get(r.reviewer_id) if r.reviewer_id else None,
+            "reviewer_ids": reviewer_ids,
+            "reviewer_names": [name_by_id.get(rid, "Unknown") for rid in reviewer_ids],
             "overall_average": overall,
         })
 

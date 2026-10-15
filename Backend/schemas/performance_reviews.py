@@ -12,9 +12,13 @@ class ReviewScore(BaseModel):
 class PerformanceReviewCreate(BaseModel):
     project_id: str
     employee_id: str
-    # Defaults to the project's manager (then owner) when omitted.
-    reviewer_id: Optional[str] = None
+    # Defaults to the project's manager (then owner) when omitted/empty.
+    reviewer_ids: Optional[List[str]] = None
     review_date: date
+    # Deadline for the self-assessment stage — null means no deadline.
+    self_due_date: Optional[date] = None
+    # Which review format/template — only "standard" exists today.
+    evaluation_format: Optional[str] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     # Defaults to the employee's logged hours on the project (within the
@@ -23,12 +27,25 @@ class PerformanceReviewCreate(BaseModel):
     project_description: Optional[str] = None
 
 
+class ReviewerEvaluationPatch(BaseModel):
+    """A single reviewer's own scores/notes. The caller is implicitly that
+    reviewer unless they're Admin/Manager, in which case `reviewer_id` picks
+    which reviewer's row to edit — see routers/performance_reviews.py."""
+    reviewer_id: Optional[str] = None
+    scores: Optional[Dict[str, ReviewScore]] = None
+    strengths_notes: Optional[str] = None
+    improvement_notes: Optional[str] = None
+    development_notes: Optional[str] = None
+
+
 class PerformanceReviewUpdate(BaseModel):
     """Partial update — which fields a caller may actually change depends on
     who they are (see services/performance_reviews.py::EMPLOYEE_FIELDS /
-    REVIEWER_FIELDS / ADMIN_FIELDS); disallowed fields are rejected."""
-    reviewer_id: Optional[str] = None
+    JOINT_FIELDS / ADMIN_FIELDS); disallowed fields are rejected."""
+    reviewer_ids: Optional[List[str]] = None
     review_date: Optional[date] = None
+    self_due_date: Optional[date] = None
+    evaluation_format: Optional[str] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     duration_hours: Optional[float] = None
@@ -37,19 +54,18 @@ class PerformanceReviewUpdate(BaseModel):
     self_strengths: Optional[str] = None
     self_improvement: Optional[str] = None
     self_development: Optional[str] = None
-    reviewer_strengths_notes: Optional[str] = None
-    reviewer_improvement_notes: Optional[str] = None
-    reviewer_development_notes: Optional[str] = None
+    self_section_comments: Optional[Dict[str, str]] = None
     joint_notes: Optional[str] = None
-    self_scores: Optional[Dict[str, ReviewScore]] = None
-    manager_scores: Optional[Dict[str, ReviewScore]] = None
     joint_scores: Optional[Dict[str, ReviewScore]] = None
+    reviewer_evaluation: Optional[ReviewerEvaluationPatch] = None
 
 
 class PerformanceReviewTransition(BaseModel):
     # "submit_self" (employee: self_assessment → in_review)
-    # "submit_manager" (reviewer: in_review → joint_review, joint pre-filled from manager scores)
-    # "complete" (reviewer: joint_review → completed)
+    # "submit_manager" (the calling reviewer submits THEIR OWN evaluation;
+    #                    once every assigned reviewer has, in_review → joint_review
+    #                    and joint is pre-filled from the average of all reviewers)
+    # "complete" (any assigned reviewer, or Admin/Manager: joint_review → completed)
     # "reopen" (Admin/Manager: one stage back)
     action: str
 
@@ -61,17 +77,31 @@ class CriterionAverage(BaseModel):
 
 
 class EvaluationOut(BaseModel):
-    # False when the caller may not see this evaluation yet (self and manager
-    # are blind to each other until joint_review) — scores come back empty.
+    # False when the caller may not see this evaluation yet (self, each
+    # reviewer, and joint are blind to each other until joint_review; the
+    # reviewee additionally never sees any individual reviewer's row) —
+    # scores come back empty.
     visible: bool
     scores: Dict[str, ReviewScore]
     criteria_averages: List[CriterionAverage]
     overall_average: Optional[float] = None
+    # Only populated for "self" — one free-text comment per criterion,
+    # replacing per-item scores (see self_section_comments on the model).
+    section_comments: Optional[Dict[str, str]] = None
+
+
+class ReviewerEvaluationOut(EvaluationOut):
+    reviewer_id: str
+    reviewer_name: Optional[str] = None
+    strengths_notes: Optional[str] = None
+    improvement_notes: Optional[str] = None
+    development_notes: Optional[str] = None
+    submitted: bool = False
 
 
 class EvaluationsOut(BaseModel):
     self: EvaluationOut
-    manager: EvaluationOut
+    reviewers: List[ReviewerEvaluationOut]
     joint: EvaluationOut
 
 
@@ -82,9 +112,10 @@ class PerformanceReviewOut(BaseModel):
     client_name: Optional[str] = None
     employee_id: str
     employee_name: str
-    reviewer_id: Optional[str] = None
-    reviewer_name: Optional[str] = None
     review_date: date
+    self_due_date: Optional[date] = None
+    self_locked: bool = False
+    evaluation_format: str = "standard"
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     duration_hours: Optional[float] = None
@@ -93,16 +124,12 @@ class PerformanceReviewOut(BaseModel):
     self_strengths: Optional[str] = None
     self_improvement: Optional[str] = None
     self_development: Optional[str] = None
-    reviewer_strengths_notes: Optional[str] = None
-    reviewer_improvement_notes: Optional[str] = None
-    reviewer_development_notes: Optional[str] = None
     joint_notes: Optional[str] = None
     evaluations: EvaluationsOut
     # Official score = the joint evaluation's overall average.
     overall_average: Optional[float] = None
     status: str
     self_submitted_at: Optional[datetime] = None
-    manager_submitted_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -154,8 +181,8 @@ class ReviewSummaryOut(BaseModel):
     id: str
     status: str
     review_date: date
-    reviewer_id: Optional[str] = None
-    reviewer_name: Optional[str] = None
+    reviewer_ids: List[str] = []
+    reviewer_names: List[str] = []
     overall_average: Optional[float] = None
 
 
@@ -174,8 +201,10 @@ class BulkAssignIn(BaseModel):
     project_id: str
     employee_ids: List[str]
     review_date: date
-    # Defaults to the project's manager (then owner) when omitted.
-    reviewer_id: Optional[str] = None
+    self_due_date: Optional[date] = None
+    evaluation_format: Optional[str] = None
+    # Defaults to the project's manager (then owner) when omitted/empty.
+    reviewer_ids: Optional[List[str]] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
 
@@ -202,10 +231,12 @@ class AnalyticsReviewOut(BaseModel):
     project_id: str
     project_name: str
     client_name: Optional[str] = None
-    reviewer_name: Optional[str] = None
+    reviewer_names: List[str] = []
     review_date: date
     duration_hours: Optional[float] = None
     self: EvaluationScoresOut
+    # Cross-reviewer average (same formula used to pre-fill joint) — not any
+    # one reviewer's individual scores.
     manager: EvaluationScoresOut
     joint: EvaluationScoresOut
 

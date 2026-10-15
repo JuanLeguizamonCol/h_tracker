@@ -24,15 +24,25 @@ def _send(to: str | None, subject: str, heading: str, body: str, review_id: str)
         logger.exception("Failed to send performance review email for review %s", review_id)
 
 
+def _reviewer_names(review: dict) -> str:
+    names = [r["reviewer_name"] for r in review.get("evaluations", {}).get("reviewers", []) if r.get("reviewer_name")]
+    return ", ".join(names)
+
+
 def notify_review_created(db: Session, review: dict, employee_email: str | None) -> None:
     """Ask the reviewee to complete the project details and self-assessment —
-    both an email and an in-app notification linking straight to the review."""
+    both an email and an in-app notification linking straight to the review
+    (open and ready to fill, not just a reference link). Mentions the
+    deadline when one is set, since the self-assessment locks once it passes."""
+    reviewer_names = _reviewer_names(review)
+    due = review.get("self_due_date")
     body = f"""
     <p>A performance review was opened for your work on <strong>{review['project_name']}</strong>
-    {f"(reviewer: {review['reviewer_name']})" if review.get('reviewer_name') else ''}.</p>
-    <p>Please complete the <strong>Project Details</strong>, the <strong>Self Assessment</strong> and your
-    <strong>self evaluation</strong> scores, then submit them to your manager.</p>
-    {action_button('Open my review', f"/reviews/{review['id']}")}
+    {f"(reviewer{'s' if ',' in reviewer_names else ''}: {reviewer_names})" if reviewer_names else ''}.</p>
+    <p>Please complete the <strong>Project Details</strong> and your <strong>Self Assessment</strong>,
+    then submit it to your reviewer{'s' if ',' in reviewer_names else ''}.</p>
+    {f"<p><strong>Due by {due}</strong> — after that date you won't be able to edit or submit it yourself.</p>" if due else ''}
+    {action_button('Open my self-assessment', f"/reviews/{review['id']}")}
     """
     _send(employee_email, f"Performance review: {review['project_name']}", "Self-assessment requested", body, review["id"])
     create_notification(
@@ -46,34 +56,37 @@ def notify_review_created(db: Session, review: dict, employee_email: str | None)
 
 
 def notify_self_assessment_submitted(review: dict, reviewer_email: str | None) -> None:
-    """Tell the reviewer the employee's part is done and scoring can start."""
+    """Tell the reviewer the employee's part is done and scoring can start —
+    reviewers can't begin until this fires."""
     body = f"""
     <p><strong>{review['employee_name']}</strong> submitted their self-assessment for
-    <strong>{review['project_name']}</strong>. Please complete your <strong>manager evaluation</strong> —
-    you'll see their self scores in the joint review.</p>
+    <strong>{review['project_name']}</strong>. Please complete your evaluation — it's independent
+    from any other reviewer's, and you'll see each other's once everyone has submitted.</p>
     {action_button('Review now', f"/reviews/{review['id']}")}
     """
     _send(reviewer_email, f"Self-assessment ready: {review['employee_name']} — {review['project_name']}", "Ready for your review", body, review["id"])
 
 
-def notify_joint_review_ready(review: dict, employee_email: str | None, reviewer_email: str | None) -> None:
-    """Both parties: self and manager evaluations are in — time for the joint one."""
+def notify_joint_review_ready(review: dict, employee_email: str | None, *reviewer_emails: str | None) -> None:
+    """Everyone involved: the self-assessment and every reviewer's evaluation
+    are in — time for the Final Submission."""
     body = f"""
-    <p>The self and manager evaluations for <strong>{review['employee_name']}</strong> on
-    <strong>{review['project_name']}</strong> are done. Meet to agree on the <strong>joint evaluation</strong> —
+    <p>The self-assessment and every reviewer evaluation for <strong>{review['employee_name']}</strong> on
+    <strong>{review['project_name']}</strong> are done. Meet to agree on the <strong>Final Submission</strong> —
     it's the one that counts toward the annual performance score.</p>
-    {action_button('Open the joint review', f"/reviews/{review['id']}")}
+    {action_button('Open the Final Submission', f"/reviews/{review['id']}")}
     """
-    subject = f"Joint review: {review['employee_name']} — {review['project_name']}"
-    for to in {employee_email, reviewer_email} - {None}:
-        _send(to, subject, "Ready for the joint review", body, review["id"])
+    subject = f"Final Submission ready: {review['employee_name']} — {review['project_name']}"
+    for to in {employee_email, *reviewer_emails} - {None}:
+        _send(to, subject, "Ready for the Final Submission", body, review["id"])
 
 
 def notify_review_completed(review: dict, employee_email: str | None) -> None:
     """Tell the reviewee their review is complete and visible."""
+    reviewer_names = _reviewer_names(review)
     body = f"""
     <p>Your performance review for <strong>{review['project_name']}</strong> has been completed
-    {f"by {review['reviewer_name']}" if review.get('reviewer_name') else ''}.</p>
+    {f"by {reviewer_names}" if reviewer_names else ''}.</p>
     {action_button('View my review', f"/reviews/{review['id']}")}
     """
     _send(employee_email, f"Performance review completed: {review['project_name']}", "Review completed", body, review["id"])

@@ -340,7 +340,7 @@ export function PerformanceReport() {
       ) : (
         <>
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
-            <Kpi label="Avg review score" value={fmt(kpis.score)} hint="Joint evaluations completed in the period"
+            <Kpi label="Avg review score" value={fmt(kpis.score)} hint="Final Submissions completed in the period"
               icon={Star} color="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" />
             <Kpi label="Avg monthly hours" value={fmtHours(kpis.monthly)} hint="Per employee, complete months"
               icon={Clock} color="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" />
@@ -357,9 +357,9 @@ export function PerformanceReport() {
             <CardHeader>
               <CardTitle className="text-base">Employee Scorecard</CardTitle>
               <p className="text-xs text-muted-foreground">
-                {rangeLabel} · Review score = mean of the joint evaluations completed in the period (official score) ·
+                {rangeLabel} · Review score = mean of the Final Submissions completed in the period (official score) ·
                 Avg monthly hours excludes the running month · Utilization = billable hours ÷ capacity (max weekly hours, prorated) ·
-                Gap = self − manager · Click a row to see each project's scores
+                Gap = self − manager (self no longer scores, so this is always empty) · Click a row to see each project's scores
               </p>
             </CardHeader>
             <CardContent>

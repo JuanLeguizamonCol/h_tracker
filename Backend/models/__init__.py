@@ -32,4 +32,4 @@ from models.pto_request_attachments import PtoRequestAttachment
 from models.employee_section_access import EmployeeSectionAccess
 from models.time_entry_lock_overrides import TimeEntryLockOverride
 from models.time_entry_delegates import TimeEntryDelegate
-from models.performance_reviews import PerformanceReview
+from models.performance_reviews import PerformanceReview, PerformanceReviewReviewer

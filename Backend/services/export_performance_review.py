@@ -1,6 +1,12 @@
 """Excel export of a project performance review — reproduces the Impact Point
 review workbook layout (columns Criteria / Sub-Criteria / Score / Reviewer
-Notes; blue = employee sections, green = reviewer sections)."""
+Notes; blue = employee sections, green = reviewer sections).
+
+With N reviewers, the fixed "Manager" sheet is the cross-reviewer average
+(same figure used to seed the joint evaluation and shown in Analytics/Reports
+— see services/performance_reviews.py::manager_evaluation_scores), and when
+there's more than one reviewer each gets their own extra detail sheet with
+their individual scores/notes."""
 import math
 import re
 from io import BytesIO
@@ -8,7 +14,7 @@ from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
-from services.performance_reviews import REVIEW_TEMPLATE
+from services.performance_reviews import REVIEW_TEMPLATE, manager_evaluation_scores, compute_averages
 
 NAVY = "FF0B347D"         # employee section headers
 GREEN = "FF237F2E"        # reviewer section headers
@@ -75,29 +81,64 @@ def export_filename(data: dict) -> str:
     return re.sub(r'[\\/:*?"<>|]', "", name)
 
 
+def _manager_average_evaluation(data: dict) -> dict:
+    reviewers = data["evaluations"]["reviewers"]
+    pooled = manager_evaluation_scores([r["scores"] for r in reviewers])
+    criteria, overall = compute_averages(pooled)
+    return {"visible": True, "scores": pooled, "criteria_averages": criteria, "overall_average": overall}
 
-# (evaluation key, sheet name, caption) — joint first: it's the official one.
-SHEETS = [
-    ("joint", "Joint", "Joint evaluation (official — counts toward the annual score)"),
-    ("manager", "Manager", "Manager evaluation"),
-    ("self", "Self", "Self evaluation"),
-]
+
+def _unique_sheet_name(used: set, base: str) -> str:
+    name = base[:31]
+    n = 2
+    while name in used:
+        name = f"{base[:28]} {n}"[:31]
+        n += 1
+    used.add(name)
+    return name
 
 
 def generate_performance_review_xlsx(data: dict) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
-    for set_key, sheet_name, caption in SHEETS:
-        _write_sheet(wb.create_sheet(sheet_name), data, set_key, caption)
+    reviewers = data["evaluations"]["reviewers"]
+    multiple_reviewers = len(reviewers) > 1
+
+    used_names = {"Final Submission", "Manager", "Self"}
+    # Final Submission first — it's the official one — then the Manager average, then Self.
+    _write_sheet(
+        wb.create_sheet("Final Submission"), data, data["evaluations"]["joint"],
+        "Final Submission (official — counts toward the annual score)", reviewer=None,
+    )
+    _write_sheet(
+        wb.create_sheet("Manager"), data, _manager_average_evaluation(data),
+        "Manager evaluation (average across reviewers)" if multiple_reviewers else "Manager evaluation",
+        reviewer=None,
+    )
+    _write_sheet(wb.create_sheet("Self"), data, data["evaluations"]["self"], "Self evaluation", reviewer=None, is_self=True)
+
+    # One extra detail sheet per reviewer when there's more than one — the
+    # fixed "Manager" sheet above already covers the single-reviewer case.
+    if multiple_reviewers:
+        for r in reviewers:
+            name = _unique_sheet_name(used_names, r.get("reviewer_name") or "Reviewer")
+            _write_sheet(
+                wb.create_sheet(name), data, r,
+                f"Reviewer evaluation — {r.get('reviewer_name') or ''}", reviewer=r,
+            )
+
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
 
 
-def _write_sheet(ws, data: dict, set_key: str, caption: str) -> None:
-    evaluation = data["evaluations"][set_key]
+def _write_sheet(ws, data: dict, evaluation: dict, caption: str, reviewer: dict | None, is_self: bool = False) -> None:
     for col, width in COL_WIDTHS.items():
         ws.column_dimensions[col].width = width
+
+    reviewers = data["evaluations"]["reviewers"]
+    reviewer_label = "Reviewers" if len(reviewers) != 1 else "Reviewer"
+    reviewer_names = ", ".join(r.get("reviewer_name") or "" for r in reviewers if r.get("reviewer_name"))
 
     # Header + instructions
     for col, label in zip("ABCD", ("Criteria", "Sub-Criteria", "Score", "Reviewer Notes")):
@@ -118,7 +159,7 @@ def _write_sheet(ws, data: dict, set_key: str, caption: str) -> None:
 
     details = [
         ("Project Name", data.get("client_name") or data["project_name"]),
-        ("Reviewer", data.get("reviewer_name") or ""),
+        (reviewer_label, (reviewer.get("reviewer_name") if reviewer else reviewer_names) or ""),
         ("Project Description", data.get("project_description") or ""),
         ("Employee's Role / Key Activities", data.get("employee_role") or ""),
         ("Duration", _hours_label(data.get("duration_hours"))),
@@ -135,26 +176,49 @@ def _write_sheet(ws, data: dict, set_key: str, caption: str) -> None:
         _cell(ws, f"D{row}", s_value, BOLD10, PEACH if s_label == "Average Total" else CREAM, CENTER)
         _fit_row(ws, row)
 
-    # Self assessment (employee) + reviewer notes on each row
+    # Self assessment (employee) + this sheet's reviewer's notes on each row
+    # (blank on Joint/Manager-average/Self, since those aren't any one
+    # reviewer's notes — see the per-reviewer detail sheets for those).
     _cell(ws, "A13", "Self Assessment", H12_WHITE, NAVY, LEFT)
     _cell(ws, "B13", "Self-Assessment Notes", H12_WHITE, NAVY)
     _cell(ws, "C13", None, H12_WHITE, NAVY)
     _cell(ws, "D13", "Reviewer Notes", H12_WHITE, GREEN)
     self_rows = [
-        ("Strengths", "self_strengths", "reviewer_strengths_notes"),
-        ("Areas for Improvement", "self_improvement", "reviewer_improvement_notes"),
-        ("Personal Development Needs", "self_development", "reviewer_development_notes"),
+        ("Strengths", "self_strengths", "strengths_notes"),
+        ("Areas for Improvement", "self_improvement", "improvement_notes"),
+        ("Personal Development Needs", "self_development", "development_notes"),
     ]
-    for i, (label, self_key, reviewer_key) in enumerate(self_rows):
+    for i, (label, self_key, reviewer_notes_key) in enumerate(self_rows):
         row = 14 + i
         _cell(ws, f"A{row}", label, BOLD10, LIGHT_BLUE, LEFT)
         _cell(ws, f"B{row}", data.get(self_key) or None, align=WRAP)
-        _cell(ws, f"D{row}", data.get(reviewer_key) or None, align=WRAP)
+        _cell(ws, f"D{row}", (reviewer.get(reviewer_notes_key) if reviewer else None) or None, align=WRAP)
         _fit_row(ws, row)
-    if set_key == "joint" and data.get("joint_notes"):
-        _cell(ws, "A17", "Joint Review Notes", BOLD10, LIGHT_GREEN, LEFT)
+    if evaluation is data["evaluations"]["joint"] and data.get("joint_notes"):
+        _cell(ws, "A17", "Final Submission Notes", BOLD10, LIGHT_GREEN, LEFT)
         _cell(ws, "B17", data["joint_notes"], align=WRAP)
         _fit_row(ws, 17)
+
+    if is_self:
+        # No per-item scoring for self — the sub-criteria are shown as a
+        # read-only reference list, with one free-text comment per section
+        # at the end of it (self_section_comments).
+        for col, label in zip("ABCD", ("Section", "What's being evaluated (reference)", "", "Your comment")):
+            _cell(ws, f"{col}18", label, H12_WHITE, NAVY, LEFT)
+        comments = evaluation.get("section_comments") or {}
+        row = 19
+        for criterion in REVIEW_TEMPLATE:
+            _cell(ws, f"A{row}", criterion["label"], BOLD10, LIGHT_BLUE, LEFT)
+            _cell(ws, f"B{row}", None, BODY10, LIGHT_BLUE)
+            _cell(ws, f"C{row}", None, BODY10, LIGHT_BLUE)
+            _cell(ws, f"D{row}", comments.get(criterion["key"]), BOLD10, LIGHT_BLUE, WRAP)
+            _fit_row(ws, row)
+            row += 1
+            for sub_key, sub_label in criterion["sub_criteria"]:
+                _cell(ws, f"B{row}", sub_label, align=WRAP)
+                _fit_row(ws, row)
+                row += 1
+        return
 
     # Reviewer assessment
     for col, label in zip("ABCD", ("Reviewer Assessment", "Sub-Criteria", "Score", "Reviewer Notes")):
@@ -176,4 +240,3 @@ def _write_sheet(ws, data: dict, set_key: str, caption: str) -> None:
             _cell(ws, f"D{row}", entry.get("notes"), align=WRAP)
             _fit_row(ws, row)
             row += 1
-
