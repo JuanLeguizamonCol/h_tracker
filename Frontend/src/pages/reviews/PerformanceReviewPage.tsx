@@ -25,6 +25,9 @@ const EMPLOYEE_ACCENT = 'border-l-4 border-l-sky-500';
 const REVIEWER_ACCENT = 'border-l-4 border-l-emerald-600';
 
 const EVALUATIONS: EvaluationKey[] = ['self', 'manager', 'joint'];
+// The Average Score summary card has no "Self" column — self no longer
+// scores anything numerically, just one comment per section.
+const SUMMARY_EVALUATIONS: EvaluationKey[] = ['manager', 'joint'];
 // Only joint is a flat scored column on the review itself — "self" no longer
 // scores anything (one comment per section instead, see self_section_comments)
 // and "manager" is whichever reviewer is currently selected (see
@@ -438,13 +441,18 @@ export default function PerformanceReviewPage() {
 
   const badge = REVIEW_STATUS_BADGE[review.status];
   const busy = updateReview.isPending || transition.isPending;
-  const canSubmitSelf = review.status === 'self_assessment' && (isReviewee || manage);
+  // Each submit/complete action also requires being ON that evaluation's own
+  // tab — these buttons live in the page header, outside the tabbed area, so
+  // without this a reviewer browsing the Self tab (e.g. to read it once it's
+  // visible) would still see "Submit My Evaluation" sitting there armed and
+  // could click it without meaning to submit the Manager evaluation at all.
+  const canSubmitSelf = tab === 'self' && review.status === 'self_assessment' && (isReviewee || manage);
   // Submitting is always the caller's OWN row — Admin/Manager can edit any
   // reviewer's scores, but submitting on someone else's behalf doesn't make
   // sense (see services/performance_reviews.py::transition_review), so this
   // only shows for an actual assigned reviewer who hasn't submitted yet.
-  const canSubmitManager = review.status === 'in_review' && !!ownReviewerRow && !ownReviewerRow.submitted;
-  const canComplete = review.status === 'joint_review' && (isReviewer || manage);
+  const canSubmitManager = tab === 'manager' && review.status === 'in_review' && !!ownReviewerRow && !ownReviewerRow.submitted;
+  const canComplete = tab === 'joint' && review.status === 'joint_review' && (isReviewer || manage);
   const canReopen = manage && review.status !== 'self_assessment';
   const canExport = manage || review.status === 'completed';
   const canEditEmployeeText = canEdit.self;
@@ -521,7 +529,8 @@ export default function PerformanceReviewPage() {
             </Button>
           )}
           {canSubmitManager && (
-            <Button className="gap-2" disabled={busy}
+            <Button className="gap-2" disabled={busy || averages.manager.overall == null}
+              title={averages.manager.overall == null ? 'Rate at least one item before submitting.' : undefined}
               onClick={() => runTransition('submit_manager', "Submit your evaluation? You won't be able to edit it afterwards. Final Submission opens once every assigned reviewer has submitted.", 'Your evaluation was submitted.')}>
               <Send className="h-4 w-4" /> Submit My Evaluation
             </Button>
@@ -649,7 +658,9 @@ export default function PerformanceReviewPage() {
               <thead>
                 <tr className="border-b text-xs text-muted-foreground">
                   <th className="text-left font-medium px-4 py-2">Criteria</th>
-                  {EVALUATIONS.map(k => (
+                  {/* No "Self" column — self no longer scores anything, just
+                      one comment per section (see the Self Evaluation tab). */}
+                  {SUMMARY_EVALUATIONS.map(k => (
                     <th key={k} className={cn('font-medium px-2 py-2 text-center', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300')}>
                       {EVALUATION_META[k].short}
                     </th>
@@ -660,7 +671,7 @@ export default function PerformanceReviewPage() {
                 {template.criteria.map((c, i) => (
                   <tr key={c.key} className="border-b last:border-b-0">
                     <td className="px-4 py-2">{c.short_label}</td>
-                    {EVALUATIONS.map(k => (
+                    {SUMMARY_EVALUATIONS.map(k => (
                       <td key={k} className={cn('px-2 py-2 text-center tabular-nums', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 font-semibold')}>
                         {visible(k) ? fmtAvg(averages[k].criteria[i].average) : <Lock className="h-3.5 w-3.5 mx-auto text-muted-foreground" />}
                       </td>
@@ -669,7 +680,7 @@ export default function PerformanceReviewPage() {
                 ))}
                 <tr className="border-t-2">
                   <td className="px-4 py-2.5 font-semibold">Average Total</td>
-                  {EVALUATIONS.map(k => (
+                  {SUMMARY_EVALUATIONS.map(k => (
                     <td key={k} className={cn('px-2 py-2.5 text-center tabular-nums font-semibold', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 text-lg text-emerald-700 dark:text-emerald-400 font-bold')}>
                       {visible(k) ? fmtAvg(averages[k].overall) : <Lock className="h-3.5 w-3.5 mx-auto text-muted-foreground" />}
                     </td>
