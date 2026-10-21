@@ -48,6 +48,7 @@ def export_time_entries_xlsx(
     work_location: Optional[List[str]] = Query(None),
     owner_id: Optional[List[str]] = Query(None),
     manager_id: Optional[List[str]] = Query(None),
+    owner_company: Optional[List[str]] = Query(None),
     status: Optional[str] = None,
     billing: Optional[str] = None,
     search: Optional[str] = None,
@@ -81,6 +82,8 @@ def export_time_entries_xlsx(
         q = q.filter(Project.owner_id.in_(owner_id))
     if manager_id:
         q = q.filter(Project.manager_id.in_(manager_id))
+    if owner_company:
+        q = q.filter(Project.owner_company.in_(owner_company))
     if location:
         ors = []
         if NO_LOCATION in location:
@@ -169,6 +172,9 @@ def export_time_entries_xlsx(
         filters.append(f"Owner: {_names_for(owner_id, Employee)}")
     if manager_id:
         filters.append(f"Manager: {_names_for(manager_id, Employee)}")
+    if owner_company:
+        company_labels = {"IPC": "IPC", "PI": "Pegasus"}
+        filters.append(f"Company: {', '.join(company_labels.get(c, c) for c in owner_company)}")
     if status in ("normal", "on_hold"):
         filters.append(f"Status: {'On Hold' if status == 'on_hold' else 'Normal'}")
     if billing in ("billable", "non_billable"):

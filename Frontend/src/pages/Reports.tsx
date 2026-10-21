@@ -102,6 +102,9 @@ type Filters = {
   workLocation: string[];
   ownerId: string[];
   managerId: string[];
+  // Project.owner_company — "IPC" or "PI" (Pegasus). Same field already
+  // shown on the project itself; this just exposes it as a report filter.
+  company: string[];
   status: string;
   billing: string;
   search: string;
@@ -117,10 +120,15 @@ const INIT: Filters = {
   workLocation: [],
   ownerId: [],
   managerId: [],
+  company: [],
   status: 'all',
   billing: 'all',
   search: '',
 };
+
+// Labels for Project.owner_company values — same convention used elsewhere
+// in the app (invoice owner company, etc.).
+const COMPANY_LABELS: Record<string, string> = { IPC: 'IPC', PI: 'Pegasus' };
 
 // ─── FilterSelect helper ──────────────────────────────────────────────────────
 
@@ -472,8 +480,18 @@ export default function Reports() {
     return [...byId].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
   }, [rawEntries, projectMap]);
 
+  // Distinct owner companies (IPC / Pegasus) present in the current entries.
+  const availableCompanies = useMemo(() => {
+    const keys = new Set<string>();
+    rawEntries.forEach(e => {
+      const company = projectMap.get(e.project_id)?.owner_company;
+      if (company) keys.add(company);
+    });
+    return [...keys].map(value => ({ value, label: COMPANY_LABELS[value] ?? value })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [rawEntries, projectMap]);
 
-  const clearAll = () => setF(prev => ({ ...prev, employeeId: [], projectId: [], clientId: [], location: [], workLocation: [], ownerId: [], managerId: [], status: 'all', billing: 'all', search: '' }));
+
+  const clearAll = () => setF(prev => ({ ...prev, employeeId: [], projectId: [], clientId: [], location: [], workLocation: [], ownerId: [], managerId: [], company: [], status: 'all', billing: 'all', search: '' }));
 
   // ── Excel export (server-generated, honours the current filters) ───────────────
   const handleExportExcel = async () => {
@@ -489,6 +507,7 @@ export default function Reports() {
       f.workLocation.forEach(v => params.append('work_location', v));
       f.ownerId.forEach(v => params.append('owner_id', v));
       f.managerId.forEach(v => params.append('manager_id', v));
+      f.company.forEach(v => params.append('owner_company', v));
       if (f.status !== 'all') params.set('status', f.status);
       if (f.billing !== 'all') params.set('billing', f.billing);
       if (f.search) params.set('search', f.search);
@@ -500,7 +519,7 @@ export default function Reports() {
       setIsExporting(false);
     }
   };
-  const hasActiveFilters = f.employeeId.length > 0 || f.projectId.length > 0 || f.clientId.length > 0 || f.location.length > 0 || f.workLocation.length > 0 || f.ownerId.length > 0 || f.managerId.length > 0 || f.status !== 'all' || f.billing !== 'all' || !!f.search;
+  const hasActiveFilters = f.employeeId.length > 0 || f.projectId.length > 0 || f.clientId.length > 0 || f.location.length > 0 || f.workLocation.length > 0 || f.ownerId.length > 0 || f.managerId.length > 0 || f.company.length > 0 || f.status !== 'all' || f.billing !== 'all' || !!f.search;
 
   // ── Filtered entries (single source of truth) ─────────────────────────────────
   const filteredEntries = useMemo(() => rawEntries.filter(e => {
@@ -511,6 +530,7 @@ export default function Reports() {
     if (f.workLocation.length > 0 && !f.workLocation.includes(workLocationOf(e))) return false;
     if (f.ownerId.length > 0 && !f.ownerId.includes(projectMap.get(e.project_id)?.owner_id ?? '')) return false;
     if (f.managerId.length > 0 && !f.managerId.includes(projectMap.get(e.project_id)?.manager_id ?? '')) return false;
+    if (f.company.length > 0 && !f.company.includes(projectMap.get(e.project_id)?.owner_company ?? '')) return false;
     if (f.status === 'normal' && e.status !== 'normal') return false;
     if (f.status === 'on_hold' && e.status !== 'on_hold') return false;
     if (f.billing === 'billable' && !e.billable) return false;
@@ -1123,6 +1143,7 @@ export default function Reports() {
           `Weekly capacity: ${WEEKLY_CAPACITY_HOURS}h`,
           f.employeeId.length > 0 ? `Employees: ${availableEmployees.filter(e => f.employeeId.includes(e.id)).map(e => e.name).join(', ')}` : 'Employees: All',
           f.location.length > 0 ? `Locations: ${availableLocations.filter(l => f.location.includes(l.value)).map(l => l.label).join(', ')}` : 'Locations: All',
+          f.company.length > 0 ? `Company: ${f.company.map(c => COMPANY_LABELS[c] ?? c).join(', ')}` : 'Company: All',
         ],
         sheets: [{
           title: 'Utilization Detail',
@@ -1165,8 +1186,9 @@ export default function Reports() {
     if (f.location.length > 0 && !f.location.includes(locationKeyOf(a.user_id))) return false;
     if (f.ownerId.length > 0 && !f.ownerId.includes(projectMap.get(a.project_id)?.owner_id ?? '')) return false;
     if (f.managerId.length > 0 && !f.managerId.includes(projectMap.get(a.project_id)?.manager_id ?? '')) return false;
+    if (f.company.length > 0 && !f.company.includes(projectMap.get(a.project_id)?.owner_company ?? '')) return false;
     return true;
-  }), [staffing, f.employeeId, f.projectId, f.clientId, f.location, f.ownerId, f.managerId, projectMap, locationKeyOf]);
+  }), [staffing, f.employeeId, f.projectId, f.clientId, f.location, f.ownerId, f.managerId, f.company, projectMap, locationKeyOf]);
 
   // ── Utilization report: forward projection from Staffing ───────────────────────
   // Turns each assignment's allocation % (set in the Staffing panel) into implied
@@ -1344,6 +1366,7 @@ export default function Reports() {
     if (f.workLocation.length > 0) c.push({ key: 'wloc', label: `Work Location: ${namesFor(f.workLocation, l => l === NO_LOCATION ? NO_LOCATION_LABEL : l)}`, onClear: () => set('workLocation', []) });
     if (f.ownerId.length > 0)    c.push({ key: 'own',  label: `Owner: ${namesFor(f.ownerId, id => availableOwners.find(o => o.value === id)?.label ?? id)}`, onClear: () => set('ownerId', []) });
     if (f.managerId.length > 0)  c.push({ key: 'mgr',  label: `Manager: ${namesFor(f.managerId, id => availableManagers.find(m => m.value === id)?.label ?? id)}`, onClear: () => set('managerId', []) });
+    if (f.company.length > 0)   c.push({ key: 'co',   label: `Company: ${namesFor(f.company, id => COMPANY_LABELS[id] ?? id)}`,  onClear: () => set('company', []) });
     if (f.status !== 'all')     c.push({ key: 'st',   label: `Status: ${f.status === 'on_hold' ? 'On Hold' : 'Normal'}`,        onClear: () => set('status', 'all') });
     if (f.billing !== 'all')    c.push({ key: 'bi',   label: f.billing === 'billable' ? 'Billable only' : 'Non-billable only',   onClear: () => set('billing', 'all') });
     if (f.search)               c.push({ key: 'q',    label: `"${f.search}"`,                                                   onClear: () => set('search', '') });
@@ -1453,6 +1476,9 @@ export default function Reports() {
                 options={availableManagers}
                 onChange={v => set('managerId', v)} onClear={() => set('managerId', [])} />
             )}
+            <MultiFilterSelect label="Company" selected={f.company} allLabel="All Companies"
+              options={availableCompanies}
+              onChange={v => set('company', v)} onClear={() => set('company', [])} />
             <FilterSelect label="Status" value={f.status} allLabel="All Statuses"
               options={[{ value: 'normal', label: 'Normal' }, { value: 'on_hold', label: 'On Hold' }]}
               isFiltered={false} onChange={v => set('status', v)} onClear={() => set('status', 'all')} />
