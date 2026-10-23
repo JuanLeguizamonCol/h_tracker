@@ -480,7 +480,7 @@ export default function PerformanceReviewPage() {
     k === 'joint'
       ? 'Final Submission opens once the self evaluation and every reviewer evaluation are submitted.'
       : k === 'self'
-      ? 'The self evaluation is only visible once the review reaches Final Submission — not before.'
+      ? 'The self evaluation becomes visible to the assigned reviewer(s) and Admin/Manager once the employee submits it.'
       : 'This reviewer’s evaluation is visible to others at Final Submission — evaluations are blind until then.';
 
   return (
@@ -738,7 +738,7 @@ export default function PerformanceReviewPage() {
                 <div className="text-xs font-medium text-sky-700 dark:text-sky-400">Self-assessment notes</div>
                 {visible('self')
                   ? textArea(selfKey, canEditEmployeeText, `Your ${label.toLowerCase()}`)
-                  : <LockedNote>Visible once the review reaches Final Submission</LockedNote>}
+                  : <LockedNote>Visible once the employee submits their self evaluation</LockedNote>}
               </div>
               <div className="space-y-1">
                 <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">

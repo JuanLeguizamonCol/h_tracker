@@ -170,21 +170,27 @@ def editable_fields(review: PerformanceReview, viewer_id: str, viewer_can_manage
 
 
 def visibility(review: PerformanceReview, viewer_id: str, viewer_can_manage: bool) -> Dict[str, bool]:
-    """Self, each reviewer, and joint are blind to EVERYONE — including
+    """Each reviewer's row and joint are blind to EVERYONE — including
     Admin/Manager — until the joint stage (which only opens once every
     assigned reviewer has submitted). At that point everyone sees everything
-    together, to compare:
+    together, to compare. Self is different: anyone who can already access
+    this review (the reviewee, an assigned reviewer, or Admin/Manager) can
+    read it as soon as the reviewee actually submits it — it doesn't wait for
+    joint_review, so a reviewer can read the self-assessment while writing
+    their own evaluation.
       - reviewee: own self always; joint + everyone's content from `joint_review` on
-      - a reviewer: own row always; self + other reviewers' rows + joint from `joint_review` on
-      - Admin/Manager: nothing content-related until `joint_review`, then everything (same as
-        everyone else) — their elevated access is for administrative actions (see
-        editable_fields/ADMIN_META_FIELDS), not for peeking at in-progress evaluations.
+      - a reviewer: own row always; self once submitted; other reviewers' rows + joint from `joint_review` on
+      - Admin/Manager: self once submitted; nothing else content-related until `joint_review`,
+        then everything (same as everyone else) — their elevated access otherwise is for
+        administrative actions (see editable_fields/ADMIN_META_FIELDS), not for peeking at
+        in-progress reviewer evaluations.
     """
     stage = _STAGE.get(review.status, 0)
     is_reviewee = review.employee_id == viewer_id
+    self_submitted = review.self_submitted_at is not None
     together = stage >= _STAGE["joint_review"]
     return {
-        "self": is_reviewee or together,
+        "self": is_reviewee or self_submitted,
         "joint": together,
         "together": together,
     }

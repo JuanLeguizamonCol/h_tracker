@@ -150,7 +150,7 @@ def _visible(db, review, viewer, manage=False):
     return vis, out
 
 
-def test_self_is_blind_to_everyone_but_the_reviewee_until_final_submission(db):
+def test_self_opens_to_the_reviewer_as_soon_as_it_is_submitted(db):
     review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"]), "x")
     svc.update_review(db, review, {"self_section_comments": {"written": "Did well here."}, "self_strengths": "Excel"})
     vis, out = _visible(db, review, "emp")
@@ -158,15 +158,16 @@ def test_self_is_blind_to_everyone_but_the_reviewee_until_final_submission(db):
     assert out["evaluations"]["self"]["section_comments"] == {"written": "Did well here."}
     vis, out = _visible(db, review, "mgr")
     assert vis == {"self": False, "joint": False, "reviewers": {"mgr": True}}
-    assert out["self_strengths"] is None  # not visible yet
+    assert out["self_strengths"] is None  # not submitted yet
 
     svc.transition_review(db, review, "submit_self")
     svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 3, "verbal_1": 4})})
     db.commit()
-    # Self is submitted but reviewers STILL can't see its content — only at
-    # Final Submission (joint_review), per the explicit "no antes" requirement.
+    # Self is submitted — the assigned reviewer can now read it while
+    # writing their own evaluation. Reviewer rows and joint still stay
+    # blind until Final Submission.
     vis, out = _visible(db, review, "mgr")
-    assert vis["self"] is False and out["self_strengths"] is None
+    assert vis["self"] is True and out["self_strengths"] == "Excel"
     vis, out = _visible(db, review, "emp")
     assert vis["reviewers"]["mgr"] is False
     assert out["overall_average"] is None
@@ -212,7 +213,7 @@ def test_employee_never_sees_any_individual_reviewer_row(db):
     assert vis["joint"] is True  # the official result stays visible to them
 
 
-def test_admin_is_blind_to_individual_evaluation_content_until_final_submission(db):
+def test_admin_is_blind_to_reviewer_content_until_final_submission_but_sees_self_once_submitted(db):
     review = svc.create_review(db, PerformanceReviewCreate(
         project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
     ), "x")
@@ -221,13 +222,14 @@ def test_admin_is_blind_to_individual_evaluation_content_until_final_submission(
     svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 4})})
     db.commit()
 
-    # Admin (viewer_can_manage=True) is blind to self and reviewer content
-    # too, same as everyone else — their elevated access is administrative
-    # (create/assign/enable, roster/dates/format) not content visibility.
+    # Admin (viewer_can_manage=True) can read self as soon as it's submitted
+    # — same as a reviewer — but is blind to each reviewer's row, same as
+    # everyone else, until Final Submission. Admin's elevated access is
+    # administrative (create/assign/enable, roster/dates/format), not a
+    # bypass for peeking at in-progress reviewer evaluations.
     vis, out = _visible(db, review, "admin", manage=True)
-    assert vis == {"self": False, "joint": False, "reviewers": {"mgr": False, "mgr2": False}}
-    assert out["self_strengths"] is None
-    assert not out["evaluations"]["self"]["section_comments"]
+    assert vis == {"self": True, "joint": False, "reviewers": {"mgr": False, "mgr2": False}}
+    assert out["evaluations"]["self"]["section_comments"] == {"written": "Did well here."}
     assert all(r["scores"] == {} for r in out["evaluations"]["reviewers"])
     # But Admin's own editable fields stay metadata-only, never content.
     assert svc.editable_fields(review, "admin", True) == svc.ADMIN_META_FIELDS
@@ -239,10 +241,9 @@ def test_admin_is_blind_to_individual_evaluation_content_until_final_submission(
     assert review.status == "joint_review"
 
     # Once together (Final Submission), Admin sees everything, to compare —
-    # same as every assigned reviewer and the reviewee's self content.
+    # same as every assigned reviewer.
     vis, out = _visible(db, review, "admin", manage=True)
     assert vis == {"self": True, "joint": True, "reviewers": {"mgr": True, "mgr2": True}}
-    assert out["evaluations"]["self"]["section_comments"] == {"written": "Did well here."}
     assert {r["reviewer_id"]: r["scores"] for r in out["evaluations"]["reviewers"]} == {
         "mgr": _scores({"written_1": 4}), "mgr2": _scores({"written_1": 2}),
     }
