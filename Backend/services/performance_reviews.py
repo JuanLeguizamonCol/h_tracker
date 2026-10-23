@@ -108,19 +108,25 @@ _STAGE = {"self_assessment": 0, "in_review": 1, "joint_review": 2, "completed": 
 #     per-section comments), while `self_assessment` AND before self_due_date
 #   - a reviewer: their own evaluation (via the nested `reviewer_evaluation` patch) — but only
 #                 once the self evaluation has been SUBMITTED (status == in_review), until THEY
-#                 submit it; joint scores + joint notes once the review reaches `joint_review`
-#                 (any assigned reviewer, not just one)
-#   - Admin/Manager (Reviews edit access): everything, any time, including the reviewer roster,
-#     and they always bypass the self-assessment deadline
+#                 submit it; joint fields once the review reaches `joint_review` (any assigned
+#                 reviewer, not just one)
+#   - Admin/Manager (Reviews edit access): purely administrative fields, any time (create/assign/
+#     enable reviews, correct dates/roster/format) — NOT evaluation content (self text, reviewer
+#     scores/notes). They see and can adjust the joint ("Final Submission") fields once that stage
+#     is reached, same as everyone else — see visibility() below, which they no longer bypass.
 EMPLOYEE_FIELDS = {
     "project_description", "employee_role",
     "self_strengths", "self_improvement", "self_development", "self_section_comments",
 }
 JOINT_FIELDS = {"joint_scores", "joint_notes"}
-ADMIN_FIELDS = EMPLOYEE_FIELDS | JOINT_FIELDS | {
-    "reviewer_evaluation", "reviewer_ids", "review_date", "self_due_date", "evaluation_format",
+ADMIN_META_FIELDS = {
+    "reviewer_ids", "review_date", "self_due_date", "evaluation_format",
     "period_start", "period_end", "duration_hours",
 }
+# Kept for backward compat (tests, docs) — what an Admin/Manager can touch on
+# a review that's reached `completed` with no reviewer row of their own: just
+# the administrative metadata, nothing content-related anymore.
+ADMIN_FIELDS = ADMIN_META_FIELDS
 
 
 def _reviewer_row(review: PerformanceReview, reviewer_id: Optional[str]) -> Optional[PerformanceReviewReviewer]:
@@ -131,17 +137,18 @@ def _reviewer_row(review: PerformanceReview, reviewer_id: Optional[str]) -> Opti
 
 def self_assessment_locked(review: PerformanceReview, today: Optional[date] = None) -> bool:
     """True once the self-assessment deadline has passed and it still hasn't
-    been submitted — the employee can no longer edit or submit it (Admin/
-    Manager can always edit regardless; see editable_fields/ADMIN_FIELDS)."""
+    been submitted — the employee can no longer edit or submit it (an Admin
+    can still extend self_due_date, which is administrative metadata, not
+    evaluation content — see editable_fields)."""
     if review.status != "self_assessment" or review.self_due_date is None:
         return False
     return (today or date.today()) > review.self_due_date
 
 
 def editable_fields(review: PerformanceReview, viewer_id: str, viewer_can_manage: bool) -> set:
-    if viewer_can_manage:
-        return set(ADMIN_FIELDS)
     allowed = set()
+    if viewer_can_manage:
+        allowed |= ADMIN_META_FIELDS
     if review.employee_id == viewer_id and review.status == "self_assessment" and not self_assessment_locked(review):
         allowed |= EMPLOYEE_FIELDS
     own_row = _reviewer_row(review, viewer_id)
@@ -154,20 +161,25 @@ def editable_fields(review: PerformanceReview, viewer_id: str, viewer_can_manage
             allowed.add("reviewer_evaluation")
         elif review.status == "joint_review":
             allowed |= JOINT_FIELDS
+    elif viewer_can_manage and review.status == "joint_review":
+        # Admin isn't necessarily a reviewer themselves, but can still help
+        # reconcile the Final Submission once everyone's evaluations are
+        # revealed together — same stage everyone else gets JOINT_FIELDS.
+        allowed |= JOINT_FIELDS
     return allowed
 
 
 def visibility(review: PerformanceReview, viewer_id: str, viewer_can_manage: bool) -> Dict[str, bool]:
-    """Self, each reviewer, and joint are blind to each other until the joint
-    stage (which only opens once every assigned reviewer has submitted):
-      - reviewee: own self always; joint from `joint_review` on — but NEVER
-        any individual reviewer's row, at any stage
-      - a reviewer: own row always; self + other reviewers' rows + joint from
-        `joint_review` on
-      - Admin/Manager: everything
+    """Self, each reviewer, and joint are blind to EVERYONE — including
+    Admin/Manager — until the joint stage (which only opens once every
+    assigned reviewer has submitted). At that point everyone sees everything
+    together, to compare:
+      - reviewee: own self always; joint + everyone's content from `joint_review` on
+      - a reviewer: own row always; self + other reviewers' rows + joint from `joint_review` on
+      - Admin/Manager: nothing content-related until `joint_review`, then everything (same as
+        everyone else) — their elevated access is for administrative actions (see
+        editable_fields/ADMIN_META_FIELDS), not for peeking at in-progress evaluations.
     """
-    if viewer_can_manage:
-        return {"self": True, "joint": True, "together": True}
     stage = _STAGE.get(review.status, 0)
     is_reviewee = review.employee_id == viewer_id
     together = stage >= _STAGE["joint_review"]
@@ -301,19 +313,25 @@ def _set_out(scores: Optional[Dict[str, dict]], visible: bool, section_comments:
 
 def to_out_dict(
     review: PerformanceReview, name_by_id: dict, project_by_id: dict,
-    viewer_id: Optional[str] = None, viewer_can_manage: bool = False,
+    viewer_id: Optional[str] = None, viewer_can_manage: bool = False, force_visible: bool = False,
 ) -> dict:
-    vis = visibility(review, viewer_id, viewer_can_manage)
+    """`force_visible` shows every evaluation regardless of stage — used only
+    by review_export_data for the .xlsx export, which is an explicit,
+    deliberate Admin action to produce a full record, not passive browsing
+    (the thing the blind-until-together rule in visibility() guards against)."""
+    vis = {"self": True, "joint": True, "together": True} if force_visible else visibility(review, viewer_id, viewer_can_manage)
     together = vis["together"]
     is_reviewee = review.employee_id == viewer_id
     project_name, client_name = project_by_id.get(review.project_id, ("Unknown", None))
 
     reviewers_out = []
     for rr in review.reviewers:
-        # The reviewee NEVER sees an individual reviewer's row — only the
-        # joint ("Final Submission") result, even once reviewers can see
-        # each other's at `together`.
-        row_visible = viewer_can_manage or (rr.reviewer_id == viewer_id) or (together and not is_reviewee)
+        # The reviewee NEVER sees an individual reviewer's row, at any
+        # stage — only the joint ("Final Submission") result. Everyone else
+        # (other reviewers, and Admin/Manager) only sees their own row until
+        # "together" (every reviewer has submitted), then sees every row, to
+        # compare.
+        row_visible = force_visible or rr.reviewer_id == viewer_id or (together and not is_reviewee)
         scores = rr.scores if row_visible else {}
         criteria, overall = compute_averages(scores)
         reviewers_out.append({
@@ -548,7 +566,7 @@ def review_export_data(db: Session, review: PerformanceReview) -> dict:
     """Everything the .xlsx export needs, with names resolved (unfiltered —
     callers check access first, so this always renders as fully visible)."""
     name_by_id, project_by_id = _lookups(db, [review])
-    data = to_out_dict(review, name_by_id, project_by_id, viewer_id=None, viewer_can_manage=True)
+    data = to_out_dict(review, name_by_id, project_by_id, force_visible=True)
     emp = db.query(Employee).filter(Employee.id == review.employee_id).first()
     if emp and emp.first_name and emp.last_name:
         data["employee_display_name"] = f"{emp.last_name.strip()}, {emp.first_name.strip()}"

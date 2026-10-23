@@ -201,14 +201,53 @@ def test_employee_never_sees_any_individual_reviewer_row(db):
     review = svc.transition_review(db, review, "submit_manager", actor_id="mgr2")
     assert review.status == "joint_review"
 
-    # Reviewers see each other now that they're "together"...
+    # Reviewers are blind to each other until "together" (every reviewer has
+    # submitted) — then they see each other's rows too, to compare.
     vis, _ = _visible(db, review, "mgr")
     assert vis["reviewers"] == {"mgr": True, "mgr2": True}
-    # ...but the reviewee never sees either individual row, only the joint result.
+    # The reviewee never sees either individual row, at any stage — only the joint result.
     vis, out = _visible(db, review, "emp")
     assert vis["reviewers"] == {"mgr": False, "mgr2": False}
     assert all(r["scores"] == {} for r in out["evaluations"]["reviewers"])
     assert vis["joint"] is True  # the official result stays visible to them
+
+
+def test_admin_is_blind_to_individual_evaluation_content_until_final_submission(db):
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
+    ), "x")
+    svc.update_review(db, review, {"self_section_comments": {"written": "Did well here."}})
+    svc.transition_review(db, review, "submit_self")
+    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 4})})
+    db.commit()
+
+    # Admin (viewer_can_manage=True) is blind to self and reviewer content
+    # too, same as everyone else — their elevated access is administrative
+    # (create/assign/enable, roster/dates/format) not content visibility.
+    vis, out = _visible(db, review, "admin", manage=True)
+    assert vis == {"self": False, "joint": False, "reviewers": {"mgr": False, "mgr2": False}}
+    assert out["self_strengths"] is None
+    assert not out["evaluations"]["self"]["section_comments"]
+    assert all(r["scores"] == {} for r in out["evaluations"]["reviewers"])
+    # But Admin's own editable fields stay metadata-only, never content.
+    assert svc.editable_fields(review, "admin", True) == svc.ADMIN_META_FIELDS
+
+    svc.apply_reviewer_evaluation(db, review, "mgr2", {"scores": _scores({"written_1": 2})})
+    db.commit()
+    svc.transition_review(db, review, "submit_manager", actor_id="mgr")
+    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr2")
+    assert review.status == "joint_review"
+
+    # Once together (Final Submission), Admin sees everything, to compare —
+    # same as every assigned reviewer and the reviewee's self content.
+    vis, out = _visible(db, review, "admin", manage=True)
+    assert vis == {"self": True, "joint": True, "reviewers": {"mgr": True, "mgr2": True}}
+    assert out["evaluations"]["self"]["section_comments"] == {"written": "Did well here."}
+    assert {r["reviewer_id"]: r["scores"] for r in out["evaluations"]["reviewers"]} == {
+        "mgr": _scores({"written_1": 4}), "mgr2": _scores({"written_1": 2}),
+    }
+    # Admin can now also edit the joint/Final Submission fields.
+    assert svc.JOINT_FIELDS <= svc.editable_fields(review, "admin", True)
 
 
 def test_self_assessment_deadline_locks_editing(db):
@@ -219,8 +258,11 @@ def test_self_assessment_deadline_locks_editing(db):
     ), "x")
     assert svc.self_assessment_locked(locked) is True
     assert svc.editable_fields(locked, "emp", False) == set()
-    # Admin/Manager always bypasses the deadline.
-    assert "self_section_comments" in svc.editable_fields(locked, "anyone", True)
+    # Admin/Manager can't edit the self content either (blind like everyone
+    # until Final Submission) — but CAN always push the deadline out
+    # (administrative metadata), which is how they actually un-stick it.
+    assert svc.editable_fields(locked, "anyone", True) == svc.ADMIN_META_FIELDS
+    assert "self_due_date" in svc.editable_fields(locked, "anyone", True)
 
     open_review = svc.create_review(db, PerformanceReviewCreate(
         project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), self_due_date=tomorrow,

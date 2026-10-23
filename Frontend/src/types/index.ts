@@ -883,7 +883,6 @@ export type PerformanceReviewPatch = Partial<Pick<PerformanceReview,
   self_section_comments?: Record<string, string>;
   joint_scores?: Record<string, ReviewScore>;
   reviewer_evaluation?: {
-    reviewer_id?: string;
     scores?: Record<string, ReviewScore>;
     strengths_notes?: string | null;
     improvement_notes?: string | null;

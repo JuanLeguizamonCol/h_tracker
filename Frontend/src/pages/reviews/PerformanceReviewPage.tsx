@@ -267,7 +267,12 @@ export default function PerformanceReviewPage() {
     if (!review) return;
     if (selectedReviewerId && review.evaluations.reviewers.some(r => r.reviewer_id === selectedReviewerId)) return;
     const own = review.evaluations.reviewers.find(r => r.reviewer_id === employee?.id);
-    setSelectedReviewerId(own?.reviewer_id ?? review.evaluations.reviewers[0]?.reviewer_id ?? null);
+    // Only default to someone ELSE's row once everyone's work is visible
+    // together (Final Submission) — before that, a non-reviewer (including
+    // Admin) has no row of their own to default to, so the Manager tab
+    // simply shows its locked state until then.
+    const together = review.evaluations.joint.visible;
+    setSelectedReviewerId(own?.reviewer_id ?? (together ? review.evaluations.reviewers[0]?.reviewer_id ?? null : null));
   }, [review, employee?.id, selectedReviewerId]);
   useEffect(() => {
     if (!review) return;
@@ -284,9 +289,10 @@ export default function PerformanceReviewPage() {
     self: !!review && (manage || (isReviewee && status === 'self_assessment' && !review.self_locked)),
     // A reviewer can't start until the self evaluation has been submitted
     // (status moves to in_review) — no more "in parallel" with self.
-    manager: !!review && !!selectedRow && (
-      manage || (selectedReviewerId === employee?.id && !selectedRow.submitted && status === 'in_review')
-    ),
+    // Always the caller's OWN row, even for Admin/Manager — reviewer content
+    // is blind to everyone (including Admin) until Final Submission, so
+    // there's no "edit anyone's row" bypass here anymore.
+    manager: !!review && !!selectedRow && selectedReviewerId === employee?.id && !selectedRow.submitted && status === 'in_review',
     joint: !!review && (manage || (isReviewer && status === 'joint_review')),
   };
 
@@ -333,12 +339,10 @@ export default function PerformanceReviewPage() {
       (['strengths_notes', 'improvement_notes', 'development_notes'] as ReviewerTextField[]).forEach(f => {
         if (normText(reviewerDraft[f]) !== normText(selectedRow[f])) rp[f] = normText(reviewerDraft[f]);
       });
-      if (Object.keys(rp).length > 0) {
-        out.reviewer_evaluation = manage && selectedReviewerId ? { reviewer_id: selectedReviewerId, ...rp } : rp;
-      }
+      if (Object.keys(rp).length > 0) out.reviewer_evaluation = rp;
     }
     return out;
-  }, [review, draft, reviewerDraft, selectedRow, selectedReviewerId, allowed, manage]);
+  }, [review, draft, reviewerDraft, selectedRow, allowed]);
   const isDirty = Object.keys(patch).length > 0;
 
   const averages = useMemo(() => {
@@ -570,6 +574,30 @@ export default function PerformanceReviewPage() {
           ))}
         </TabsList>
 
+      {/* Prominent "whose evaluation is this" banner — moved up from inside
+          the Evaluations card (where it was easy to miss) so it's the first
+          thing seen after switching tabs, to avoid confusing one person's
+          evaluation for another's. */}
+      <div className={cn(
+        'flex flex-wrap items-center gap-3 rounded-lg border-2 px-4 py-3',
+        tab === 'self' && 'border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40',
+        tab === 'manager' && 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40',
+        tab === 'joint' && 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40',
+      )}>
+        <span className={cn('h-3 w-3 shrink-0 rounded-full', EVALUATION_META[tab].dot)} />
+        <div className="min-w-0">
+          <p className={cn('text-base font-bold', EVALUATION_META[tab].text)}>
+            {tab === 'manager' && selectedRow ? `${selectedRow.reviewer_name}'s evaluation` : EVALUATION_META[tab].label}
+          </p>
+          <p className="text-xs text-muted-foreground">{EVALUATION_META[tab].who}</p>
+        </div>
+        {!visible(tab) && (
+          <span className="ml-auto flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Lock className="h-3.5 w-3.5" /> {lockedReason(tab)}
+          </span>
+        )}
+      </div>
+
       <Card className="card-elevated">
         <CardContent className="p-4"><StageStepper status={review.status} /></CardContent>
       </Card>
@@ -739,13 +767,14 @@ export default function PerformanceReviewPage() {
               const meta = EVALUATION_META[k];
               return (
                 <TabsContent key={k} value={k} className="mt-4 space-y-5">
-                  <p className="text-sm text-muted-foreground">
-                    <span className={cn('font-medium', meta.text)}>
-                      {k === 'manager' && selectedRow ? `${selectedRow.reviewer_name}'s evaluation` : meta.label}
-                    </span> — {meta.who}.
-                    {!editable && visible(k) && ' Read-only at this stage.'}
-                  </p>
-                  {k === 'manager' && reviewers.length > 1 && (
+                  {!editable && visible(k) && (
+                    <p className="text-sm text-muted-foreground">Read-only at this stage.</p>
+                  )}
+                  {k === 'manager' && reviewers.length > 1 && visible('joint') && (
+                    // Once Final Submission is reached everyone's row is
+                    // visible together, to compare — before that each person
+                    // only ever has their own row to look at, so there's
+                    // nothing useful to switch between yet.
                     <div className="flex flex-wrap gap-1.5">
                       {reviewers.map(rr => (
                         <button
@@ -761,7 +790,6 @@ export default function PerformanceReviewPage() {
                         >
                           {rr.reviewer_name}
                           {rr.submitted && <Check className="h-3 w-3" />}
-                          {!rr.visible && <Lock className="h-3 w-3" />}
                         </button>
                       ))}
                     </div>

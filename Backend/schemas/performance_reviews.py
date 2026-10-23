@@ -28,10 +28,9 @@ class PerformanceReviewCreate(BaseModel):
 
 
 class ReviewerEvaluationPatch(BaseModel):
-    """A single reviewer's own scores/notes. The caller is implicitly that
-    reviewer unless they're Admin/Manager, in which case `reviewer_id` picks
-    which reviewer's row to edit — see routers/performance_reviews.py."""
-    reviewer_id: Optional[str] = None
+    """A single reviewer's own scores/notes. Always applies to the calling
+    reviewer's own row — no bypass for Admin/Manager, reviewer content stays
+    blind to everyone until Final Submission — see routers/performance_reviews.py."""
     scores: Optional[Dict[str, ReviewScore]] = None
     strengths_notes: Optional[str] = None
     improvement_notes: Optional[str] = None

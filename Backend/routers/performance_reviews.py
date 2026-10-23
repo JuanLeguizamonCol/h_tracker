@@ -272,18 +272,16 @@ def update_review(
     if "review_date" in changes and changes["review_date"] is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Review date is required.")
 
+    # Editing reviewer_evaluation is always the caller's OWN row, with no
+    # bypass for Admin/Manager — reviewer content is blind to everyone,
+    # including Admin, until Final Submission (see svc.editable_fields),
+    # so there's no legitimate "edit someone else's row" case to support.
     reviewer_evaluation = changes.pop("reviewer_evaluation", None)
-    if reviewer_evaluation is not None:
-        target_reviewer_id = reviewer_evaluation.get("reviewer_id")
-        if target_reviewer_id and not manage and target_reviewer_id != current_employee.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own evaluation.")
-        if not target_reviewer_id:
-            target_reviewer_id = current_employee.id
 
     try:
         review = svc.update_review(db, review, changes)
         if reviewer_evaluation is not None:
-            svc.apply_reviewer_evaluation(db, review, target_reviewer_id, reviewer_evaluation)
+            svc.apply_reviewer_evaluation(db, review, current_employee.id, reviewer_evaluation)
             db.commit()
             db.refresh(review)
     except ValueError as e:
