@@ -1,9 +1,11 @@
+import re
+
 import pytest
 from pydantic import ValidationError
 
 from schemas.project_roles import ProjectRoleCreate, ProjectRoleUpdate
 from services.export_excel import _line_subtotal
-from services.export_pdf import _build_professional_rows
+from services.export_pdf import _build_professional_rows, generate_invoice_html
 
 BASE = dict(project_id="p", name="Dev", hourly_rate_usd=0)
 
@@ -33,3 +35,24 @@ def test_fee_line_bills_its_amount_in_pdf_and_xlsx():
     assert (subtotal, discount, net) == (3500.0, 0.0, 3500.0)
     assert _line_subtotal(fee_line, 0, 0) == 2500.0
     assert _line_subtotal({}, 10, 100) == 1000
+
+
+def test_pdf_total_fees_due_row_is_not_inflated_by_the_discount():
+    # The "Total Fees Due" row's Subtotal cell must equal the sum of the
+    # line subtotals (here 1000.0) — a past bug added the discount dollars
+    # on top of that (yielding 1100.0), double-counting it: the Discount and
+    # Total cells on the same row were already correct, so the row's own
+    # arithmetic (Subtotal - Discount != Total) didn't add up on the PDF.
+    edit_data = {
+        "invoice": {}, "client": {}, "project": {},
+        "lines": [{"employee_name": "Ana", "title": "Dev", "hours": 10, "hourly_rate": 100,
+                    "discount_type": "amount", "discount_value": 100}],
+        "expenses": [], "manual_lines": [], "time_detail": [],
+    }
+    html = generate_invoice_html(edit_data)
+    row = re.search(r"Total Fees Due.*?</tr>", html, re.S).group(0)
+    cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+    # cells (label cell itself falls outside the match): [Hourly Rate(blank), Hours(blank), Subtotal, Discount, Total]
+    assert "$1,000.00" in cells[2]
+    assert "$100.00" in cells[3]
+    assert "$900.00" in cells[4]

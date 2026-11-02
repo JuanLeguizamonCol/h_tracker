@@ -987,7 +987,13 @@ def generate_invoice_html(edit_data: dict) -> str:
 
     fees_table = _build_fees_table_html(
         professional_rows,
-        _format_currency(total_fees + total_discount),
+        # `total_fees` is already the gross subtotal (see
+        # _build_professional_rows/_build_flat_fee_rows docstrings) — adding
+        # `total_discount` on top double-counted it, inflating the "Total
+        # Fees Due" row's Subtotal cell by the discount amount on any invoice
+        # with a per-line discount (the Discount and Total cells beside it
+        # were always correct, so the row's own arithmetic didn't add up).
+        _format_currency(total_fees),
         _format_currency(total_discount),
         _format_currency(total_net),
         cap_row,
