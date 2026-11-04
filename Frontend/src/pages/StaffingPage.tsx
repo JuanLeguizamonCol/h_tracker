@@ -31,6 +31,22 @@ function parseLocalDate(s: string): Date {
   return new Date(y, m - 1, d);
 }
 
+// A scheduled change (see handleScheduledChange) splits one assignment into
+// two rows with back-to-back, non-overlapping windows — the old one trimmed
+// to end the day before, the new one starting on the effective date. Both
+// rows are real and correct, but only one of them is actually in effect
+// *today*; naively summing every row's allocation_percentage double-counts
+// the person across past/future rows that were never concurrent, producing
+// a false "over-allocated" reading (see the allocation badge below).
+const TODAY = format(new Date(), 'yyyy-MM-dd');
+function isActiveToday(row: StaffingAssignment): boolean {
+  const start = row.start_date || row.project_start_date || null;
+  const end = row.end_date || row.project_end_date || null;
+  if (start && TODAY < start) return false;
+  if (end && TODAY > end) return false;
+  return true;
+}
+
 type AssignForm = {
   employeeId: string;
   projectId: string;
@@ -569,8 +585,9 @@ export default function StaffingPage() {
       ) : (
         <div className="space-y-4">
           {grouped.map(group => {
-            const totalAllocation = group.rows.reduce((sum, r) => sum + (r.allocation_percentage ?? 0), 0);
-            const hasAnyAllocation = group.rows.some(r => r.allocation_percentage != null);
+            const currentRows = group.rows.filter(isActiveToday);
+            const totalAllocation = currentRows.reduce((sum, r) => sum + (r.allocation_percentage ?? 0), 0);
+            const hasAnyAllocation = currentRows.some(r => r.allocation_percentage != null);
             const overAllocated = hasAnyAllocation && totalAllocation > 100;
             return (
               <Card key={group.userId} className="card-elevated">
@@ -578,9 +595,10 @@ export default function StaffingPage() {
                   <CardTitle className="text-base flex items-center gap-2">
                     {group.employeeName}
                     {hasAnyAllocation && (
-                      <Badge variant={overAllocated ? 'destructive' : 'secondary'} className="text-xs font-normal gap-1">
+                      <Badge variant={overAllocated ? 'destructive' : 'secondary'} className="text-xs font-normal gap-1"
+                        title="Only counts rows whose window covers today — a scheduled change (two back-to-back rows) doesn't double-count.">
                         {overAllocated && <AlertTriangle className="h-3 w-3" />}
-                        {totalAllocation}% allocated
+                        {totalAllocation}% allocated today
                       </Badge>
                     )}
                   </CardTitle>
