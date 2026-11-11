@@ -52,15 +52,21 @@ def _email_of(db: Session, employee_id: Optional[str]) -> Optional[str]:
     return db.query(Employee.email).filter(Employee.id == employee_id).scalar()
 
 
+def _check_format(fmt: Optional[str]) -> None:
+    if fmt and fmt not in svc.EVALUATION_FORMATS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown evaluation format: {fmt}")
+
+
 @performance_reviews_router.get("/template", response_model=ReviewTemplateOut)
-def get_template():
-    return svc.template_out()
+def get_template(format: Optional[str] = None):
+    """The criteria for one evaluation format (default: standard)."""
+    return svc.template_out(format)
 
 
 @performance_reviews_router.get("/formats")
 def get_evaluation_formats():
-    """Which evaluation formats a review can be assigned under — only one
-    today ("standard"); more are coming (see EVALUATION_FORMATS)."""
+    """Which evaluation formats a review can be assigned under (see
+    EVALUATION_FORMATS)."""
     return [{"key": k, "label": v} for k, v in svc.EVALUATION_FORMATS.items()]
 
 
@@ -154,6 +160,7 @@ def bulk_assign_self_assessments(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Performance reviews are turned off for this project.")
     if not data.employee_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one employee.")
+    _check_format(data.evaluation_format)
     if data.period_start and data.period_end and data.period_end < data.period_start:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Period end must be on or after the start.")
     reviewer_ids = list(dict.fromkeys(data.reviewer_ids or []))
@@ -224,6 +231,7 @@ def create_review(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Performance reviews are turned off for this project.")
     if not db.query(Employee.id).filter(Employee.id == data.employee_id).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee not found.")
+    _check_format(data.evaluation_format)
     reviewer_ids = list(dict.fromkeys(data.reviewer_ids or []))
     if reviewer_ids:
         found_reviewers = {i for (i,) in db.query(Employee.id).filter(Employee.id.in_(reviewer_ids)).all()}
@@ -326,7 +334,7 @@ def transition_review(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an assigned reviewer can complete this review.")
         if review.status != "joint_review":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A review can only be completed from the joint review stage.")
-        if svc.compute_averages(review.joint_scores or {})[1] is None:
+        if svc.compute_averages(review.joint_scores or {}, review.evaluation_format)[1] is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Score the joint evaluation before completing.")
     elif body.action == "reopen":
         if not manage:

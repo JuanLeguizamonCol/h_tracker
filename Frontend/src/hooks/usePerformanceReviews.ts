@@ -27,16 +27,36 @@ export const EVALUATION_META: Record<EvaluationKey, { label: string; short: stri
   },
 };
 
-export function useReviewTemplate() {
+/** The criteria for one evaluation format (a review's `evaluation_format`);
+ * omitted → the standard format. Pass `enabled: false` to wait for the format. */
+export function useReviewTemplate(format?: string, enabled = true) {
+  const fmt = format || 'standard';
   return useQuery({
-    queryKey: ['performance-reviews', 'template'],
-    queryFn: () => api.get<ReviewTemplate>('/performance-reviews/template'),
+    queryKey: ['performance-reviews', 'template', fmt],
+    queryFn: () => api.get<ReviewTemplate>(`/performance-reviews/template?format=${encodeURIComponent(fmt)}`),
+    staleTime: Infinity,
+    enabled,
+  });
+}
+
+/** Every format's template, keyed by format — for views that mix reviews of
+ * different formats (Analytics). */
+export function useAllReviewTemplates() {
+  const { data: formats = [], isLoading: formatsLoading } = useEvaluationFormats();
+  return useQuery({
+    queryKey: ['performance-reviews', 'templates', formats.map(f => f.key).join(',')],
+    queryFn: async () => {
+      const entries = await Promise.all(formats.map(async f =>
+        [f.key, await api.get<ReviewTemplate>(`/performance-reviews/template?format=${encodeURIComponent(f.key)}`)] as const));
+      return Object.fromEntries(entries) as Record<string, ReviewTemplate>;
+    },
+    enabled: !formatsLoading && formats.length > 0,
     staleTime: Infinity,
   });
 }
 
-/** Which evaluation formats a review can be assigned under — only one today
- * ("standard"); more are coming later, this is the selector's data source. */
+/** Which evaluation formats a review can be assigned under — the selector's
+ * data source (see services/performance_reviews.py::EVALUATION_FORMATS). */
 export function useEvaluationFormats() {
   return useQuery({
     queryKey: ['performance-reviews', 'formats'],

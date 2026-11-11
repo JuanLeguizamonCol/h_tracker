@@ -829,6 +829,9 @@ export interface ReviewCriterion {
 }
 
 export interface ReviewTemplate {
+  /** Evaluation format key this template belongs to (e.g. "standard"). */
+  format: string;
+  format_label: string;
   score_min: number;
   score_max: number;
   criteria: ReviewCriterion[];
@@ -848,9 +851,10 @@ export interface PerformanceReview {
   /** True once self_due_date has passed and it still hasn't been submitted —
    * the employee can no longer edit/submit it (Admin/Manager always can). */
   self_locked: boolean;
-  /** Which REVIEW_TEMPLATE-equivalent format this review uses — only
-   * "standard" exists today (see useEvaluationFormats). */
+  /** Which evaluation format (template) this review uses — e.g. "standard"
+   * or "managers_directors" (see useEvaluationFormats / useReviewTemplate). */
   evaluation_format: string;
+  evaluation_format_label?: string | null;
   period_start: string | null;
   period_end: string | null;
   duration_hours: number | null;
@@ -942,6 +946,7 @@ export interface AnalyticsReview {
   reviewer_names: string[];
   review_date: string;
   duration_hours: number | null;
+  evaluation_format: string;
   self: AnalyticsEvaluationScores;
   /** Cross-reviewer average — not any one reviewer's individual scores. */
   manager: AnalyticsEvaluationScores;

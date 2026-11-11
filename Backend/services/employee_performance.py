@@ -169,12 +169,12 @@ def employee_performance(db: Session, start: date, end: date, today: date) -> di
             "client_name": cname,
             "review_date": r.review_date,
             "hours_in_window": project_hours.get((r.employee_id, r.project_id), 0.0),
-            "self": compute_averages(r.self_scores or {})[1],
+            "self": compute_averages(r.self_scores or {}, r.evaluation_format)[1],
             # Cross-reviewer average — same definition used to seed the joint
             # evaluation and shown in Analytics, so this figure never
             # disagrees with those.
-            "manager": compute_averages(manager_evaluation_scores([rr.scores for rr in r.reviewers]))[1],
-            "joint": compute_averages(r.joint_scores or {})[1],
+            "manager": compute_averages(manager_evaluation_scores([rr.scores for rr in r.reviewers]), r.evaluation_format)[1],
+            "joint": compute_averages(r.joint_scores or {}, r.evaluation_format)[1],
         })
 
     # ---- who to include: active employees + anyone with hours/reviews in the window ----

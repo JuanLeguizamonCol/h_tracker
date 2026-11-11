@@ -17,7 +17,7 @@ class PerformanceReviewCreate(BaseModel):
     review_date: date
     # Deadline for the self-assessment stage — null means no deadline.
     self_due_date: Optional[date] = None
-    # Which review format/template — only "standard" exists today.
+    # Which review format/template — a key of services/performance_reviews.py::EVALUATION_FORMATS.
     evaluation_format: Optional[str] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
@@ -115,6 +115,7 @@ class PerformanceReviewOut(BaseModel):
     self_due_date: Optional[date] = None
     self_locked: bool = False
     evaluation_format: str = "standard"
+    evaluation_format_label: Optional[str] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     duration_hours: Optional[float] = None
@@ -147,6 +148,8 @@ class ReviewCriterionOut(BaseModel):
 
 
 class ReviewTemplateOut(BaseModel):
+    format: str = "standard"
+    format_label: str = "Impact Point Standard"
     score_min: int
     score_max: int
     criteria: List[ReviewCriterionOut]
@@ -233,6 +236,7 @@ class AnalyticsReviewOut(BaseModel):
     reviewer_names: List[str] = []
     review_date: date
     duration_hours: Optional[float] = None
+    evaluation_format: str = "standard"
     self: EvaluationScoresOut
     # Cross-reviewer average (same formula used to pre-fill joint) — not any
     # one reviewer's individual scores.

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Loader2, Search, ClipboardCheck, Users, Star, Scale } from 'lucide-react';
-import { useReviewAnalytics, useReviewTemplate, EVALUATION_META } from '@/hooks/usePerformanceReviews';
+import { useReviewAnalytics, useAllReviewTemplates, EVALUATION_META } from '@/hooks/usePerformanceReviews';
 import { AnalyticsReview, EvaluationKey, ReviewTemplate } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -78,7 +78,11 @@ function KpiCard({ label, value, hint, icon: Icon }: { label: string; value: str
 
 export default function ReviewAnalytics() {
   const navigate = useNavigate();
-  const { data: template } = useReviewTemplate();
+  // Every format shares the same five criterion keys, so the criterion
+  // matrices use the standard template's columns; only the per-item view
+  // needs each format's own sub-criteria.
+  const { data: templates } = useAllReviewTemplates();
+  const template = templates?.standard ?? (templates ? Object.values(templates)[0] : undefined);
   const [year, setYear] = useState<number | null>(null);
   const [yearInitialized, setYearInitialized] = useState(false);
   const { data, isLoading } = useReviewAnalytics(year);
@@ -123,18 +127,27 @@ export default function ReviewAnalytics() {
     const rs = term ? reviews.filter(r => [r.employee_name, r.project_name, r.client_name].some(v => v?.toLowerCase().includes(term))) : reviews;
     const avg = (k: EvaluationKey, item: string) => mean(rs.map(r => r[k].items[item]));
     const avgCriterion = (k: EvaluationKey, c: string) => mean(rs.map(r => r[k].criteria[c]));
+    // The standard format's items always show; another format's items only
+    // when this selection actually has reviews in that format.
+    const formatsInUse = new Set(rs.map(r => r.evaluation_format || 'standard'));
+    const otherTemplates = Object.values(templates ?? {}).filter(t => t.format !== template.format && formatsInUse.has(t.format));
     return template.criteria.map(c => ({
       key: c.key,
       label: c.label,
       values: { self: avgCriterion('self', c.key), manager: avgCriterion('manager', c.key), joint: avgCriterion('joint', c.key) },
-      items: c.sub_criteria.map(s => ({
+      items: [
+        ...c.sub_criteria.map(s => ({ ...s, formatLabel: otherTemplates.length ? template.format_label : null })),
+        ...otherTemplates.flatMap(t => (t.criteria.find(tc => tc.key === c.key)?.sub_criteria ?? [])
+          .map(s => ({ ...s, formatLabel: t.format_label as string | null }))),
+      ].map(s => ({
         key: s.key,
         label: s.label,
+        formatLabel: s.formatLabel,
         values: { self: avg('self', s.key), manager: avg('manager', s.key), joint: avg('joint', s.key) },
         rated: rs.filter(r => r.joint.items[s.key] != null).length,
       })),
     }));
-  }, [reviews, template, term]);
+  }, [reviews, template, templates, term]);
 
   const kpis = useMemo(() => {
     const annual = employeeRows.map(r => r.total);
@@ -247,7 +260,10 @@ export default function ReviewAnalytics() {
                           const itemGap = item.values.self != null && item.values.manager != null ? item.values.self - item.values.manager : null;
                           return (
                             <TableRow key={item.key}>
-                              <TableCell className={cn('text-xs bg-background pl-6 whitespace-pre-line', stickyCell)}>{item.label}</TableCell>
+                              <TableCell className={cn('text-xs bg-background pl-6 whitespace-pre-line', stickyCell)}>
+                                {item.label}
+                                {item.formatLabel && <span className="block mt-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{item.formatLabel}</span>}
+                              </TableCell>
                               {(['self', 'manager', 'joint'] as const).map(k => (
                                 <TableCell key={k} className={cn('text-center text-sm font-medium tabular-nums', k === 'joint' && 'border-l-2 border-border')} style={heat(item.values[k])}>
                                   {fmt(item.values[k])}

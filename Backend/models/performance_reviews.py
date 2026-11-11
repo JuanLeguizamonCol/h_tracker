@@ -25,10 +25,8 @@ import uuid
 # ("Final Submission") result. See services/performance_reviews.py::visibility.
 REVIEW_STATUSES = ("self_assessment", "in_review", "joint_review", "completed")
 
-# Registry of evaluation formats a review can use — today there's only one;
-# more are coming later (see services/performance_reviews.py::EVALUATION_FORMATS).
-# REVIEW_TEMPLATE doesn't branch on this yet, but the field exists on every
-# review now so the selector works end-to-end once a second format is added.
+# Which evaluation format (template) a review uses — see
+# services/performance_reviews.py::EVALUATION_FORMATS / get_template().
 DEFAULT_EVALUATION_FORMAT = "standard"
 
 

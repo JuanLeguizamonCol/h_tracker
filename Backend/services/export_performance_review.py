@@ -14,7 +14,7 @@ from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
-from services.performance_reviews import REVIEW_TEMPLATE, manager_evaluation_scores, compute_averages
+from services.performance_reviews import get_template, manager_evaluation_scores, compute_averages
 
 NAVY = "FF0B347D"         # employee section headers
 GREEN = "FF237F2E"        # reviewer section headers
@@ -84,7 +84,7 @@ def export_filename(data: dict) -> str:
 def _manager_average_evaluation(data: dict) -> dict:
     reviewers = data["evaluations"]["reviewers"]
     pooled = manager_evaluation_scores([r["scores"] for r in reviewers])
-    criteria, overall = compute_averages(pooled)
+    criteria, overall = compute_averages(pooled, data.get("evaluation_format"))
     return {"visible": True, "scores": pooled, "criteria_averages": criteria, "overall_average": overall}
 
 
@@ -207,7 +207,7 @@ def _write_sheet(ws, data: dict, evaluation: dict, caption: str, reviewer: dict 
             _cell(ws, f"{col}18", label, H12_WHITE, NAVY, LEFT)
         comments = evaluation.get("section_comments") or {}
         row = 19
-        for criterion in REVIEW_TEMPLATE:
+        for criterion in get_template(data.get("evaluation_format")):
             _cell(ws, f"A{row}", criterion["label"], BOLD10, LIGHT_BLUE, LEFT)
             _cell(ws, f"B{row}", None, BODY10, LIGHT_BLUE)
             _cell(ws, f"C{row}", None, BODY10, LIGHT_BLUE)
@@ -227,7 +227,7 @@ def _write_sheet(ws, data: dict, evaluation: dict, caption: str, reviewer: dict 
     scores = evaluation["scores"] or {}
     avg_by_key = {c["key"]: c["average"] for c in evaluation["criteria_averages"]}
     row = 19
-    for criterion in REVIEW_TEMPLATE:
+    for criterion in get_template(data.get("evaluation_format")):
         _cell(ws, f"A{row}", criterion["label"], BOLD10, LIGHT_GREEN, LEFT)
         _cell(ws, f"B{row}", None, BODY10, LIGHT_GREEN)
         _cell(ws, f"C{row}", avg_by_key.get(criterion["key"]), BODY10, LIGHT_GREEN, CENTER_WRAP)

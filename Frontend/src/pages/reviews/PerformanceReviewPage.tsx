@@ -250,7 +250,7 @@ export default function PerformanceReviewPage() {
   const navigate = useNavigate();
   const { employee, hasEdit } = useAuth();
   const { data: review, isLoading, error } = usePerformanceReview(reviewId);
-  const { data: template } = useReviewTemplate();
+  const { data: template } = useReviewTemplate(review?.evaluation_format, !!review);
   const { data: employees = [] } = useEmployees();
   const updateReview = useUpdatePerformanceReview();
   const transition = useTransitionPerformanceReview();
@@ -495,6 +495,9 @@ export default function PerformanceReviewPage() {
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-foreground">{review.employee_name}</h1>
             <Badge variant="outline" className={`border-0 ${badge.className}`}>{badge.label}</Badge>
+            {review.evaluation_format !== 'standard' && template && (
+              <Badge variant="outline">{template.format_label}</Badge>
+            )}
           </div>
           <p className="text-muted-foreground">
             {review.project_name}{review.client_name ? ` · ${review.client_name}` : ''} · reviewed by{' '}

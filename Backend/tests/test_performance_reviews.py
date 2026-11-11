@@ -138,6 +138,62 @@ def test_create_with_multiple_reviewers(db):
 
 def test_evaluation_formats_registry():
     assert svc.EVALUATION_FORMATS["standard"] == "Impact Point Standard"
+    assert svc.EVALUATION_FORMATS["managers_directors"] == "Managers and Directors Reviews"
+
+
+def test_managers_directors_template_matches_its_workbook():
+    tpl = svc.get_template("managers_directors")
+    # Same criteria (keys) as the standard format, its own sub-criteria.
+    assert [c["key"] for c in tpl] == [c["key"] for c in svc.REVIEW_TEMPLATE]
+    assert [len(c["sub_criteria"]) for c in tpl] == [5, 3, 5, 4, 4]
+    assert tpl[0]["sub_criteria"][0][1] == "Ability to build presentation decks, process flows, report writing, etc."
+    assert not (svc.sub_criterion_keys("managers_directors") & svc.SUB_CRITERION_KEYS)
+    out = svc.template_out("managers_directors")
+    assert out["format"] == "managers_directors" and out["format_label"] == "Managers and Directors Reviews"
+    assert svc.template_out("nope")["format"] == "standard"
+    assert svc.get_template(None) is svc.REVIEW_TEMPLATE
+
+
+def test_scores_are_validated_against_the_reviews_own_format(db):
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15),
+        reviewer_ids=["mgr"], evaluation_format="managers_directors",
+    ), "mgr")
+    svc.transition_review(db, review, "submit_self")
+    with pytest.raises(ValueError):
+        svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 3})})
+    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"md_written_1": 4, "md_verbal_3": 2})})
+    db.commit()
+    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr")
+    assert review.status == "joint_review"
+    out = svc.serialize(db, [review], "mgr", False)[0]
+    assert out["evaluation_format"] == "managers_directors"
+    assert out["overall_average"] == 3.0  # joint pre-filled from the reviewer: (4 + 2) / 2
+    # The format is locked once scoring started.
+    with pytest.raises(ValueError):
+        svc.update_review(db, review, {"evaluation_format": "standard"})
+
+
+def test_format_can_change_before_scoring_but_not_to_unknown(db):
+    review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15)), "mgr")
+    svc.update_review(db, review, {"evaluation_format": "managers_directors"})
+    assert review.evaluation_format == "managers_directors"
+    with pytest.raises(ValueError):
+        svc.update_review(db, review, {"evaluation_format": "nope"})
+
+
+def test_xlsx_export_uses_the_managers_directors_items(db):
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15),
+        reviewer_ids=["mgr"], evaluation_format="managers_directors",
+    ), "mgr")
+    svc.update_review(db, review, {"joint_scores": _scores({"md_written_1": 5, "md_verbal_1": 3})})
+    data = svc.review_export_data(db, review)
+    ws = load_workbook(BytesIO(generate_performance_review_xlsx(data)))["Final Submission"]
+    assert ws["A19"].value == "Written Communications" and ws["C19"].value == 5.0
+    assert ws["B20"].value.startswith("Ability to build presentation decks") and ws["C20"].value == 5
+    assert ws["A25"].value == "Verbal Communications" and ws["C26"].value == 3
+    assert ws["A40"].value == "Overall Professionalism and Core Values"
 
 
 def _visible(db, review, viewer, manage=False):

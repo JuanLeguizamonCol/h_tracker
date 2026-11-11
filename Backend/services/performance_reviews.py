@@ -91,13 +91,103 @@ REVIEW_TEMPLATE: List[dict] = [
     },
 ]
 
-SUB_CRITERION_KEYS = {sub_key for c in REVIEW_TEMPLATE for sub_key, _ in c["sub_criteria"]}
+# "Managers and Directors Reviews" — copied verbatim from the firm's
+# "Project Performance Review Template - Manager / SA" workbook. Same five
+# criteria (same criterion keys, so per-criterion analytics, section comments
+# and the summary block line up across formats) but its own sub-criteria,
+# under their own `md_` keys — never reuse a standard key for a different
+# item, the scores JSON is keyed by them.
+MANAGERS_DIRECTORS_TEMPLATE: List[dict] = [
+    {
+        "key": "written",
+        "label": "Written Communications",
+        "short_label": "Written Communications",
+        "sub_criteria": [
+            ("md_written_1", "Ability to build presentation decks, process flows, report writing, etc."),
+            ("md_written_2", "Use graphical and charting techniques to improve the quality of deliverables"),
+            ("md_written_3", "Accurate information presented"),
+            ("md_written_4", "Strong grasp of story boarding and knowing your audience"),
+            ("md_written_5", "Uses concise and effective written communication (slide design, memos, emails, etc.)"),
+        ],
+    },
+    {
+        "key": "verbal",
+        "label": "Verbal Communications",
+        "short_label": "Verbal Communications",
+        "sub_criteria": [
+            ("md_verbal_1", "Presentations and meetings with clients are clear \nManages conversations effectively; influences others'\nperspectives"),
+            ("md_verbal_2", "Crisp presentations, and demonstrating of understanding the client business\nPersuades on the basis of facts and reason"),
+            ("md_verbal_3", "Engages audience, projects self-assurance; displays strong presence"),
+        ],
+    },
+    {
+        "key": "analysis",
+        "label": "Quality of Analysis",
+        "short_label": "Quality of Analysis",
+        "sub_criteria": [
+            ("md_analysis_1", "Identifies key issues and linkages; scopes module and\nPrioritizes analyses through hypothesis-driven approach"),
+            ("md_analysis_2", "Conducts complex qualitative and quantitative analysis independently and effectively"),
+            ("md_analysis_3", "Provides good insight\nDistills insight from analyses; goes beyond the obvious and identifies second order implications\nTranslates the output of analyses into practical recommendations"),
+            ("md_analysis_4", "Raises issues / questions to leaders when needed"),
+            ("md_analysis_5", "Accurate analysis / Limited rework\nChecks accuracy of juniors / own-work"),
+        ],
+    },
+    {
+        "key": "client",
+        "label": "Client Management",
+        "short_label": "Client Management",
+        "sub_criteria": [
+            ("md_client_1", "Delivers to deadlines\nIs reliable and timely; manages team expectations"),
+            ("md_client_2", "Rapport building\nBuilds strong client relationships at appropriate levels\nBuilds trust with client\nUnderstands client’s organizational dynamics and adapts behavior accordingly"),
+            ("md_client_3", "Can prioritize multiple workstreams or projects\nPrioritizes work effectively; demonstrates business sense and adaptability"),
+            ("md_client_4", "Demonstrates understanding of the client's overall problem and the analytic steps required to solve it"),
+        ],
+    },
+    {
+        "key": "professionalism",
+        "label": "Overall Professionalism and Core Values",
+        "short_label": "Professionalism / Values",
+        "sub_criteria": [
+            ("md_professionalism_1", "Time Management / Delivers to deadlines\nDisplays perseverance and tenacity in the face of obstacles; responds calmly to stressful situations"),
+            ("md_professionalism_2", "Demonstrates DRIVE values\nContributes to positive working environment\nOverall attitude, work ethic and professionalism\nTreats all others with respect regardless of background, position or performance"),
+            ("md_professionalism_3", "Provides coaching to junior personnel (where applicable)"),
+            ("md_professionalism_4", "Performs role with highest level of integrity, generating trust and protecting client interests"),
+        ],
+    },
+]
 
-# Review formats — only one exists today; REVIEW_TEMPLATE doesn't branch on it
-# yet, but every review already carries the chosen key (set at assignment
-# time, see evaluation_format) so a second format can slot in later without
-# another migration.
-EVALUATION_FORMATS = {"standard": "Impact Point Standard"}
+# Review formats — every review carries the chosen key (set at assignment
+# time, see evaluation_format), and everything that walks the criteria
+# (averages, score validation, the panel, the .xlsx export) resolves the
+# template through get_template(review.evaluation_format).
+EVALUATION_FORMATS = {
+    "standard": "Impact Point Standard",
+    "managers_directors": "Managers and Directors Reviews",
+}
+TEMPLATES: Dict[str, List[dict]] = {
+    "standard": REVIEW_TEMPLATE,
+    "managers_directors": MANAGERS_DIRECTORS_TEMPLATE,
+}
+
+
+def get_template(fmt: Optional[str] = None) -> List[dict]:
+    """The criteria for a format; unknown/empty falls back to the standard
+    one (older rows predate the column default)."""
+    return TEMPLATES.get(fmt or DEFAULT_EVALUATION_FORMAT, REVIEW_TEMPLATE)
+
+
+def sub_criterion_keys(fmt: Optional[str] = None) -> set:
+    return {sub_key for c in get_template(fmt) for sub_key, _ in c["sub_criteria"]}
+
+
+# Standard-format keys — kept for backward compat (tests/imports).
+SUB_CRITERION_KEYS = sub_criterion_keys("standard")
+
+
+def has_any_scores(review: PerformanceReview) -> bool:
+    """True once anyone has rated/annotated something — the format can't be
+    switched after that (the stored keys belong to the old template)."""
+    return bool(review.self_scores or review.joint_scores or any(rr.scores for rr in review.reviewers))
 
 # Lifecycle order — see models/performance_reviews.py::REVIEW_STATUSES.
 _STAGE = {"self_assessment": 0, "in_review": 1, "joint_review": 2, "completed": 3}
@@ -196,8 +286,11 @@ def visibility(review: PerformanceReview, viewer_id: str, viewer_can_manage: boo
     }
 
 
-def template_out() -> dict:
+def template_out(fmt: Optional[str] = None) -> dict:
+    fmt = fmt if fmt in TEMPLATES else DEFAULT_EVALUATION_FORMAT
     return {
+        "format": fmt,
+        "format_label": EVALUATION_FORMATS[fmt],
         "score_min": SCORE_MIN,
         "score_max": SCORE_MAX,
         "criteria": [
@@ -207,7 +300,7 @@ def template_out() -> dict:
                 "short_label": c["short_label"],
                 "sub_criteria": [{"key": k, "label": label} for k, label in c["sub_criteria"]],
             }
-            for c in REVIEW_TEMPLATE
+            for c in get_template(fmt)
         ],
     }
 
@@ -216,10 +309,10 @@ def _mean(values: List[float]) -> Optional[float]:
     return round(sum(values) / len(values), 2) if values else None
 
 
-def compute_averages(scores: Dict[str, dict]) -> Tuple[List[dict], Optional[float]]:
+def compute_averages(scores: Dict[str, dict], fmt: Optional[str] = None) -> Tuple[List[dict], Optional[float]]:
     """Returns ([{key, label, average}] per criterion, overall average)."""
     criteria = []
-    for c in REVIEW_TEMPLATE:
+    for c in get_template(fmt):
         rated = [
             float(scores[k]["score"])
             for k, _ in c["sub_criteria"]
@@ -230,7 +323,7 @@ def compute_averages(scores: Dict[str, dict]) -> Tuple[List[dict], Optional[floa
     return criteria, overall
 
 
-def normalize_scores(raw: Dict[str, dict]) -> Dict[str, dict]:
+def normalize_scores(raw: Dict[str, dict], fmt: Optional[str] = None) -> Dict[str, dict]:
     """Validates keys/ranges. Raises ValueError.
 
     Keeps every entry the caller sends, including a bare
@@ -240,8 +333,9 @@ def normalize_scores(raw: Dict[str, dict]) -> Dict[str, dict]:
     here once the user has actually interacted with it.
     """
     clean: Dict[str, dict] = {}
+    valid_keys = sub_criterion_keys(fmt)
     for key, entry in (raw or {}).items():
-        if key not in SUB_CRITERION_KEYS:
+        if key not in valid_keys:
             raise ValueError(f"Unknown sub-criterion: {key}")
         score = entry.get("score")
         notes = (entry.get("notes") or "").strip() or None
@@ -308,9 +402,9 @@ def _lookups(db: Session, reviews: List[PerformanceReview]) -> Tuple[dict, dict]
     return name_by_id, project_by_id
 
 
-def _set_out(scores: Optional[Dict[str, dict]], visible: bool, section_comments: Optional[Dict[str, str]] = None) -> dict:
+def _set_out(scores: Optional[Dict[str, dict]], visible: bool, section_comments: Optional[Dict[str, str]] = None, fmt: Optional[str] = None) -> dict:
     scores = (scores or {}) if visible else {}
-    criteria, overall = compute_averages(scores)
+    criteria, overall = compute_averages(scores, fmt)
     out = {"visible": visible, "scores": scores, "criteria_averages": criteria, "overall_average": overall}
     if section_comments is not None:
         out["section_comments"] = section_comments if visible else {}
@@ -328,6 +422,7 @@ def to_out_dict(
     vis = {"self": True, "joint": True, "together": True} if force_visible else visibility(review, viewer_id, viewer_can_manage)
     together = vis["together"]
     is_reviewee = review.employee_id == viewer_id
+    fmt = review.evaluation_format or DEFAULT_EVALUATION_FORMAT
     project_name, client_name = project_by_id.get(review.project_id, ("Unknown", None))
 
     reviewers_out = []
@@ -339,7 +434,7 @@ def to_out_dict(
         # compare.
         row_visible = force_visible or rr.reviewer_id == viewer_id or (together and not is_reviewee)
         scores = rr.scores if row_visible else {}
-        criteria, overall = compute_averages(scores)
+        criteria, overall = compute_averages(scores, fmt)
         reviewers_out.append({
             "reviewer_id": rr.reviewer_id,
             "reviewer_name": name_by_id.get(rr.reviewer_id),
@@ -354,9 +449,9 @@ def to_out_dict(
         })
 
     evaluations = {
-        "self": _set_out(review.self_scores, vis["self"], review.self_section_comments),
+        "self": _set_out(review.self_scores, vis["self"], review.self_section_comments, fmt),
         "reviewers": reviewers_out,
-        "joint": _set_out(review.joint_scores, vis["joint"]),
+        "joint": _set_out(review.joint_scores, vis["joint"], fmt=fmt),
     }
     self_visible = vis["self"]
     return {
@@ -369,7 +464,8 @@ def to_out_dict(
         "review_date": review.review_date,
         "self_due_date": review.self_due_date,
         "self_locked": self_assessment_locked(review),
-        "evaluation_format": review.evaluation_format or DEFAULT_EVALUATION_FORMAT,
+        "evaluation_format": fmt,
+        "evaluation_format_label": EVALUATION_FORMATS.get(fmt, fmt),
         "period_start": review.period_start,
         "period_end": review.period_end,
         "duration_hours": float(review.duration_hours) if review.duration_hours is not None else None,
@@ -482,10 +578,18 @@ def update_review(db: Session, review: PerformanceReview, changes: dict) -> Perf
         for reviewer_id, row in existing.items():
             if reviewer_id not in new_ids:
                 db.delete(row)
+    if "evaluation_format" in changes:
+        new_fmt = changes["evaluation_format"] or DEFAULT_EVALUATION_FORMAT
+        if new_fmt not in EVALUATION_FORMATS:
+            raise ValueError(f"Unknown evaluation format: {new_fmt}")
+        if new_fmt != (review.evaluation_format or DEFAULT_EVALUATION_FORMAT) and has_any_scores(review):
+            raise ValueError("The evaluation format can't be changed once scoring has started.")
+        changes["evaluation_format"] = new_fmt
+    fmt = changes.get("evaluation_format") or review.evaluation_format
     if "joint_scores" in changes:
-        changes["joint_scores"] = normalize_scores({k: dict(v) for k, v in (changes["joint_scores"] or {}).items()})
+        changes["joint_scores"] = normalize_scores({k: dict(v) for k, v in (changes["joint_scores"] or {}).items()}, fmt)
     if "self_section_comments" in changes:
-        criterion_keys = {c["key"] for c in REVIEW_TEMPLATE}
+        criterion_keys = {c["key"] for c in get_template(fmt)}
         changes["self_section_comments"] = {
             k: (v or "").strip() for k, v in (changes["self_section_comments"] or {}).items()
             if k in criterion_keys and (v or "").strip()
@@ -504,7 +608,7 @@ def apply_reviewer_evaluation(db: Session, review: PerformanceReview, reviewer_i
     if row is None:
         raise ValueError("That person isn't an assigned reviewer on this review.")
     if patch.get("scores") is not None:
-        row.scores = normalize_scores({k: dict(v) for k, v in patch["scores"].items()})
+        row.scores = normalize_scores({k: dict(v) for k, v in patch["scores"].items()}, review.evaluation_format)
     if patch.get("strengths_notes") is not None:
         row.strengths_notes = patch["strengths_notes"]
     if patch.get("improvement_notes") is not None:
@@ -528,7 +632,7 @@ def transition_review(db: Session, review: PerformanceReview, action: str, actor
             raise ValueError("You're not an assigned reviewer on this review.")
         if row.submitted_at is not None:
             raise ValueError("You've already submitted your evaluation.")
-        if compute_averages(row.scores)[1] is None:
+        if compute_averages(row.scores, review.evaluation_format)[1] is None:
             raise ValueError("Rate at least one item before submitting.")
         row.submitted_at = now
         db.add(row)
@@ -596,8 +700,8 @@ def analytics(db: Session, year: Optional[int] = None) -> dict:
         reviews = [r for r in reviews if r.review_date.year == year]
     name_by_id, project_by_id = _lookups(db, reviews)
 
-    def _set(scores):
-        criteria, overall = compute_averages(scores or {})
+    def _set(scores, fmt):
+        criteria, overall = compute_averages(scores or {}, fmt)
         return {
             "criteria": {c["key"]: c["average"] for c in criteria},
             "overall": overall,
@@ -618,9 +722,10 @@ def analytics(db: Session, year: Optional[int] = None) -> dict:
             "reviewer_names": [name_by_id.get(rr.reviewer_id, "Unknown") for rr in r.reviewers],
             "review_date": r.review_date,
             "duration_hours": float(r.duration_hours) if r.duration_hours is not None else None,
-            "self": _set(r.self_scores),
-            "manager": _set(manager_scores),
-            "joint": _set(r.joint_scores),
+            "evaluation_format": r.evaluation_format or DEFAULT_EVALUATION_FORMAT,
+            "self": _set(r.self_scores, r.evaluation_format),
+            "manager": _set(manager_scores, r.evaluation_format),
+            "joint": _set(r.joint_scores, r.evaluation_format),
         })
     return {"years": years, "year": year, "reviews": rows}
 
@@ -724,7 +829,7 @@ def project_team(db: Session, project_id: str) -> List[dict]:
 
     reviews_by_emp: Dict[str, List[dict]] = {}
     for r in reviews:  # already newest first
-        _, overall = compute_averages(r.joint_scores or {})
+        _, overall = compute_averages(r.joint_scores or {}, r.evaluation_format)
         reviewer_ids = [rr.reviewer_id for rr in r.reviewers]
         reviews_by_emp.setdefault(r.employee_id, []).append({
             "id": r.id,
