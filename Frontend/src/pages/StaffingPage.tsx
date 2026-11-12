@@ -1082,21 +1082,23 @@ export default function StaffingPage() {
             <p>They'll no longer be able to log time against it, and it'll stop counting toward their allocation.</p>
             <p>
               <span className="font-medium text-foreground">Unassign</span> keeps this assignment's role, hours and
-              window in the database as history. <span className="font-medium text-foreground">Delete permanently</span> erases
-              it entirely — only use that if it was added by mistake.
+              window in the database as history.
             </p>
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={() => handleRemove(true)}
+              className="inline-flex items-center gap-1.5 text-xs text-destructive hover:underline disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Added by mistake? Delete permanently instead.
+            </button>
           </div>
-          <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between gap-2">
-            <Button variant="ghost" className="gap-2 text-destructive hover:text-destructive" disabled={isDeleting} onClick={() => handleRemove(true)}>
-              <Trash2 className="h-4 w-4" /> Delete permanently
+          <DialogFooter>
+            <Button variant="outline" disabled={isDeleting} onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button disabled={isDeleting} onClick={() => handleRemove(false)}>
+              {isDeleting && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Unassign (keep history)
             </Button>
-            <div className="flex gap-2">
-              <Button variant="outline" disabled={isDeleting} onClick={() => setDeleteTarget(null)}>Cancel</Button>
-              <Button disabled={isDeleting} onClick={() => handleRemove(false)}>
-                {isDeleting && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-                Unassign (keep history)
-              </Button>
-            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
