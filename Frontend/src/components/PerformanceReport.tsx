@@ -48,9 +48,10 @@ const fmt = (v: number | null | undefined, digits = 2) => (v == null ? '—' : v
 const fmtHours = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 1 }));
 
 function scoreClass(v: number | null | undefined): string {
+  // Review score scale: 1 = best, 5 = worst — lower is better.
   if (v == null) return 'text-muted-foreground';
-  if (v >= 4) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300';
-  if (v >= 3) return 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300';
+  if (v <= 2) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300';
+  if (v <= 3) return 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300';
   return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300';
 }
 
@@ -357,7 +358,7 @@ export function PerformanceReport() {
             <CardHeader>
               <CardTitle className="text-base">Employee Scorecard</CardTitle>
               <p className="text-xs text-muted-foreground">
-                {rangeLabel} · Review score = mean of the Final Submissions completed in the period (official score) ·
+                {rangeLabel} · Review score = mean of the Final Submissions completed in the period (official score, scale 1 best – 5 worst) ·
                 Avg monthly hours excludes the running month · Utilization = billable hours ÷ capacity (max weekly hours, prorated) ·
                 Gap = self − manager (self no longer scores, so this is always empty) · Click a row to see each project's scores
               </p>

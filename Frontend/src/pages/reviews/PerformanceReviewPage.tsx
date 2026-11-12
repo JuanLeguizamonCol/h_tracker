@@ -177,7 +177,8 @@ function ScorePicker({ value, onChange, min, max, disabled, activeClass, naSelec
             disabled && value !== n && 'opacity-50',
           )}
           aria-pressed={value === n}
-          aria-label={`Score ${n}`}
+          aria-label={`Score ${n}${n === min ? ' (best)' : n === max ? ' (worst)' : ''}`}
+          title={n === min ? 'Best' : n === max ? 'Worst' : undefined}
         >
           {n}
         </button>
@@ -720,7 +721,7 @@ export default function PerformanceReviewPage() {
               </tbody>
             </table>
             <p className="px-4 pt-3 text-xs text-muted-foreground">
-              Scale {template.score_min}–{template.score_max}. Each criterion averages its rated items; the total averages the criteria.
+              Scale {template.score_min} (best) – {template.score_max} (worst). Each criterion averages its rated items; the total averages the criteria — lower is better.
             </p>
           </CardContent>
         </Card>
@@ -761,7 +762,9 @@ export default function PerformanceReviewPage() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Evaluations</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Rate each item from {template.score_min} to {template.score_max}; leave N/A when it doesn't apply to this project.
+            {tab === 'self'
+              ? "Write a comment for each section below based on the items listed — you're not asked to assign yourself a score."
+              : `Rate each item from ${template.score_min} (best) to ${template.score_max} (worst); leave N/A when it doesn't apply to this project.`}
           </p>
         </CardHeader>
         <CardContent>

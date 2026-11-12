@@ -102,10 +102,12 @@ export default function ReviewAnalytics() {
   const scoreMin = template?.score_min ?? 1;
   const scoreMax = template?.score_max ?? 5;
 
-  // Blue heatmap like Reports, scaled to the score range (darker = higher).
+  // Blue heatmap like Reports, scaled to the score range. Scale is 1 (best)
+  // to 5 (worst) — darker = better, so t runs from 1 at scoreMin down to 0
+  // at scoreMax instead of the other way around.
   const heat = (v: number | null): React.CSSProperties => {
     if (v == null) return {};
-    const t = Math.max(0, Math.min(1, (v - scoreMin) / (scoreMax - scoreMin)));
+    const t = Math.max(0, Math.min(1, (scoreMax - v) / (scoreMax - scoreMin)));
     const alpha = 0.08 + t * 0.72;
     return { backgroundColor: `rgba(37, 99, 235, ${alpha.toFixed(2)})`, color: alpha > 0.5 ? '#fff' : undefined };
   };
@@ -204,7 +206,7 @@ export default function ReviewAnalytics() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Completed reviews" value={String(kpis.reviews)} icon={ClipboardCheck} />
         <KpiCard label="Employees evaluated" value={String(kpis.employees)} icon={Users} />
-        <KpiCard label="Average annual score" value={kpis.avg != null ? kpis.avg.toFixed(2) : '—'} hint="Mean of employees' Final Submission averages" icon={Star} />
+        <KpiCard label="Average annual score" value={kpis.avg != null ? kpis.avg.toFixed(2) : '—'} hint="Mean of employees' Final Submission averages (1 best – 5 worst)" icon={Star} />
         <KpiCard
           label="Self vs manager gap"
           value={kpis.gap != null ? `${kpis.gap > 0 ? '+' : ''}${kpis.gap.toFixed(2)}` : '—'}
@@ -225,7 +227,7 @@ export default function ReviewAnalytics() {
           <CardHeader>
             <CardTitle className="text-base">Average by Item</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Average score of each item across the completed reviews{term ? ' matching the filter' : ''}, per evaluation · Gap = self − manager · Darker cells mean higher scores
+              Average score of each item across the completed reviews{term ? ' matching the filter' : ''}, per evaluation · Gap = self − manager · Darker cells mean a better score (scale 1 best – 5 worst)
             </p>
           </CardHeader>
           <CardContent>
@@ -295,7 +297,7 @@ export default function ReviewAnalytics() {
               {view === 'employees'
                 ? 'Final Submission averages per criterion · Annual score = mean of the employee\'s completed reviews in the year · Click an employee to see each project review'
                 : 'Final Submission averages per criterion across the project\'s reviewed employees · Click a project to see each employee'}
-              {' · '}Darker cells mean higher scores
+              {' · '}Darker cells mean a better score (scale 1 best – 5 worst)
             </p>
           </CardHeader>
           <CardContent>
