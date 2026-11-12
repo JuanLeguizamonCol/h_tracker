@@ -199,6 +199,13 @@ export default function StaffingPage() {
   const [newClientName, setNewClientName] = useState('');
   const [isCreatingClient, setIsCreatingClient] = useState(false);
 
+  // "Remove" is a choice, not a single destructive click: by default it just
+  // archives the assignment (kept for history, stops counting as staffed) —
+  // "Delete permanently" is a separate, explicit option for one added by
+  // mistake. See useDeleteAssignment / delete_employee_project.
+  const [deleteTarget, setDeleteTarget] = useState<StaffingAssignment | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   async function handleCreateClient() {
     if (!newClientName.trim()) { toast.error('Enter a client name.'); return; }
     setIsCreatingClient(true);
@@ -536,13 +543,17 @@ export default function StaffingPage() {
     }
   }
 
-  async function handleDelete(row: StaffingAssignment) {
-    if (!confirm(`Remove ${row.employee_name} from ${row.project_name}? They'll no longer be able to log time against it.`)) return;
+  async function handleRemove(permanent: boolean) {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
-      await deleteAssignment.mutateAsync(row.id);
-      toast.success('Unassigned.');
+      await deleteAssignment.mutateAsync({ id: deleteTarget.id, permanent });
+      toast.success(permanent ? 'Assignment deleted permanently.' : 'Unassigned — kept in the assignment history.');
+      setDeleteTarget(null);
     } catch {
       toast.error('Something went wrong.');
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -748,7 +759,7 @@ export default function StaffingPage() {
                                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(row)} title="Full edit (incl. project dates)">
                                   <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(row)}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeleteTarget(row)} title="Remove">
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
@@ -1058,6 +1069,34 @@ export default function StaffingPage() {
               {isCreatingClient && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
               Create &amp; Use
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={o => { if (!o) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove {deleteTarget?.employee_name} from {deleteTarget?.project_name}?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm text-muted-foreground">
+            <p>They'll no longer be able to log time against it, and it'll stop counting toward their allocation.</p>
+            <p>
+              <span className="font-medium text-foreground">Unassign</span> keeps this assignment's role, hours and
+              window in the database as history. <span className="font-medium text-foreground">Delete permanently</span> erases
+              it entirely — only use that if it was added by mistake.
+            </p>
+          </div>
+          <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between gap-2">
+            <Button variant="ghost" className="gap-2 text-destructive hover:text-destructive" disabled={isDeleting} onClick={() => handleRemove(true)}>
+              <Trash2 className="h-4 w-4" /> Delete permanently
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" disabled={isDeleting} onClick={() => setDeleteTarget(null)}>Cancel</Button>
+              <Button disabled={isDeleting} onClick={() => handleRemove(false)}>
+                {isDeleting && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                Unassign (keep history)
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

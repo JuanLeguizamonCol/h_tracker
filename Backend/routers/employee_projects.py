@@ -45,16 +45,19 @@ def create_new_employee_project(ep_in: EmployeeProjectCreate, db: Session = Depe
 def list_employee_projects(
     user_id: Optional[str] = None,
     project_id: Optional[str] = None,
+    include_archived: bool = False,
     db: Session = Depends(get_db),
 ):
-    return get_employee_projects(db, user_id=user_id, project_id=project_id)
+    return get_employee_projects(db, user_id=user_id, project_id=project_id, include_archived=include_archived)
 
 
 @employee_projects_router.get("/staffing", response_model=List[StaffingAssignmentOut],
                                dependencies=[Depends(require_section_view('staffing'))])
-def list_staffing(db: Session = Depends(get_db)):
-    """Every assignment across every employee — feeds the Staffing panel."""
-    return get_all_assignments_with_details(db)
+def list_staffing(include_archived: bool = False, db: Session = Depends(get_db)):
+    """Every assignment across every employee — feeds the Staffing panel.
+    Removed assignments (is_active=False) are excluded by default; they're
+    kept for history, not to keep showing up here as still staffed."""
+    return get_all_assignments_with_details(db, include_archived=include_archived)
 
 
 @employee_projects_router.get("/{user_id}/details", response_model=List[EmployeeProjectWithDetailsOut])
@@ -79,6 +82,9 @@ def update_employee_project_detail(ep_id: str, body: UpdateEpBody, db: Session =
 
 @employee_projects_router.delete("/{ep_id}", status_code=status.HTTP_204_NO_CONTENT,
                                   dependencies=[Depends(require_section_edit('staffing'))])
-def delete_employee_project_detail(ep_id: str, db: Session = Depends(get_db)):
-    if not delete_employee_project(db, ep_id):
+def delete_employee_project_detail(ep_id: str, permanent: bool = False, db: Session = Depends(get_db)):
+    """By default just archives the assignment (is_active=False) — it stops
+    counting as current but stays in the database. `permanent=True` (an
+    assignment added by mistake) hard-deletes it instead."""
+    if not delete_employee_project(db, ep_id, permanent=permanent):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee project not found")

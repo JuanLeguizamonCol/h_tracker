@@ -1,5 +1,5 @@
 from config.database import Base
-from sqlalchemy import Column, String, ForeignKey, DateTime, Date, Numeric
+from sqlalchemy import Column, String, ForeignKey, DateTime, Date, Numeric, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
@@ -25,6 +25,12 @@ class EmployeeProject(Base):
     end_date = Column(Date, nullable=True)
     assigned_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     assigned_by = Column(String, nullable=True)
+    # "Remove" from Staffing sets this False instead of deleting the row, so
+    # the role/allocation/window history stays in the database (excluded
+    # from Staffing and every assignment listing, same as an inactive
+    # Client/Project) — a separate "Delete permanently" action still hard-
+    # deletes, for an assignment added by mistake.
+    is_active = Column(Boolean, nullable=False, default=True)
 
     employee = relationship("Employee", back_populates="assigned_projects")
     project = relationship("Project", back_populates="assigned_projects")

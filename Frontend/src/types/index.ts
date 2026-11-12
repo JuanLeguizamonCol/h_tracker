@@ -367,6 +367,7 @@ export interface EmployeeProject {
   end_date: string | null;
   assigned_at: string;
   assigned_by: string | null;
+  is_active: boolean;
 }
 
 export interface EmployeeProjectWithDetails extends EmployeeProject {
@@ -395,6 +396,7 @@ export interface StaffingAssignment {
   project_start_date: string | null;
   project_end_date: string | null;
   assigned_at: string;
+  is_active: boolean;
 }
 
 export interface UserRole {

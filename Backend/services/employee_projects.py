@@ -42,8 +42,11 @@ def get_employee_projects(
     db: Session,
     user_id: Optional[str] = None,
     project_id: Optional[str] = None,
+    include_archived: bool = False,
 ) -> List[EmployeeProject]:
     query = db.query(EmployeeProject)
+    if not include_archived:
+        query = query.filter(EmployeeProject.is_active.is_(True))
     if user_id is not None:
         query = query.filter(EmployeeProject.user_id == user_id)
     if project_id is not None:
@@ -55,8 +58,8 @@ def get_employee_project(db: Session, ep_id: str) -> Optional[EmployeeProject]:
     return db.query(EmployeeProject).filter(EmployeeProject.id == ep_id).first()
 
 
-def get_employee_projects_with_details(db: Session, user_id: str) -> List[dict]:
-    results = (
+def get_employee_projects_with_details(db: Session, user_id: str, include_archived: bool = False) -> List[dict]:
+    query = (
         db.query(
             EmployeeProject.id,
             EmployeeProject.user_id,
@@ -74,8 +77,10 @@ def get_employee_projects_with_details(db: Session, user_id: str) -> List[dict]:
         .join(Project, EmployeeProject.project_id == Project.id)
         .join(Client, Project.client_id == Client.id)
         .filter(EmployeeProject.user_id == user_id)
-        .all()
     )
+    if not include_archived:
+        query = query.filter(EmployeeProject.is_active.is_(True))
+    results = query.all()
     return [
         {
             "id": r.id,
@@ -95,7 +100,7 @@ def get_employee_projects_with_details(db: Session, user_id: str) -> List[dict]:
     ]
 
 
-def get_all_assignments_with_details(db: Session) -> List[dict]:
+def get_all_assignments_with_details(db: Session, include_archived: bool = False) -> List[dict]:
     """Every employee↔project assignment, with everything the Staffing panel
     needs to render in one query: who, which project/client/role, how much of
     their time (%), and the project's own time window.
@@ -108,8 +113,12 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
     project, none of it a real staffing decision. Client-project assignments
     are always shown regardless of allocation % — those are never
     auto-created, so an unallocated one is still a deliberate staffing call
-    that just hasn't had a % set yet."""
-    results = (
+    that just hasn't had a % set yet.
+
+    `is_active=False` rows ("Remove" from Staffing — see delete_employee_project)
+    are excluded by default: they're kept for history, not to keep showing up
+    here as if still staffed."""
+    query = (
         db.query(
             EmployeeProject.id,
             EmployeeProject.user_id,
@@ -119,6 +128,7 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
             EmployeeProject.start_date,
             EmployeeProject.end_date,
             EmployeeProject.assigned_at,
+            EmployeeProject.is_active,
             Employee.name.label("employee_name"),
             Project.name.label("project_name"),
             Project.is_active.label("project_is_active"),
@@ -135,8 +145,10 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
         .outerjoin(ProjectRole, EmployeeProject.role_id == ProjectRole.id)
         .filter(or_(Project.is_internal == False, EmployeeProject.allocation_percentage.isnot(None)))  # noqa: E712
         .order_by(Employee.name, Project.name)
-        .all()
     )
+    if not include_archived:
+        query = query.filter(EmployeeProject.is_active.is_(True))
+    results = query.all()
     return [
         {
             "id": r.id,
@@ -156,6 +168,7 @@ def get_all_assignments_with_details(db: Session) -> List[dict]:
             "project_start_date": r.project_start_date,
             "project_end_date": r.project_end_date,
             "assigned_at": r.assigned_at,
+            "is_active": r.is_active,
         }
         for r in results
     ]
@@ -176,11 +189,18 @@ def update_employee_project(db: Session, ep_id: str, updates: dict) -> Optional[
     return db_ep
 
 
-def delete_employee_project(db: Session, ep_id: str) -> bool:
+def delete_employee_project(db: Session, ep_id: str, permanent: bool = False) -> bool:
+    """"Remove" from Staffing, by default, just archives the row
+    (is_active=False) — it stops counting as a current assignment but its
+    role/allocation/window history stays in the database. `permanent=True`
+    (an assignment added by mistake) hard-deletes it instead."""
     db_ep = get_employee_project(db, ep_id)
     if not db_ep:
         return False
-    db.delete(db_ep)
+    if permanent:
+        db.delete(db_ep)
+    else:
+        db_ep.is_active = False
     db.commit()
     return True
 

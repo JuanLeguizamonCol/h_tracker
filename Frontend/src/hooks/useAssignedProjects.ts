@@ -82,7 +82,11 @@ export function useUpdateAssignment() {
 export function useDeleteAssignment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.delete<void>(`/employee-projects/${id}`),
+    // By default this just archives the assignment server-side (is_active =
+    // false) — it stops counting as staffed but stays in the database.
+    // `permanent: true` (an assignment added by mistake) hard-deletes it.
+    mutationFn: ({ id, permanent }: { id: string; permanent?: boolean }) =>
+      api.delete<void>(`/employee-projects/${id}${permanent ? '?permanent=true' : ''}`),
     onSuccess: () => invalidateStaffing(queryClient),
   });
 }

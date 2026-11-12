@@ -39,6 +39,7 @@ class EmployeeProjectOut(EmployeeProjectBase):
     id: str
     assigned_at: datetime
     assigned_by: Optional[str] = None
+    is_active: bool = True
 
 
 class EmployeeProjectWithDetails(BaseModel):
@@ -91,3 +92,4 @@ class StaffingAssignmentOut(BaseModel):
     project_start_date: Optional[date] = None
     project_end_date: Optional[date] = None
     assigned_at: datetime
+    is_active: bool = True
