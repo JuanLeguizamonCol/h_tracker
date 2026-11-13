@@ -618,14 +618,38 @@ def apply_reviewer_evaluation(db: Session, review: PerformanceReview, reviewer_i
     db.add(row)
 
 
-def transition_review(db: Session, review: PerformanceReview, action: str, actor_id: Optional[str] = None) -> PerformanceReview:
+def transition_review(
+    db: Session, review: PerformanceReview, action: str,
+    actor_id: Optional[str] = None, reviewer_id: Optional[str] = None,
+) -> PerformanceReview:
     """Raises ValueError for an action the actor can't take right now (the
     router turns that into a 400); authorization for WHO may call an action
-    at all is checked by the router before this runs."""
+    at all is checked by the router before this runs.
+
+    Reopening is always scoped to one specific part, never the whole
+    process: "reopen_self" only touches the self-assessment, "reopen_reviewer"
+    only clears one reviewer's own submission, "reopen_joint" only reopens
+    Final Submission — each leaves everything else exactly as it was."""
     now = datetime.now(timezone.utc)
+
+    def _advance_to_joint_if_all_reviewers_submitted() -> None:
+        if review.reviewers and all(r.submitted_at is not None for r in review.reviewers):
+            review.status = "joint_review"
+            # The joint session starts from the reviewers' average and adjusts
+            # it — only seeded once, so re-entering joint_review (e.g. after a
+            # reopen_self whose resubmission finds every reviewer already
+            # done) never overwrites whatever's already been agreed there.
+            if not review.joint_scores:
+                avg = manager_evaluation_scores([r.scores for r in review.reviewers])
+                review.joint_scores = {k: {"score": _clamp_int_score(v["score"]), "notes": None} for k, v in avg.items()}
+
     if action == "submit_self":
         review.status = "in_review"
         review.self_submitted_at = now
+        # Every reviewer may already have submitted against an earlier reopen
+        # of just the self-assessment — without this, the review would sit at
+        # in_review forever with nothing left to trigger joint_review.
+        _advance_to_joint_if_all_reviewers_submitted()
     elif action == "submit_manager":
         row = _reviewer_row(review, actor_id)
         if row is None:
@@ -638,30 +662,30 @@ def transition_review(db: Session, review: PerformanceReview, action: str, actor
         db.add(row)
         db.flush()
         db.refresh(review)
-        if review.reviewers and all(r.submitted_at is not None for r in review.reviewers):
-            review.status = "joint_review"
-            # The joint session starts from the reviewers' average and adjusts
-            # it — only seeded once, so re-entering joint_review (e.g. after a
-            # reopen + a newly added reviewer submits) never overwrites
-            # whatever's already been agreed there.
-            if not review.joint_scores:
-                avg = manager_evaluation_scores([r.scores for r in review.reviewers])
-                review.joint_scores = {k: {"score": _clamp_int_score(v["score"]), "notes": None} for k, v in avg.items()}
+        _advance_to_joint_if_all_reviewers_submitted()
     elif action == "complete":
         review.status = "completed"
         review.completed_at = now
-    elif action == "reopen":
-        if review.status == "completed":
-            review.status = "joint_review"
-            review.completed_at = None
-        elif review.status == "joint_review":
-            # Per design: reopening does NOT clear what individual reviewers
-            # already submitted — it just reopens the stage (e.g. so an admin
-            # can fix something, or a newly-added reviewer can submit too).
+    elif action == "reopen_self":
+        review.status = "self_assessment"
+        review.self_submitted_at = None
+        review.completed_at = None
+    elif action == "reopen_reviewer":
+        row = _reviewer_row(review, reviewer_id)
+        if row is None:
+            raise ValueError("That person isn't an assigned reviewer on this review.")
+        if row.submitted_at is None:
+            raise ValueError("That reviewer hasn't submitted yet.")
+        row.submitted_at = None
+        db.add(row)
+        # Not everyone has submitted anymore — back to in_review, same as
+        # before this one reviewer's submission ever completed the set.
+        if review.status in ("joint_review", "completed"):
             review.status = "in_review"
-        else:
-            review.status = "self_assessment"
-            review.self_submitted_at = None
+            review.completed_at = None
+    elif action == "reopen_joint":
+        review.status = "joint_review"
+        review.completed_at = None
     db.commit()
     db.refresh(review)
     return review

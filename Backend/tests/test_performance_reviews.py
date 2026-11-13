@@ -357,16 +357,81 @@ def test_joint_only_opens_once_every_reviewer_submits(db):
         svc.transition_review(db, review, "submit_manager", actor_id="mgr")  # already submitted
 
 
-def test_reopen_from_joint_preserves_reviewer_submissions(db):
+def test_reopen_joint_from_completed_only_touches_the_joint_stage(db):
     review = svc.create_review(db, PerformanceReviewCreate(
         project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"],
     ), "x")
     review = _submit_self_and_reviewer(db, review, "mgr", {"written_1": 4})
     assert review.status == "joint_review"
+    review = svc.transition_review(db, review, "complete")
+    assert review.status == "completed" and review.completed_at is not None
 
-    review = svc.transition_review(db, review, "reopen")
+    review = svc.transition_review(db, review, "reopen_joint")
+    assert review.status == "joint_review"
+    assert review.completed_at is None
+    assert review.reviewers[0].submitted_at is not None  # untouched
+    assert review.reviewers[0].scores["written_1"]["score"] == 4
+    assert review.self_submitted_at is not None  # untouched
+
+
+def test_reopen_reviewer_clears_only_that_ones_submission(db):
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
+    ), "x")
+    svc.transition_review(db, review, "submit_self")
+    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 4})})
+    svc.apply_reviewer_evaluation(db, review, "mgr2", {"scores": _scores({"written_1": 2})})
+    db.commit()
+    svc.transition_review(db, review, "submit_manager", actor_id="mgr")
+    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr2")
+    assert review.status == "joint_review"
+
+    with pytest.raises(ValueError):
+        svc.transition_review(db, review, "reopen_reviewer", reviewer_id="nobody")
+
+    review = svc.transition_review(db, review, "reopen_reviewer", reviewer_id="mgr")
+    assert review.status == "in_review"  # not everyone has submitted anymore
+    mgr_row = next(r for r in review.reviewers if r.reviewer_id == "mgr")
+    mgr2_row = next(r for r in review.reviewers if r.reviewer_id == "mgr2")
+    assert mgr_row.submitted_at is None
+    assert mgr_row.scores["written_1"]["score"] == 4  # cleared submission, not the scores themselves
+    assert mgr2_row.submitted_at is not None  # untouched
+    assert review.self_submitted_at is not None  # untouched
+
+    # mgr2's own submission is a separate, still-valid target — reopening it
+    # works exactly the same way, independently of mgr's.
+    review = svc.transition_review(db, review, "reopen_reviewer", reviewer_id="mgr2")
     assert review.status == "in_review"
-    assert review.reviewers[0].submitted_at is not None  # preserved, not cleared
+    assert next(r for r in review.reviewers if r.reviewer_id == "mgr2").submitted_at is None
+
+    # Once already-cleared, re-reopening the same reviewer is rejected —
+    # there's nothing submitted left to reopen.
+    with pytest.raises(ValueError):
+        svc.transition_review(db, review, "reopen_reviewer", reviewer_id="mgr2")
+
+
+def test_reopen_self_lets_the_employee_resubmit_without_touching_reviewers(db):
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"],
+    ), "x")
+    review = _submit_self_and_reviewer(db, review, "mgr", {"written_1": 4})
+    assert review.status == "joint_review"
+    review = svc.transition_review(db, review, "complete")
+    assert review.status == "completed"
+
+    # Reopening self jumps straight back to self_assessment from ANY stage —
+    # the employee doesn't have to be walked back through every stage first.
+    review = svc.transition_review(db, review, "reopen_self")
+    assert review.status == "self_assessment"
+    assert review.self_submitted_at is None
+    assert review.completed_at is None
+    assert review.reviewers[0].submitted_at is not None  # untouched — not re-asked to review
+
+    # The reviewer already finished, so resubmitting self must not get stuck
+    # at in_review forever — it should fall straight back through to
+    # joint_review since nothing else is outstanding.
+    review = svc.transition_review(db, review, "submit_self")
+    assert review.status == "joint_review"
     assert review.reviewers[0].scores["written_1"]["score"] == 4
 
 

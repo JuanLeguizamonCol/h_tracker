@@ -112,11 +112,17 @@ export function useUpdatePerformanceReview() {
   });
 }
 
+export type ReviewTransitionAction =
+  | 'submit_self' | 'submit_manager' | 'complete'
+  // Reopening is always scoped to one specific part, never the whole
+  // process at once — see Backend/services/performance_reviews.py::transition_review.
+  | 'reopen_self' | 'reopen_reviewer' | 'reopen_joint';
+
 export function useTransitionPerformanceReview() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, action }: { id: string; action: 'submit_self' | 'submit_manager' | 'complete' | 'reopen' }) =>
-      api.post<PerformanceReview>(`/performance-reviews/${id}/transition`, { action }),
+    mutationFn: ({ id, action, reviewer_id }: { id: string; action: ReviewTransitionAction; reviewer_id?: string }) =>
+      api.post<PerformanceReview>(`/performance-reviews/${id}/transition`, { action, reviewer_id }),
     onSuccess: (review) => {
       queryClient.setQueryData(['performance-reviews', 'detail', review.id], review);
       queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });

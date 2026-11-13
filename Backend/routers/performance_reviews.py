@@ -336,17 +336,35 @@ def transition_review(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A review can only be completed from the joint review stage.")
         if svc.compute_averages(review.joint_scores or {}, review.evaluation_format)[1] is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Score the joint evaluation before completing.")
-    elif body.action == "reopen":
+    elif body.action == "reopen_self":
         if not manage:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
         if review.status == "self_assessment":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This review is already open.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The self-assessment is already open.")
+    elif body.action == "reopen_reviewer":
+        if not manage:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
+        if not body.reviewer_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reviewer_id is required.")
+        target_row = next((r for r in review.reviewers if r.reviewer_id == body.reviewer_id), None)
+        if target_row is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That person isn't an assigned reviewer on this review.")
+        if target_row.submitted_at is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That reviewer hasn't submitted yet.")
+    elif body.action == "reopen_joint":
+        if not manage:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
+        if review.status != "completed":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Final Submission can only be reopened from a completed review.")
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='action must be "submit_self", "submit_manager", "complete" or "reopen"')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='action must be "submit_self", "submit_manager", "complete", "reopen_self", "reopen_reviewer" or "reopen_joint"',
+        )
 
     was_in_review = review.status == "in_review"
     try:
-        review = svc.transition_review(db, review, body.action, actor_id=current_employee.id)
+        review = svc.transition_review(db, review, body.action, actor_id=current_employee.id, reviewer_id=body.reviewer_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     out = _out(db, review, current_employee, manage)

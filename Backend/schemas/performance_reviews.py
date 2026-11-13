@@ -65,8 +65,15 @@ class PerformanceReviewTransition(BaseModel):
     #                    once every assigned reviewer has, in_review → joint_review
     #                    and joint is pre-filled from the average of all reviewers)
     # "complete" (any assigned reviewer, or Admin/Manager: joint_review → completed)
-    # "reopen" (Admin/Manager: one stage back)
+    # Reopening is always scoped to one specific part — never the whole
+    # process at once (see services/performance_reviews.py::transition_review):
+    # "reopen_self"     (Admin/Manager: back to self_assessment; clears self_submitted_at
+    #                    and completed_at — every reviewer's own submission is untouched)
+    # "reopen_reviewer" (Admin/Manager: clears ONE reviewer's own submission — needs
+    #                    reviewer_id; drops joint_review/completed back to in_review)
+    # "reopen_joint"    (Admin/Manager: completed → joint_review; clears completed_at)
     action: str
+    reviewer_id: Optional[str] = None
 
 
 class CriterionAverage(BaseModel):

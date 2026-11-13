@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { ArrowLeft, Download, Loader2, Lock, RotateCcw, Save, Send, CheckCircle2, RefreshCw, Check, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Download, Loader2, Lock, RotateCcw, Save, Send, CheckCircle2, RefreshCw, Check, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   usePerformanceReview, useReviewTemplate, useUpdatePerformanceReview, useTransitionPerformanceReview,
-  useReviewLoggedHours, downloadReviewXlsx, REVIEW_STATUS_BADGE, EVALUATION_META,
+  useReviewLoggedHours, downloadReviewXlsx, REVIEW_STATUS_BADGE, EVALUATION_META, ReviewTransitionAction,
 } from '@/hooks/usePerformanceReviews';
 import { useEmployees } from '@/hooks/useEmployees';
 import { EvaluationKey, PerformanceReview, PerformanceReviewStatus, ReviewerEvaluation, ReviewScore, ReviewTemplate } from '@/types';
@@ -17,6 +17,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 // Same convention as the review workbook: employees complete the blue
@@ -418,13 +421,15 @@ export default function PerformanceReviewPage() {
     }
   }
 
-  async function runTransition(action: 'submit_self' | 'submit_manager' | 'complete' | 'reopen', confirmText: string, successText: string) {
+  async function runTransition(action: ReviewTransitionAction, confirmText: string, successText: string, reviewerId?: string) {
     if (!confirm(confirmText)) return;
     if (!(await save(true))) return;
     try {
-      await transition.mutateAsync({ id: review!.id, action });
+      await transition.mutateAsync({ id: review!.id, action, reviewer_id: reviewerId });
       toast.success(successText);
-      if (action === 'submit_manager' || action === 'complete') setTab('joint');
+      if (action === 'submit_manager' || action === 'complete' || action === 'reopen_joint') setTab('joint');
+      else if (action === 'reopen_self') setTab('self');
+      else if (action === 'reopen_reviewer') { setTab('manager'); if (reviewerId) setSelectedReviewerId(reviewerId); }
     } catch (e) {
       toast.error(e instanceof Error ? e.message.replace(/^API error \d+: /, '') : 'Action failed.');
     }
@@ -458,7 +463,13 @@ export default function PerformanceReviewPage() {
   // only shows for an actual assigned reviewer who hasn't submitted yet.
   const canSubmitManager = tab === 'manager' && review.status === 'in_review' && !!ownReviewerRow && !ownReviewerRow.submitted;
   const canComplete = tab === 'joint' && review.status === 'joint_review' && (isReviewer || manage);
-  const canReopen = manage && review.status !== 'self_assessment';
+  // Reopening is always scoped to one specific part, never the whole
+  // process at once: Self, one reviewer's own evaluation, or Final
+  // Submission, each independently of the others (see transition_review).
+  const submittedReviewers = review.evaluations.reviewers.filter(r => r.submitted);
+  const canReopenSelf = manage && review.status !== 'self_assessment';
+  const canReopenJoint = manage && review.status === 'completed';
+  const canReopenAnything = canReopenSelf || canReopenJoint || (manage && submittedReviewers.length > 0);
   const canExport = manage || review.status === 'completed';
   const canEditEmployeeText = canEdit.self;
   const reviewers = review.evaluations.reviewers;
@@ -514,11 +525,44 @@ export default function PerformanceReviewPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {canReopen && (
-            <Button variant="outline" className="gap-2" disabled={busy}
-              onClick={() => runTransition('reopen', 'Move this review back one stage?', 'Review moved back one stage.')}>
-              <RotateCcw className="h-4 w-4" /> Reopen
-            </Button>
+          {canReopenAnything && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2" disabled={busy}>
+                  <RotateCcw className="h-4 w-4" /> Reopen <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {canReopenSelf && (
+                  <DropdownMenuItem onClick={() => runTransition(
+                    'reopen_self',
+                    'Reopen the self evaluation? The employee will be able to edit and resubmit it — every reviewer\'s own evaluation is left exactly as it is.',
+                    'Self evaluation reopened.',
+                  )}>
+                    Reopen Self Evaluation
+                  </DropdownMenuItem>
+                )}
+                {submittedReviewers.map(r => (
+                  <DropdownMenuItem key={r.reviewer_id} onClick={() => runTransition(
+                    'reopen_reviewer',
+                    `Reopen ${r.reviewer_name}'s evaluation? They'll be able to edit and resubmit it — nothing else on this review is affected.`,
+                    `${r.reviewer_name}'s evaluation reopened.`,
+                    r.reviewer_id,
+                  )}>
+                    Reopen {r.reviewer_name}'s Evaluation
+                  </DropdownMenuItem>
+                ))}
+                {canReopenJoint && (
+                  <DropdownMenuItem onClick={() => runTransition(
+                    'reopen_joint',
+                    'Reopen Final Submission? This review will no longer count toward the annual measurement until it\'s completed again.',
+                    'Final Submission reopened.',
+                  )}>
+                    Reopen Final Submission
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {canExport && (
             <Button variant="outline" className="gap-2" onClick={handleExport} disabled={busy}>
