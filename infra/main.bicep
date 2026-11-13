@@ -48,14 +48,14 @@ param copToUsdRate string = '4200'
 @description('EUR to USD exchange rate.')
 param eurToUsdRate string = '1.08'
 
-@description('Microsoft Graph app (client) id used to send invitation emails. Empty disables email.')
+@description('Microsoft Graph app (client) id used to send transactional/notification email (Mail.Send). Empty disables Graph email.')
 param graphClientId string = ''
 
-@description('Microsoft Graph client secret. Empty disables email.')
+@description('Microsoft Graph client secret. Empty disables Graph email.')
 @secure()
 param graphClientSecret string = ''
 
-@description('From address for invitation emails — must be a real M365 mailbox.')
+@description('From address for notification email — must be a real M365 mailbox.')
 param graphSender string = ''
 
 @description('Entra ID (Azure AD) tenant id for "Sign in with Microsoft". Empty disables it.')
@@ -394,7 +394,9 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'FRONTEND_URL'
               value: 'https://placeholder.azurecontainerapps.io'
             }
-            // Microsoft Graph (invitation emails). Empty values disable email.
+            // Microsoft Graph (internal notification email — see utils/email.py).
+            // Empty values disable it (falls back to SMTP_* if those are set
+            // out-of-band, else email is just logged and skipped).
             {
               name: 'GRAPH_TENANT_ID'
               value: tenant().tenantId
@@ -583,12 +585,12 @@ resource frontendApp 'Microsoft.App/containerApps@2024-03-01' = {
 // step needed like backendApp's CORS_ORIGINS) so the "Log my hours" button in
 // the email (utils/email_html.py::action_button) actually renders a link.
 //
-// NOTE: like the backend app, this job only gets outbound email if SMTP_HOST /
-// SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_EMAIL (see utils/email.py) are
-// configured on it the same way they're configured on backendApp — those
-// aren't declared here because they aren't declared as bicep params for
-// backendApp either (set out-of-band). Without them this job just logs and
-// exits 0 (utils/email.py::send_email is a safe no-op when SMTP isn't set).
+// Outbound email (the reminder IS the email) goes through Microsoft Graph —
+// same GRAPH_* values as backendApp, reusing the same graphClientSecret
+// param/secret. Falls back to SMTP_* if those happen to be set out-of-band
+// on this job too (not declared here, same as backendApp); with neither,
+// utils/email.py::send_email is a safe no-op and this job just logs and
+// exits 0.
 
 resource timesheetReminderJob 'Microsoft.App/jobs@2024-03-01' = {
   name: timesheetReminderJobName
@@ -613,6 +615,13 @@ resource timesheetReminderJob 'Microsoft.App/jobs@2024-03-01' = {
         {
           name: 'acr-password'
           value: acrAdminPassword0
+        }
+        {
+          name: 'graph-client-secret'
+          // Container Apps rejects empty secret values, so use a placeholder when
+          // email isn't configured. GRAPH_CLIENT_ID stays empty in that case, so
+          // email_configured() is False and no mail is attempted anyway.
+          value: empty(graphClientSecret) ? 'not-configured' : graphClientSecret
         }
       ]
       registries: [
@@ -645,6 +654,22 @@ resource timesheetReminderJob 'Microsoft.App/jobs@2024-03-01' = {
             {
               name: 'FRONTEND_URL'
               value: 'https://${frontendApp.properties.configuration.ingress.fqdn}'
+            }
+            {
+              name: 'GRAPH_TENANT_ID'
+              value: tenant().tenantId
+            }
+            {
+              name: 'GRAPH_CLIENT_ID'
+              value: graphClientId
+            }
+            {
+              name: 'GRAPH_CLIENT_SECRET'
+              secretRef: 'graph-client-secret'
+            }
+            {
+              name: 'GRAPH_SENDER'
+              value: graphSender
             }
           ]
         }

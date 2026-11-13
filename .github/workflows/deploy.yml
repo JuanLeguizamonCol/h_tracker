@@ -130,8 +130,9 @@ jobs:
           # main.bicepparam (mixing bicepparam + inline --parameters fails BCP258).
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-          # Optional — invitation emails via Microsoft Graph. Empty if unset;
-          # email stays disabled and the deploy still succeeds.
+          # Optional — internal notification email + the weekly timesheet
+          # reminder, via Microsoft Graph (impactpoint-hours-graph-mail app).
+          # Empty if unset; email stays disabled and the deploy still succeeds.
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
           GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
           # Optional — "Sign in with Microsoft" (Entra ID). Not secret (a SPA's

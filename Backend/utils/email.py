@@ -1,14 +1,18 @@
-"""Outbound email via SMTP — used for internal notifications (e.g. "a new
-client was created"). Configured entirely through env vars, same "optional
-integration" pattern as Expensify/FreshSales elsewhere in this app: with no
-SMTP_HOST set, send_email() just logs and returns False instead of raising,
-so a notification failure/missing config never blocks the request that
-triggered it.
+"""Outbound email — used for internal notifications (e.g. "a new client was
+created", PTO requests, performance review updates, the weekly timesheet
+reminder). Tries Microsoft Graph first (utils/graph_email.py — app-only
+Mail.Send, the production transport via the impactpoint-hours-graph-mail app
+registration), then falls back to SMTP (simpler for local dev, e.g. a
+Mailhog/smtp4dev catcher). With neither configured, send_email() just logs
+and returns False instead of raising, so a notification failure/missing
+config never blocks the request that triggered it.
 """
 import os
 import logging
 import smtplib
 from email.message import EmailMessage
+
+from utils import graph_email
 
 logger = logging.getLogger(__name__)
 
@@ -24,19 +28,15 @@ SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or SMTP_USERNAME
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Horas+ (Impact Point)")
 
 
-def email_enabled() -> bool:
+def _smtp_configured() -> bool:
     return bool(SMTP_HOST and SMTP_FROM_EMAIL)
 
 
-def send_email(to: str, subject: str, html_body: str) -> bool:
-    """Best-effort send. Returns True/False instead of raising — callers
-    should never let an email failure block the action that triggered it."""
-    if not email_enabled():
-        logger.warning("Email not sent (SMTP_HOST/SMTP_FROM_EMAIL not configured): %s", subject)
-        return False
-    if not to:
-        logger.warning("Email not sent (no recipient given): %s", subject)
-        return False
+def email_enabled() -> bool:
+    return graph_email.email_configured() or _smtp_configured()
+
+
+def _send_via_smtp(to: str, subject: str, html_body: str) -> bool:
     try:
         msg = EmailMessage()
         msg["Subject"] = subject
@@ -51,8 +51,24 @@ def send_email(to: str, subject: str, html_body: str) -> bool:
             if SMTP_USERNAME and SMTP_PASSWORD:
                 server.login(SMTP_USERNAME, SMTP_PASSWORD)
             server.send_message(msg)
-        logger.info("Email sent: %s -> %s", subject, to)
+        logger.info("Email sent via SMTP: %s -> %s", subject, to)
         return True
     except Exception:
-        logger.exception("Failed to send email: %s -> %s", subject, to)
+        logger.exception("Failed to send email via SMTP: %s -> %s", subject, to)
         return False
+
+
+def send_email(to: str, subject: str, html_body: str) -> bool:
+    """Best-effort send. Returns True/False instead of raising — callers
+    should never let an email failure block the action that triggered it.
+    Graph wins when both transports happen to be configured, since that's
+    the one meant for production."""
+    if not to:
+        logger.warning("Email not sent (no recipient given): %s", subject)
+        return False
+    if graph_email.email_configured():
+        return graph_email.send_email(to, subject, html_body)
+    if _smtp_configured():
+        return _send_via_smtp(to, subject, html_body)
+    logger.warning("Email not sent (neither GRAPH_* nor SMTP_HOST/SMTP_FROM_EMAIL configured): %s", subject)
+    return False

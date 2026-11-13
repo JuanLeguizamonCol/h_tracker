@@ -17,7 +17,7 @@ Sistema de seguimiento de horas y facturación para empresas de servicios profes
 | Notificaciones | Sonner |
 | Auth | Usuario/contraseña → JWT (HS256, python-jose + passlib/bcrypt) |
 | Recordatorios de timesheet | Azure Container Apps Job (cron semanal) — `python -m jobs.send_timesheet_reminders` |
-| Email saliente | SMTP (`utils/email.py`) — notificaciones internas (PTO, facturas, anuncios, timesheet) |
+| Email saliente | Microsoft Graph Mail.Send (`utils/graph_email.py`), con SMTP como fallback (`utils/email.py`) — notificaciones internas (PTO, facturas, anuncios, timesheet) |
 | Exportación | ReportLab / xhtml2pdf (PDF), OpenPyXL (Excel) |
 | Almacenamiento | Azure Blob Storage para adjuntos (fallback a filesystem local) |
 | Contenerización | Docker Compose + Nginx (local) · Azure Container Apps + Bicep (prod) |
@@ -94,8 +94,15 @@ AZURE_STORAGE_CONTAINER          invoice-attachments
 COP_TO_USD_RATE / EUR_TO_USD_RATE   4200 / 1.08
 EXPENSIFY_* / FRESHSALES_*        integraciones opcionales
 ENTRA_TENANT_ID / ENTRA_CLIENT_ID  App Registration de Entra ID (SPA, sin secreto) para "Sign in with Microsoft". Vacío = deshabilitado.
+GRAPH_TENANT_ID / GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET / GRAPH_SENDER
+                                  envío de correo vía Microsoft Graph (Mail.Send, app
+                                  `impactpoint-hours-graph-mail`) — ver utils/graph_email.py.
+                                  Transporte principal en producción (PTO, facturas, anuncios,
+                                  reviews, y el recordatorio semanal de timesheet).
 SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_EMAIL / SMTP_FROM_NAME / SMTP_USE_TLS
-                                  cuenta de correo (no-reply) usada para notificaciones internas por email — ver utils/email.py. Sin SMTP_HOST no se envía nada (solo se loguea).
+                                  fallback por SMTP si Graph no está configurado (útil en local,
+                                  p.ej. un catcher tipo Mailhog) — ver utils/email.py. Sin ninguno
+                                  de los dos, send_email() solo loguea y no falla nada.
 NEW_CLIENT_NOTIFY_EMAIL          destinatario de la notificación "nuevo cliente creado" (Gail Fornell) — ver services/client_notifications.py. Vacío = notificación deshabilitada.
 ```
 > No existe `AUTH_MODE`. La auth base es siempre usuario/contraseña → JWT propio;
@@ -464,12 +471,14 @@ a todo empleado activo sin ninguna hora registrada en los últimos 7 días (excl
 quien lleve menos de 7 días en la empresa, para no marcar falsos positivos).
 
 ### Notificaciones por correo (utils/email.py)
-El mismo sistema SMTP que originalmente se usó para los correos de restablecimiento
-de contraseña (auth por contraseña, eliminada — ver `023_password_auth.py`) hoy se
-reutiliza para notificaciones internas. `email_enabled()` es `False` sin `SMTP_HOST`
-configurado — `send_email()` entonces solo loguea y no falla nada (no bloquea la
-acción que la disparó). Todo el copy de estos correos está en **inglés**. Disparadores
-actuales, todos "best-effort" (nunca lanzan si el correo falla):
+`send_email()` intenta primero Microsoft Graph (`utils/graph_email.py` — Mail.Send,
+client-credentials, app `impactpoint-hours-graph-mail`) y cae a SMTP si Graph no está
+configurado; el sistema SMTP es el mismo que originalmente se usó para los correos de
+restablecimiento de contraseña (auth por contraseña, eliminada — ver
+`023_password_auth.py`), hoy solo como fallback (útil en local). `email_enabled()` es
+`False` sin ninguno de los dos configurado — `send_email()` entonces solo loguea y no
+falla nada (no bloquea la acción que la disparó). Todo el copy de estos correos está en
+**inglés**. Disparadores actuales, todos "best-effort" (nunca lanzan si el correo falla):
 
 | Evento | Servicio | Destinatario(s) |
 |--------|----------|------------------|

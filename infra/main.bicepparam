@@ -71,13 +71,16 @@ param copToUsdRate = '4200'
 param eurToUsdRate = '1.08'
 
 // ---------------------------------------------------------------------------
-// Microsoft Graph — invitation emails (optional)
+// Microsoft Graph — internal notification email (optional)
 // ---------------------------------------------------------------------------
 // Sent from a real M365 mailbox via an app registration with the Mail.Send
-// application permission (admin consent required). If GRAPH_CLIENT_ID /
-// GRAPH_CLIENT_SECRET are not provided as env vars at deploy time, email stays
-// disabled (user creation still works, just without the invitation mail) — the
-// '' defaults keep the .bicepparam compiling either way.
+// application permission (admin consent required — the
+// impactpoint-hours-graph-mail app). Used by every notification in
+// Backend/services/*_notifications.py plus the weekly timesheet reminder job
+// (see utils/email.py — falls back to SMTP_* if those happen to be set
+// out-of-band instead). If GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET are not
+// provided as env vars at deploy time, email just stays disabled — the ''
+// defaults keep the .bicepparam compiling either way.
 param graphClientId = readEnvironmentVariable('GRAPH_CLIENT_ID', '')
 param graphClientSecret = readEnvironmentVariable('GRAPH_CLIENT_SECRET', '')
 // From address — must be a real licensed/shared mailbox in the tenant.
