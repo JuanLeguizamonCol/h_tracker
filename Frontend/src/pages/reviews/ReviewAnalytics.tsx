@@ -1,9 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Loader2, Search, ClipboardCheck, Users, Star, Scale } from 'lucide-react';
-import { useReviewAnalytics, useAllReviewTemplates, EVALUATION_META } from '@/hooks/usePerformanceReviews';
+import { toast } from 'sonner';
+import { ChevronDown, ChevronRight, Download, Loader2, Search, ClipboardCheck, Users, Star, Scale, X } from 'lucide-react';
+import { useReviewAnalytics, useAllReviewTemplates, EVALUATION_META, downloadReviewsXlsxBulk } from '@/hooks/usePerformanceReviews';
 import { AnalyticsReview, EvaluationKey, ReviewTemplate } from '@/types';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -89,6 +92,12 @@ export default function ReviewAnalytics() {
   const [view, setView] = useState<View>('employees');
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Selected review ids, for the bulk Excel download — shared across the
+  // Employees/Projects views (same underlying reviews, just grouped
+  // differently); there's nothing to select in the Items view (cross-review
+  // aggregates), so it's simply not shown there.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Start on the most recent year that has completed reviews.
   useEffect(() => {
@@ -172,6 +181,40 @@ export default function ReviewAnalytics() {
     || r.children.some(c => c.name.toLowerCase().includes(term)),
   );
 
+  const toggleReview = (id: string) => setSelected(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  const toggleGroup = (row: MatrixRow) => setSelected(prev => {
+    const n = new Set(prev);
+    const ids = row.children.map(c => c.reviewId);
+    const allSelected = ids.every(id => n.has(id));
+    ids.forEach(id => (allSelected ? n.delete(id) : n.add(id)));
+    return n;
+  });
+  const visibleReviewIds = matrixRows.flatMap(r => r.children.map(c => c.reviewId));
+  const allVisibleSelected = visibleReviewIds.length > 0 && visibleReviewIds.every(id => selected.has(id));
+  const someVisibleSelected = visibleReviewIds.some(id => selected.has(id));
+  const toggleAllVisible = () => setSelected(prev => {
+    const n = new Set(prev);
+    if (allVisibleSelected) visibleReviewIds.forEach(id => n.delete(id));
+    else visibleReviewIds.forEach(id => n.add(id));
+    return n;
+  });
+
+  async function handleBulkDownload() {
+    if (selected.size === 0) return;
+    setIsDownloading(true);
+    try {
+      await downloadReviewsXlsxBulk([...selected]);
+    } catch {
+      toast.error('Failed to download the selected reviews.');
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
   const stickyCell = 'sticky left-0 z-10 shadow-[1px_0_0_0_hsl(var(--border))]';
 
   return (
@@ -202,6 +245,19 @@ export default function ReviewAnalytics() {
           <Input placeholder="Filter by employee, project, client..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
         </div>
       </div>
+
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/40 px-4 py-2.5">
+          <span className="text-sm font-medium">{selected.size} review{selected.size === 1 ? '' : 's'} selected</span>
+          <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground" onClick={() => setSelected(new Set())}>
+            <X className="h-3.5 w-3.5" /> Clear
+          </Button>
+          <Button size="sm" className="gap-1.5 ml-auto" disabled={isDownloading} onClick={handleBulkDownload}>
+            {isDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Download Excel
+          </Button>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Completed reviews" value={String(kpis.reviews)} icon={ClipboardCheck} />
@@ -308,6 +364,13 @@ export default function ReviewAnalytics() {
                 <Table containerClassName="overflow-visible">
                   <TableHeader className="sticky top-0 z-20 bg-background">
                     <TableRow>
+                      <TableHead className="table-header w-10 bg-background">
+                        <Checkbox
+                          checked={allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false}
+                          onCheckedChange={toggleAllVisible}
+                          aria-label="Select all visible reviews"
+                        />
+                      </TableHead>
                       <TableHead className={cn('table-header bg-background min-w-[220px]', stickyCell)}>{view === 'employees' ? 'Employee' : 'Project'}</TableHead>
                       <TableHead className="table-header text-center min-w-[110px] border-r-2 border-border">
                         {view === 'employees' ? 'Annual score' : 'Project average'}
@@ -321,9 +384,19 @@ export default function ReviewAnalytics() {
                   <TableBody>
                     {matrixRows.map(row => {
                       const isOpen = expanded.has(row.id);
+                      const groupIds = row.children.map(c => c.reviewId);
+                      const groupAllSelected = groupIds.length > 0 && groupIds.every(id => selected.has(id));
+                      const groupSomeSelected = groupIds.some(id => selected.has(id));
                       return (
                         <Fragment key={row.id}>
                           <TableRow className="cursor-pointer hover:bg-muted/40" onClick={() => toggle(row.id)}>
+                            <TableCell onClick={e => e.stopPropagation()}>
+                              <Checkbox
+                                checked={groupAllSelected ? true : groupSomeSelected ? 'indeterminate' : false}
+                                onCheckedChange={() => toggleGroup(row)}
+                                aria-label={`Select all of ${row.name}'s reviews`}
+                              />
+                            </TableCell>
                             <TableCell className={cn('font-medium text-sm bg-background', stickyCell)}>
                               <div className="flex items-center gap-1.5">
                                 {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
@@ -341,6 +414,13 @@ export default function ReviewAnalytics() {
                           </TableRow>
                           {isOpen && row.children.map(child => (
                             <TableRow key={child.id} className="bg-muted/20 cursor-pointer hover:bg-muted/40" onClick={() => navigate(`/reviews/${child.reviewId}`)}>
+                              <TableCell onClick={e => e.stopPropagation()}>
+                                <Checkbox
+                                  checked={selected.has(child.reviewId)}
+                                  onCheckedChange={() => toggleReview(child.reviewId)}
+                                  aria-label={`Select ${child.name}'s review`}
+                                />
+                              </TableCell>
                               <TableCell className={cn('text-xs text-muted-foreground bg-muted/20 pl-9', stickyCell)}>
                                 <div className="truncate">{child.name}</div>
                                 {child.sublabel && <div className="truncate opacity-75">{child.sublabel}</div>}

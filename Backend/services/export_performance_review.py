@@ -9,7 +9,9 @@ there's more than one reviewer each gets their own extra detail sheet with
 their individual scores/notes."""
 import math
 import re
+import zipfile
 from io import BytesIO
+from typing import List
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -79,6 +81,26 @@ def export_filename(data: dict) -> str:
     who = data.get("client_name") or data["project_name"]
     name = f"{who} - {data['employee_name']} - {data['review_date'].year}.xlsx"
     return re.sub(r'[\\/:*?"<>|]', "", name)
+
+
+def export_reviews_zip(datas: List[dict]) -> bytes:
+    """One .xlsx per review — the exact same workbook export_filename/
+    generate_performance_review_xlsx produce for a single review — bundled
+    into a zip, for downloading a multi-selection (e.g. Analytics) in one go.
+    Collisions (same person/project/year reviewed twice) get a " (2)", " (3)"
+    suffix rather than silently overwriting one another in the zip."""
+    buf = BytesIO()
+    used_names: set[str] = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for data in datas:
+            base_name = export_filename(data)
+            name, n = base_name, 2
+            while name in used_names:
+                name = f"{base_name[:-5]} ({n}).xlsx"
+                n += 1
+            used_names.add(name)
+            zf.writestr(name, generate_performance_review_xlsx(data))
+    return buf.getvalue()
 
 
 def _manager_average_evaluation(data: dict) -> dict:

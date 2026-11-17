@@ -2,6 +2,7 @@
 .xlsx export. The sample numbers are the THERAPAK / Michael Franz 2025 review
 workbook this format was copied from (category averages 3 / 3.25 / 2.8 / 3 /
 2.75, overall 2.96)."""
+import zipfile
 from datetime import date, timedelta
 from io import BytesIO
 
@@ -18,7 +19,7 @@ from models.projects import Project
 from models.time_entries import TimeEntry
 from schemas.performance_reviews import PerformanceReviewCreate
 from services import performance_reviews as svc
-from services.export_performance_review import generate_performance_review_xlsx, export_filename
+from services.export_performance_review import generate_performance_review_xlsx, export_filename, export_reviews_zip
 
 SAMPLE_SCORES = {
     "written_2": 3, "written_3": 3, "written_4": 3,
@@ -506,6 +507,26 @@ def test_xlsx_export_layout_single_reviewer(db):
     assert self_ws["B20"].value and self_ws["C20"].value is None  # sub-criterion label, no score column
     # …and one comment per section, written in the criterion's own row.
     assert self_ws["D19"].value == "Clear writer."
+
+
+def test_bulk_zip_bundles_one_workbook_per_review_and_dedupes_filenames(db):
+    review1 = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 3, 1), reviewer_ids=["mgr"]), "mgr")
+    review2 = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 9, 1), reviewer_ids=["mgr"]), "mgr")
+    datas = [svc.review_export_data(db, review1), svc.review_export_data(db, review2)]
+    # Same employee/project/year on both — export_filename collides for them,
+    # so the zip must still keep both workbooks, disambiguated.
+    assert export_filename(datas[0]) == export_filename(datas[1])
+
+    zip_bytes = export_reviews_zip(datas)
+    with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+        names = zf.namelist()
+        assert len(names) == 2
+        assert names[0] == "THERAPAK, LLC - Michael Franz - 2025.xlsx"
+        assert names[1] == "THERAPAK, LLC - Michael Franz - 2025 (2).xlsx"
+        # Each entry is a real, independently-readable workbook.
+        for name in names:
+            wb = load_workbook(BytesIO(zf.read(name)))
+            assert wb.sheetnames == ["Final Submission", "Manager", "Self"]
 
 
 def test_xlsx_export_adds_a_sheet_per_reviewer_when_there_are_several(db):

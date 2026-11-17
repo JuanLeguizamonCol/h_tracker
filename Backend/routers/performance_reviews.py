@@ -1,7 +1,7 @@
 from datetime import date
 from urllib.parse import quote
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from config.database import get_db
@@ -14,7 +14,7 @@ from schemas.performance_reviews import (
     ReviewProjectOut, ProjectReviewToggle, ReviewTeamMemberOut, BulkAssignIn, BulkAssignOut, ReviewAnalyticsOut,
 )
 from services import performance_reviews as svc
-from services.export_performance_review import generate_performance_review_xlsx, export_filename
+from services.export_performance_review import generate_performance_review_xlsx, export_filename, export_reviews_zip
 from services.performance_review_notifications import (
     notify_review_created, notify_self_assessment_submitted, notify_joint_review_ready, notify_review_completed,
 )
@@ -106,6 +106,34 @@ def get_analytics(
     employee / project / item matrices. Reviews edit access only."""
     _require_manage(db, current_employee)
     return svc.analytics(db, year)
+
+
+@performance_reviews_router.get("/export/xlsx/bulk")
+def export_reviews_xlsx_bulk(
+    ids: List[str] = Query(...),
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Zips one .xlsx per review — the exact same workbook as the single-review
+    export — for downloading a multi-selection from Analytics in one go.
+    Same gate as Analytics itself (Reviews edit access)."""
+    _require_manage(db, current_employee)
+    if not ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No reviews selected.")
+
+    datas = []
+    for review_id in ids:
+        review = svc.get_review(db, review_id)
+        if review:
+            datas.append(svc.review_export_data(db, review))
+    if not datas:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="None of the selected reviews were found.")
+
+    return Response(
+        content=export_reviews_zip(datas),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="performance-reviews.zip"', "Cache-Control": "no-store"},
+    )
 
 
 # ---------- Projects panel (Reviews edit access) ----------

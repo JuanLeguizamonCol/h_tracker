@@ -152,6 +152,13 @@ export function downloadReviewXlsx(review: PerformanceReview) {
   return api.download(`/performance-reviews/${review.id}/export/xlsx`, reviewExportFilename(review));
 }
 
+// One .xlsx per review (the exact same workbook as the single export),
+// bundled into a zip — for downloading a multi-selection from Analytics.
+export function downloadReviewsXlsxBulk(reviewIds: string[]) {
+  const query = reviewIds.map(id => `ids=${encodeURIComponent(id)}`).join('&');
+  return api.download(`/performance-reviews/export/xlsx/bulk?${query}`, 'performance-reviews.zip');
+}
+
 // ---------- Projects panel ----------
 
 export function useReviewProjects(includeInactive = false) {
