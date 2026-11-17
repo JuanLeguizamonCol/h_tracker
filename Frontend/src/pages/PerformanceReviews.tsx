@@ -135,7 +135,7 @@ function ProjectsPanel() {
                           <span className="text-sm text-muted-foreground">{p.performance_review_enabled ? 'Not assigned yet' : '—'}</span>
                         ) : (
                           <div className="flex flex-wrap gap-1.5">
-                            {(['self_assessment', 'in_review', 'joint_review', 'completed'] as const).map(st => {
+                            {(['self_assessment', 'in_review', 'completed'] as const).map(st => {
                               const n = p[`reviews_${st}`];
                               return n > 0 ? (
                                 <Badge key={st} variant="outline" className={`border-0 ${REVIEW_STATUS_BADGE[st].className}`}>
@@ -173,12 +173,12 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
     const term = search.trim().toLowerCase();
     return reviews.filter(r =>
       (statusFilter === 'all' || r.status === statusFilter) &&
-      (!term || [r.employee_name, r.project_name, r.client_name, ...r.evaluations.reviewers.map(rr => rr.reviewer_name)].some(v => v?.toLowerCase().includes(term))),
+      (!term || [r.employee_name, r.project_name, r.client_name, ...r.reviewers.map(rr => rr.reviewer_name)].some(v => v?.toLowerCase().includes(term))),
     );
   }, [reviews, statusFilter, search]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: reviews.length, self_assessment: 0, in_review: 0, joint_review: 0, completed: 0 };
+    const c: Record<string, number> = { all: reviews.length, self_assessment: 0, in_review: 0, completed: 0 };
     reviews.forEach(r => { c[r.status] += 1; });
     return c;
   }, [reviews]);
@@ -204,15 +204,12 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
   function roleOf(r: PerformanceReview): string | null {
     if (r.employee_id === employee?.id) {
       if (r.status === 'self_assessment') return r.self_locked ? 'Self evaluation deadline passed' : 'Your self evaluation is pending';
-      if (r.status === 'joint_review') return 'Final Submission in progress';
+      if (r.status === 'in_review') return 'Manager Review in progress';
       return 'You (reviewee)';
     }
-    const ownRow = r.evaluations.reviewers.find(rr => rr.reviewer_id === employee?.id);
-    if (ownRow) {
+    if (r.reviewers.some(rr => rr.reviewer_id === employee?.id)) {
       if (r.status === 'self_assessment') return 'Waiting for the self evaluation';
-      if (r.status === 'in_review' && !ownRow.submitted) return 'Your evaluation is pending';
-      if (r.status === 'in_review' && ownRow.submitted) return 'Submitted — waiting on other reviewers';
-      if (r.status === 'joint_review') return 'Final Submission — record the agreed scores';
+      if (r.status === 'in_review') return 'Manager Review pending — fill it in and complete it';
       return 'You (reviewer)';
     }
     return null;
@@ -225,8 +222,7 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
           <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="all">All ({counts.all})</TabsTrigger>
             <TabsTrigger value="self_assessment">Self-assessment ({counts.self_assessment})</TabsTrigger>
-            <TabsTrigger value="in_review">Manager review ({counts.in_review})</TabsTrigger>
-            <TabsTrigger value="joint_review">Final Submission ({counts.joint_review})</TabsTrigger>
+            <TabsTrigger value="in_review">Manager Review ({counts.in_review})</TabsTrigger>
             <TabsTrigger value="completed">Completed ({counts.completed})</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -272,8 +268,8 @@ function ReviewsList({ canManage }: { canManage: boolean }) {
                           {r.client_name && <div className="text-xs text-muted-foreground">{r.client_name}</div>}
                         </TableCell>
                         <TableCell>
-                          {r.evaluations.reviewers.length
-                            ? r.evaluations.reviewers.map(rr => rr.reviewer_name).join(', ')
+                          {r.reviewers.length
+                            ? r.reviewers.map(rr => rr.reviewer_name).join(', ')
                             : <span className="text-muted-foreground">—</span>}
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{formatDate(r.review_date)}</TableCell>
@@ -326,7 +322,7 @@ export default function PerformanceReviews() {
         <h1 className="text-2xl font-bold text-foreground">Performance Reviews</h1>
         <p className="text-muted-foreground">
           {canManage
-            ? 'Each review has a self evaluation, one per reviewer, and a Final Submission — only the Final Submission counts toward the annual score'
+            ? 'Each review has a self evaluation and one Manager Review shared by every assigned reviewer — the Manager Review is the official score'
             : 'Your project self-assessments and the reviews assigned to you'}
         </p>
       </div>

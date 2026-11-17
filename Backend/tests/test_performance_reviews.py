@@ -62,12 +62,10 @@ def _reviewer_ids(review):
     return [r.reviewer_id for r in review.reviewers]
 
 
-def _submit_self_and_reviewer(db, review, reviewer_id="mgr", reviewer_scores=None):
-    """Helper: self-assessment then one reviewer's evaluation, both submitted."""
+def _submit_self_and_score(db, review, scores=None):
+    """Helper: self-assessment submitted, then the shared Manager Review scored."""
     svc.transition_review(db, review, "submit_self")
-    svc.apply_reviewer_evaluation(db, review, reviewer_id, {"scores": _scores(reviewer_scores or {"written_1": 3})})
-    db.commit()
-    return svc.transition_review(db, review, "submit_manager", actor_id=reviewer_id)
+    return svc.update_review(db, review, {"manager_scores": _scores(scores or {"written_1": 3})})
 
 
 def test_averages_match_the_sample_workbook():
@@ -94,15 +92,6 @@ def test_normalize_scores_validates():
     # (which never appears in the payload in the first place).
     assert svc.normalize_scores({"written_1": {"score": None, "notes": "  "}}) == {"written_1": {"score": None, "notes": None}}
     assert svc.normalize_scores({"written_1": {"score": None, "notes": " ok "}}) == {"written_1": {"score": None, "notes": "ok"}}
-
-
-def test_manager_evaluation_scores_averages_across_reviewers():
-    pooled = svc.manager_evaluation_scores([
-        _scores({"written_1": 4, "written_2": 2}),
-        _scores({"written_1": 5}),  # written_2 untouched by this reviewer — excluded, not counted as 0
-    ])
-    assert pooled["written_1"]["score"] == 4.5
-    assert pooled["written_2"]["score"] == 2.0
 
 
 def test_create_defaults_reviewer_hours_description_and_format(db):
@@ -138,38 +127,38 @@ def test_create_with_multiple_reviewers(db):
 
 
 def test_evaluation_formats_registry():
-    assert svc.EVALUATION_FORMATS["standard"] == "Impact Point Standard"
-    assert svc.EVALUATION_FORMATS["managers_directors"] == "Managers and Directors Reviews"
+    assert svc.EVALUATION_FORMATS == {
+        "standard": "Principals and Directors Review",
+        "seniors_managers": "Seniors and Managers Review",
+    }
 
 
-def test_managers_directors_template_matches_its_workbook():
-    tpl = svc.get_template("managers_directors")
+def test_seniors_managers_template_matches_its_workbook():
+    tpl = svc.get_template("seniors_managers")
     # Same criteria (keys) as the standard format, its own sub-criteria.
     assert [c["key"] for c in tpl] == [c["key"] for c in svc.REVIEW_TEMPLATE]
     assert [len(c["sub_criteria"]) for c in tpl] == [5, 3, 5, 4, 4]
     assert tpl[0]["sub_criteria"][0][1] == "Ability to build presentation decks, process flows, report writing, etc."
-    assert not (svc.sub_criterion_keys("managers_directors") & svc.SUB_CRITERION_KEYS)
-    out = svc.template_out("managers_directors")
-    assert out["format"] == "managers_directors" and out["format_label"] == "Managers and Directors Reviews"
+    assert not (svc.sub_criterion_keys("seniors_managers") & svc.SUB_CRITERION_KEYS)
+    out = svc.template_out("seniors_managers")
+    assert out["format"] == "seniors_managers" and out["format_label"] == "Seniors and Managers Review"
     assert svc.template_out("nope")["format"] == "standard"
+    assert svc.template_out(None)["format_label"] == "Principals and Directors Review"
     assert svc.get_template(None) is svc.REVIEW_TEMPLATE
 
 
 def test_scores_are_validated_against_the_reviews_own_format(db):
     review = svc.create_review(db, PerformanceReviewCreate(
         project_id="prj", employee_id="emp", review_date=date(2025, 12, 15),
-        reviewer_ids=["mgr"], evaluation_format="managers_directors",
+        reviewer_ids=["mgr"], evaluation_format="seniors_managers",
     ), "mgr")
     svc.transition_review(db, review, "submit_self")
     with pytest.raises(ValueError):
-        svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 3})})
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"md_written_1": 4, "md_verbal_3": 2})})
-    db.commit()
-    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr")
-    assert review.status == "joint_review"
+        svc.update_review(db, review, {"manager_scores": _scores({"written_1": 3})})
+    review = svc.update_review(db, review, {"manager_scores": _scores({"md_written_1": 4, "md_verbal_3": 2})})
     out = svc.serialize(db, [review], "mgr", False)[0]
-    assert out["evaluation_format"] == "managers_directors"
-    assert out["overall_average"] == 3.0  # joint pre-filled from the reviewer: (4 + 2) / 2
+    assert out["evaluation_format"] == "seniors_managers"
+    assert out["overall_average"] == 3.0  # (4 + 2) / 2
     # The format is locked once scoring started.
     with pytest.raises(ValueError):
         svc.update_review(db, review, {"evaluation_format": "standard"})
@@ -177,20 +166,20 @@ def test_scores_are_validated_against_the_reviews_own_format(db):
 
 def test_format_can_change_before_scoring_but_not_to_unknown(db):
     review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15)), "mgr")
-    svc.update_review(db, review, {"evaluation_format": "managers_directors"})
-    assert review.evaluation_format == "managers_directors"
+    svc.update_review(db, review, {"evaluation_format": "seniors_managers"})
+    assert review.evaluation_format == "seniors_managers"
     with pytest.raises(ValueError):
         svc.update_review(db, review, {"evaluation_format": "nope"})
 
 
-def test_xlsx_export_uses_the_managers_directors_items(db):
+def test_xlsx_export_uses_the_seniors_managers_items(db):
     review = svc.create_review(db, PerformanceReviewCreate(
         project_id="prj", employee_id="emp", review_date=date(2025, 12, 15),
-        reviewer_ids=["mgr"], evaluation_format="managers_directors",
+        reviewer_ids=["mgr"], evaluation_format="seniors_managers",
     ), "mgr")
-    svc.update_review(db, review, {"joint_scores": _scores({"md_written_1": 5, "md_verbal_1": 3})})
+    svc.update_review(db, review, {"manager_scores": _scores({"md_written_1": 5, "md_verbal_1": 3})})
     data = svc.review_export_data(db, review)
-    ws = load_workbook(BytesIO(generate_performance_review_xlsx(data)))["Final Submission"]
+    ws = load_workbook(BytesIO(generate_performance_review_xlsx(data)))["Manager Review"]
     assert ws["A19"].value == "Written Communications" and ws["C19"].value == 5.0
     assert ws["B20"].value.startswith("Ability to build presentation decks") and ws["C20"].value == 5
     assert ws["A25"].value == "Verbal Communications" and ws["C26"].value == 3
@@ -201,8 +190,7 @@ def _visible(db, review, viewer, manage=False):
     out = svc.serialize(db, [review], viewer, manage)[0]
     vis = {
         "self": out["evaluations"]["self"]["visible"],
-        "joint": out["evaluations"]["joint"]["visible"],
-        "reviewers": {r["reviewer_id"]: r["visible"] for r in out["evaluations"]["reviewers"]},
+        "manager": out["evaluations"]["manager"]["visible"],
     }
     return vis, out
 
@@ -211,101 +199,66 @@ def test_self_opens_to_the_reviewer_as_soon_as_it_is_submitted(db):
     review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"]), "x")
     svc.update_review(db, review, {"self_section_comments": {"written": "Did well here."}, "self_strengths": "Excel"})
     vis, out = _visible(db, review, "emp")
-    assert vis == {"self": True, "joint": False, "reviewers": {"mgr": False}}
+    assert vis == {"self": True, "manager": False}
     assert out["evaluations"]["self"]["section_comments"] == {"written": "Did well here."}
     vis, out = _visible(db, review, "mgr")
-    assert vis == {"self": False, "joint": False, "reviewers": {"mgr": True}}
+    assert vis == {"self": False, "manager": True}
     assert out["self_strengths"] is None  # not submitted yet
 
-    svc.transition_review(db, review, "submit_self")
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 3, "verbal_1": 4})})
-    db.commit()
-    # Self is submitted — the assigned reviewer can now read it while
-    # writing their own evaluation. Reviewer rows and joint still stay
-    # blind until Final Submission.
+    _submit_self_and_score(db, review, {"written_1": 3, "verbal_1": 4})
     vis, out = _visible(db, review, "mgr")
     assert vis["self"] is True and out["self_strengths"] == "Excel"
+    assert out["overall_average"] == 3.5
+    # The reviewee doesn't see the Manager Review until it's completed.
     vis, out = _visible(db, review, "emp")
-    assert vis["reviewers"]["mgr"] is False
-    assert out["overall_average"] is None
+    assert vis["manager"] is False and out["overall_average"] is None
 
-    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr")
-    assert review.status == "joint_review"
+    review = svc.transition_review(db, review, "complete")
     vis, out = _visible(db, review, "emp")
-    assert vis["self"] is True and out["self_strengths"] == "Excel"
-    assert out["overall_average"] == out["evaluations"]["joint"]["overall_average"]
+    assert vis == {"self": True, "manager": True}
+    assert out["overall_average"] == out["evaluations"]["manager"]["overall_average"] == 3.5
 
 
-def test_reviewer_cannot_start_before_self_is_submitted(db):
-    review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"]), "x")
-    # Self hasn't been submitted yet — the reviewer has no editable fields at all.
-    assert svc.editable_fields(review, "mgr", False) == set()
-    with pytest.raises(ValueError):
-        svc.transition_review(db, review, "submit_manager", actor_id="mgr")
-
-    svc.transition_review(db, review, "submit_self")
-    assert svc.editable_fields(review, "mgr", False) == {"reviewer_evaluation"}
-
-
-def test_employee_never_sees_any_individual_reviewer_row(db):
+def test_every_reviewer_edits_the_same_manager_review(db):
     review = svc.create_review(db, PerformanceReviewCreate(
         project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
     ), "x")
+    # Nobody can start before the self-assessment is submitted.
+    assert svc.editable_fields(review, "mgr", False) == set()
     svc.transition_review(db, review, "submit_self")
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 4})})
-    svc.apply_reviewer_evaluation(db, review, "mgr2", {"scores": _scores({"written_1": 2})})
-    db.commit()
-    svc.transition_review(db, review, "submit_manager", actor_id="mgr")
-    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr2")
-    assert review.status == "joint_review"
+    assert svc.editable_fields(review, "mgr", False) == svc.MANAGER_FIELDS
+    assert svc.editable_fields(review, "mgr2", False) == svc.MANAGER_FIELDS
 
-    # Reviewers are blind to each other until "together" (every reviewer has
-    # submitted) — then they see each other's rows too, to compare.
-    vis, _ = _visible(db, review, "mgr")
-    assert vis["reviewers"] == {"mgr": True, "mgr2": True}
-    # The reviewee never sees either individual row, at any stage — only the joint result.
-    vis, out = _visible(db, review, "emp")
-    assert vis["reviewers"] == {"mgr": False, "mgr2": False}
-    assert all(r["scores"] == {} for r in out["evaluations"]["reviewers"])
-    assert vis["joint"] is True  # the official result stays visible to them
+    svc.update_review(db, review, {"manager_scores": _scores({"written_1": 4}), "manager_strengths_notes": "From mgr"})
+    # mgr2 picks up the same evaluation and keeps editing it.
+    vis, out = _visible(db, review, "mgr2")
+    assert vis["manager"] is True
+    assert out["evaluations"]["manager"]["scores"] == _scores({"written_1": 4})
+    assert out["evaluations"]["manager"]["strengths_notes"] == "From mgr"
+    review = svc.update_review(db, review, {"manager_scores": _scores({"written_1": 2, "verbal_1": 4}), "manager_notes": "Agreed"})
+    assert review.joint_scores == _scores({"written_1": 2, "verbal_1": 4})
+    assert review.joint_notes == "Agreed"
+    assert [r["reviewer_name"] for r in svc.serialize(db, [review], "mgr", False)[0]["reviewers"]] == ["Brandon Beal", "Casey Diaz"]
 
 
-def test_admin_is_blind_to_reviewer_content_until_final_submission_but_sees_self_once_submitted(db):
+def test_admin_is_blind_to_the_manager_review_until_completed(db):
     review = svc.create_review(db, PerformanceReviewCreate(
-        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"],
     ), "x")
     svc.update_review(db, review, {"self_section_comments": {"written": "Did well here."}})
-    svc.transition_review(db, review, "submit_self")
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 4})})
-    db.commit()
+    _submit_self_and_score(db, review, {"written_1": 4})
 
-    # Admin (viewer_can_manage=True) can read self as soon as it's submitted
-    # — same as a reviewer — but is blind to each reviewer's row, same as
-    # everyone else, until Final Submission. Admin's elevated access is
-    # administrative (create/assign/enable, roster/dates/format), not a
-    # bypass for peeking at in-progress reviewer evaluations.
+    # Admin (viewer_can_manage=True, not a reviewer) reads self once it's
+    # submitted, but not the in-progress Manager Review — and never edits content.
     vis, out = _visible(db, review, "admin", manage=True)
-    assert vis == {"self": True, "joint": False, "reviewers": {"mgr": False, "mgr2": False}}
-    assert out["evaluations"]["self"]["section_comments"] == {"written": "Did well here."}
-    assert all(r["scores"] == {} for r in out["evaluations"]["reviewers"])
-    # But Admin's own editable fields stay metadata-only, never content.
+    assert vis == {"self": True, "manager": False}
+    assert out["evaluations"]["manager"]["scores"] == {}
     assert svc.editable_fields(review, "admin", True) == svc.ADMIN_META_FIELDS
 
-    svc.apply_reviewer_evaluation(db, review, "mgr2", {"scores": _scores({"written_1": 2})})
-    db.commit()
-    svc.transition_review(db, review, "submit_manager", actor_id="mgr")
-    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr2")
-    assert review.status == "joint_review"
-
-    # Once together (Final Submission), Admin sees everything, to compare —
-    # same as every assigned reviewer.
+    review = svc.transition_review(db, review, "complete")
     vis, out = _visible(db, review, "admin", manage=True)
-    assert vis == {"self": True, "joint": True, "reviewers": {"mgr": True, "mgr2": True}}
-    assert {r["reviewer_id"]: r["scores"] for r in out["evaluations"]["reviewers"]} == {
-        "mgr": _scores({"written_1": 4}), "mgr2": _scores({"written_1": 2}),
-    }
-    # Admin can now also edit the joint/Final Submission fields.
-    assert svc.JOINT_FIELDS <= svc.editable_fields(review, "admin", True)
+    assert vis == {"self": True, "manager": True}
+    assert out["overall_average"] == 4.0
 
 
 def test_self_assessment_deadline_locks_editing(db):
@@ -316,9 +269,8 @@ def test_self_assessment_deadline_locks_editing(db):
     ), "x")
     assert svc.self_assessment_locked(locked) is True
     assert svc.editable_fields(locked, "emp", False) == set()
-    # Admin/Manager can't edit the self content either (blind like everyone
-    # until Final Submission) — but CAN always push the deadline out
-    # (administrative metadata), which is how they actually un-stick it.
+    # Admin/Manager can't edit the self content — but CAN always push the
+    # deadline out (administrative metadata), which is how they un-stick it.
     assert svc.editable_fields(locked, "anyone", True) == svc.ADMIN_META_FIELDS
     assert "self_due_date" in svc.editable_fields(locked, "anyone", True)
 
@@ -332,108 +284,50 @@ def test_self_assessment_deadline_locks_editing(db):
     assert svc.self_assessment_locked(no_deadline) is False
 
 
-def test_joint_only_opens_once_every_reviewer_submits(db):
-    review = svc.create_review(db, PerformanceReviewCreate(
-        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
-    ), "x")
-    svc.transition_review(db, review, "submit_self")
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 4})})
-    svc.apply_reviewer_evaluation(db, review, "mgr2", {"scores": _scores({"written_1": 2})})
-    db.commit()
-
-    # mgr2 is blind to mgr's row and vice versa, even though both are reviewers.
-    vis, _ = _visible(db, review, "mgr")
-    assert vis["reviewers"] == {"mgr": True, "mgr2": False}
-
-    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr")
-    assert review.status == "in_review"  # mgr2 hasn't submitted yet
-    assert review.joint_scores == {}
-
-    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr2")
-    assert review.status == "joint_review"
-    # Joint pre-fills from the average of both reviewers, rounded to a whole score.
-    assert review.joint_scores["written_1"]["score"] == 3  # mean(4, 2) = 3.0
-
-    with pytest.raises(ValueError):
-        svc.transition_review(db, review, "submit_manager", actor_id="mgr")  # already submitted
-
-
-def test_reopen_joint_from_completed_only_touches_the_joint_stage(db):
+def test_complete_needs_a_rated_item(db):
     review = svc.create_review(db, PerformanceReviewCreate(
         project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"],
     ), "x")
-    review = _submit_self_and_reviewer(db, review, "mgr", {"written_1": 4})
-    assert review.status == "joint_review"
+    svc.transition_review(db, review, "submit_self")
+    with pytest.raises(ValueError):
+        svc.transition_review(db, review, "complete")
+    svc.update_review(db, review, {"manager_scores": _scores({"written_1": 3})})
     review = svc.transition_review(db, review, "complete")
     assert review.status == "completed" and review.completed_at is not None
-
-    review = svc.transition_review(db, review, "reopen_joint")
-    assert review.status == "joint_review"
-    assert review.completed_at is None
-    assert review.reviewers[0].submitted_at is not None  # untouched
-    assert review.reviewers[0].scores["written_1"]["score"] == 4
-    assert review.self_submitted_at is not None  # untouched
-
-
-def test_reopen_reviewer_clears_only_that_ones_submission(db):
-    review = svc.create_review(db, PerformanceReviewCreate(
-        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
-    ), "x")
-    svc.transition_review(db, review, "submit_self")
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 4})})
-    svc.apply_reviewer_evaluation(db, review, "mgr2", {"scores": _scores({"written_1": 2})})
-    db.commit()
-    svc.transition_review(db, review, "submit_manager", actor_id="mgr")
-    review = svc.transition_review(db, review, "submit_manager", actor_id="mgr2")
-    assert review.status == "joint_review"
-
     with pytest.raises(ValueError):
-        svc.transition_review(db, review, "reopen_reviewer", reviewer_id="nobody")
-
-    review = svc.transition_review(db, review, "reopen_reviewer", reviewer_id="mgr")
-    assert review.status == "in_review"  # not everyone has submitted anymore
-    mgr_row = next(r for r in review.reviewers if r.reviewer_id == "mgr")
-    mgr2_row = next(r for r in review.reviewers if r.reviewer_id == "mgr2")
-    assert mgr_row.submitted_at is None
-    assert mgr_row.scores["written_1"]["score"] == 4  # cleared submission, not the scores themselves
-    assert mgr2_row.submitted_at is not None  # untouched
-    assert review.self_submitted_at is not None  # untouched
-
-    # mgr2's own submission is a separate, still-valid target — reopening it
-    # works exactly the same way, independently of mgr's.
-    review = svc.transition_review(db, review, "reopen_reviewer", reviewer_id="mgr2")
-    assert review.status == "in_review"
-    assert next(r for r in review.reviewers if r.reviewer_id == "mgr2").submitted_at is None
-
-    # Once already-cleared, re-reopening the same reviewer is rejected —
-    # there's nothing submitted left to reopen.
-    with pytest.raises(ValueError):
-        svc.transition_review(db, review, "reopen_reviewer", reviewer_id="mgr2")
+        svc.transition_review(db, review, "submit_manager")  # the old per-reviewer step is gone
 
 
-def test_reopen_self_lets_the_employee_resubmit_without_touching_reviewers(db):
+def test_reopen_manager_from_completed_keeps_the_scores(db):
     review = svc.create_review(db, PerformanceReviewCreate(
         project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"],
     ), "x")
-    review = _submit_self_and_reviewer(db, review, "mgr", {"written_1": 4})
-    assert review.status == "joint_review"
-    review = svc.transition_review(db, review, "complete")
-    assert review.status == "completed"
+    _submit_self_and_score(db, review, {"written_1": 4})
+    svc.transition_review(db, review, "complete")
+    assert svc.editable_fields(review, "mgr", False) == set()
 
-    # Reopening self jumps straight back to self_assessment from ANY stage —
-    # the employee doesn't have to be walked back through every stage first.
+    review = svc.transition_review(db, review, "reopen_manager")
+    assert review.status == "in_review" and review.completed_at is None
+    assert review.joint_scores["written_1"]["score"] == 4
+    assert review.self_submitted_at is not None  # untouched
+    assert svc.editable_fields(review, "mgr", False) == svc.MANAGER_FIELDS
+
+
+def test_reopen_self_keeps_the_manager_review(db):
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"],
+    ), "x")
+    _submit_self_and_score(db, review, {"written_1": 4})
+    review = svc.transition_review(db, review, "complete")
+
     review = svc.transition_review(db, review, "reopen_self")
     assert review.status == "self_assessment"
-    assert review.self_submitted_at is None
-    assert review.completed_at is None
-    assert review.reviewers[0].submitted_at is not None  # untouched — not re-asked to review
-
-    # The reviewer already finished, so resubmitting self must not get stuck
-    # at in_review forever — it should fall straight back through to
-    # joint_review since nothing else is outstanding.
+    assert review.self_submitted_at is None and review.completed_at is None
+    assert review.joint_scores["written_1"]["score"] == 4
+    # Resubmitting goes back to the Manager Review stage, scores intact.
     review = svc.transition_review(db, review, "submit_self")
-    assert review.status == "joint_review"
-    assert review.reviewers[0].scores["written_1"]["score"] == 4
+    assert review.status == "in_review"
+    assert review.joint_scores["written_1"]["score"] == 4
 
 
 def test_editable_fields_follow_the_stage(db):
@@ -442,11 +336,8 @@ def test_editable_fields_follow_the_stage(db):
     assert svc.editable_fields(review, "mgr", False) == set()  # can't start until self is submitted
     svc.transition_review(db, review, "submit_self")
     assert svc.editable_fields(review, "emp", False) == set()
-    assert svc.editable_fields(review, "mgr", False) == {"reviewer_evaluation"}
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 3})})
-    db.commit()
-    svc.transition_review(db, review, "submit_manager", actor_id="mgr")
-    assert svc.editable_fields(review, "mgr", False) == svc.JOINT_FIELDS
+    assert svc.editable_fields(review, "mgr", False) == svc.MANAGER_FIELDS
+    svc.update_review(db, review, {"manager_scores": _scores({"written_1": 3})})
     svc.transition_review(db, review, "complete")
     assert svc.editable_fields(review, "mgr", False) == set()
     assert svc.editable_fields(review, "anyone", True) == svc.ADMIN_FIELDS
@@ -454,8 +345,7 @@ def test_editable_fields_follow_the_stage(db):
 
 def test_analytics_uses_completed_reviews_only(db):
     done = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"]), "x")
-    svc.update_review(db, done, {"joint_scores": _scores({"written_1": 4})})
-    svc.apply_reviewer_evaluation(db, done, "mgr", {"scores": _scores({"written_1": 3})})
+    svc.update_review(db, done, {"manager_scores": _scores({"written_1": 4})})
     done.status = "completed"
     db.commit()
     svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2026, 1, 15)), "x")
@@ -465,46 +355,47 @@ def test_analytics_uses_completed_reviews_only(db):
     assert len(data["reviews"]) == 1
     row = data["reviews"][0]
     # Self no longer scores anything — "self" overall is always None now.
-    assert (row["self"]["overall"], row["manager"]["overall"], row["joint"]["overall"]) == (None, 3.0, 4.0)
-    assert row["joint"]["items"] == {"written_1": 4}
+    assert (row["self"]["overall"], row["manager"]["overall"]) == (None, 4.0)
+    assert "joint" not in row
+    assert row["manager"]["items"] == {"written_1": 4}
     assert row["reviewer_names"] == ["Brandon Beal"]
     assert svc.analytics(db, 2026)["reviews"] == []
 
 
-def test_xlsx_export_layout_single_reviewer(db):
-    review = svc.create_review(db, PerformanceReviewCreate(project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr"]), "mgr")
+def test_xlsx_export_layout(db):
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
+    ), "mgr")
     svc.update_review(db, review, {
-        "joint_scores": _scores(SAMPLE_SCORES),
+        "manager_scores": _scores(SAMPLE_SCORES),
         "self_strengths": "Excel skills",
         "self_section_comments": {"written": "Clear writer."},
-        "joint_notes": "Agreed",
+        "manager_notes": "Agreed",
+        "manager_strengths_notes": "Technically sound",
     })
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 2}), "strengths_notes": "Technically sound"})
-    db.commit()
     data = svc.review_export_data(db, review)
     wb = load_workbook(BytesIO(generate_performance_review_xlsx(data)))
-    assert wb.sheetnames == ["Final Submission", "Manager", "Self"]  # single reviewer: no extra per-reviewer sheet
-    ws = wb["Final Submission"]
+    assert wb.sheetnames == ["Manager Review", "Self"]
+    ws = wb["Manager Review"]
 
     assert export_filename(data) == "THERAPAK, LLC - Michael Franz - 2025.xlsx"
     assert ws["B6"].value == "Franz, Michael"
-    assert ws["B8"].value == "Brandon Beal"
+    assert ws["A8"].value == "Reviewers" and ws["B8"].value == "Brandon Beal, Casey Diaz"
     assert ws["B11"].value == "296 hours"
     assert ws["B12"].value == "12/15/2025"
     assert [ws[f"D{r}"].value for r in range(7, 13)] == [3.0, 3.25, 2.8, 3.0, 2.75, 2.96]
-    assert ws["B14"].value == "Excel skills" and ws["D14"].value is None  # Final Submission sheet shows no single reviewer's notes
-    assert ws["B17"].value == "Agreed"
+    assert ws["B14"].value == "Excel skills" and ws["D14"].value == "Technically sound"
+    assert ws["A17"].value == "Manager Review Notes" and ws["B17"].value == "Agreed"
     assert ws["A19"].value == "Written Communications" and ws["C19"].value == 3.0
     assert ws["C20"].value is None and ws["C21"].value == 3
     assert ws["A43"].value == "Overall Professionalism and Core Values" and ws["C43"].value == 2.75
     assert ws["C44"].value == 2
 
-    assert wb["Manager"]["C20"].value == 2 and wb["Manager"]["D12"].value == 2.0
-
     self_ws = wb["Self"]
     # No per-item scores at all on the Self sheet — just the reference list…
     assert self_ws["A19"].value == "Written Communications" and self_ws["C19"].value is None
     assert self_ws["B20"].value and self_ws["C20"].value is None  # sub-criterion label, no score column
+    assert self_ws["D14"].value is None  # no reviewer notes on the Self sheet
     # …and one comment per section, written in the criterion's own row.
     assert self_ws["D19"].value == "Clear writer."
 
@@ -526,22 +417,7 @@ def test_bulk_zip_bundles_one_workbook_per_review_and_dedupes_filenames(db):
         # Each entry is a real, independently-readable workbook.
         for name in names:
             wb = load_workbook(BytesIO(zf.read(name)))
-            assert wb.sheetnames == ["Final Submission", "Manager", "Self"]
-
-
-def test_xlsx_export_adds_a_sheet_per_reviewer_when_there_are_several(db):
-    review = svc.create_review(db, PerformanceReviewCreate(
-        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
-    ), "mgr")
-    svc.apply_reviewer_evaluation(db, review, "mgr", {"scores": _scores({"written_1": 4}), "strengths_notes": "From mgr"})
-    svc.apply_reviewer_evaluation(db, review, "mgr2", {"scores": _scores({"written_1": 2}), "strengths_notes": "From mgr2"})
-    db.commit()
-    data = svc.review_export_data(db, review)
-    wb = load_workbook(BytesIO(generate_performance_review_xlsx(data)))
-    assert wb.sheetnames == ["Final Submission", "Manager", "Self", "Brandon Beal", "Casey Diaz"]
-    assert wb["Manager"]["C20"].value == 3.0  # mean(4, 2)
-    assert wb["Brandon Beal"]["C20"].value == 4 and wb["Brandon Beal"]["D14"].value == "From mgr"
-    assert wb["Casey Diaz"]["C20"].value == 2 and wb["Casey Diaz"]["D14"].value == "From mgr2"
+            assert wb.sheetnames == ["Manager Review", "Self"]
 
 
 def test_reviewer_never_defaults_to_the_reviewee(db):
@@ -576,3 +452,30 @@ def test_projects_panel_and_team(db):
     assert len(team["emp"]["reviews"]) == 1 and team["emp"]["reviews"][0]["reviewer_names"] == ["Brandon Beal"]
     assert team["mgr"]["reviews"] == []
     assert svc.has_open_review(db, "prj", "emp") and not svc.has_open_review(db, "prj", "mgr")
+
+
+def test_manager_scores_patches_merge_item_by_item(db):
+    """Two reviewers saving different items of the shared Manager Review
+    don't overwrite each other — the panel only sends what changed."""
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
+    ), "x")
+    svc.transition_review(db, review, "submit_self")
+    svc.update_review(db, review, {"manager_scores": _scores({"written_1": 4})})   # mgr
+    svc.update_review(db, review, {"manager_scores": _scores({"verbal_1": 2})})    # mgr2
+    review = svc.update_review(db, review, {"manager_scores": {"written_1": {"score": None, "notes": None}}})  # mgr marks N/A
+    assert review.joint_scores == {"written_1": {"score": None, "notes": None}, "verbal_1": {"score": 2, "notes": None}}
+
+
+def test_one_reviewer_alone_can_complete_when_there_are_several(db):
+    """With several reviewers, any ONE of them can fill in and complete the
+    Manager Review — the others don't have to touch it (e.g. only one of
+    them was able to review this person)."""
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15), reviewer_ids=["mgr", "mgr2"],
+    ), "x")
+    svc.transition_review(db, review, "submit_self")
+    svc.update_review(db, review, {"manager_scores": _scores({"written_1": 2})})  # mgr only; mgr2 never touches it
+    review = svc.transition_review(db, review, "complete")
+    assert review.status == "completed"
+    assert svc.serialize(db, [review], "emp", False)[0]["overall_average"] == 2.0

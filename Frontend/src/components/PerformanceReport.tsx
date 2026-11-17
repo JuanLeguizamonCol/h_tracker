@@ -223,12 +223,11 @@ export function PerformanceReport() {
               { key: 'employees_reviewed', label: 'Employees', format: 'number' },
               { key: 'hours_in_window', label: 'Hours (period)', format: 'number' },
               { key: 'self_avg', label: 'Self', format: 'number' },
-              { key: 'manager_avg', label: 'Manager', format: 'number' },
-              { key: 'joint_avg', label: 'Joint (official)', format: 'number' },
+              { key: 'joint_avg', label: 'Manager Review (official)', format: 'number' },
             ],
             rows: (data?.projects ?? []).map(p => ({
               name: p.name, client_name: p.client_name || '', employees_reviewed: p.employees_reviewed,
-              hours_in_window: p.hours_in_window, self_avg: p.self_avg, manager_avg: p.manager_avg, joint_avg: p.joint_avg,
+              hours_in_window: p.hours_in_window, self_avg: p.self_avg, joint_avg: p.joint_avg,
             })),
           },
         ],
@@ -341,7 +340,7 @@ export function PerformanceReport() {
       ) : (
         <>
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
-            <Kpi label="Avg review score" value={fmt(kpis.score)} hint="Final Submissions completed in the period"
+            <Kpi label="Avg review score" value={fmt(kpis.score)} hint="Manager Reviews completed in the period"
               icon={Star} color="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" />
             <Kpi label="Avg monthly hours" value={fmtHours(kpis.monthly)} hint="Per employee, complete months"
               icon={Clock} color="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" />
@@ -358,7 +357,7 @@ export function PerformanceReport() {
             <CardHeader>
               <CardTitle className="text-base">Employee Scorecard</CardTitle>
               <p className="text-xs text-muted-foreground">
-                {rangeLabel} · Review score = mean of the Final Submissions completed in the period (official score, scale 1 best – 5 worst) ·
+                {rangeLabel} · Review score = mean of the Manager Reviews completed in the period (official score, scale 1 best – 5 worst) ·
                 Avg monthly hours excludes the running month · Utilization = billable hours ÷ capacity (max weekly hours, prorated) ·
                 Gap = self − manager (self no longer scores, so this is always empty) · Click a row to see each project's scores
               </p>
@@ -434,8 +433,7 @@ export function PerformanceReport() {
                                           <th className="text-left font-medium py-1.5">Review date</th>
                                           <th className="text-right font-medium py-1.5">Hours (period)</th>
                                           <th className="text-center font-medium py-1.5">Self</th>
-                                          <th className="text-center font-medium py-1.5">Manager</th>
-                                          <th className="text-center font-medium py-1.5">Joint (official)</th>
+                                          <th className="text-center font-medium py-1.5">Manager Review (official)</th>
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -448,7 +446,6 @@ export function PerformanceReport() {
                                             <td className="py-1.5">{format(new Date(`${rv.review_date}T00:00:00`), 'MMM d, yyyy')}</td>
                                             <td className="py-1.5 text-right tabular-nums">{fmtHours(rv.hours_in_window)}</td>
                                             <td className="py-1.5 text-center tabular-nums">{fmt(rv.self)}</td>
-                                            <td className="py-1.5 text-center tabular-nums">{fmt(rv.manager)}</td>
                                             <td className="py-1.5 text-center"><ScorePill value={rv.joint} /></td>
                                           </tr>
                                         ))}
@@ -524,7 +521,7 @@ export function PerformanceReport() {
           <Card className="card-elevated">
             <CardHeader>
               <CardTitle className="text-base">Review Scores by Project</CardTitle>
-              <p className="text-xs text-muted-foreground">Reviews completed in the period, grouped by project · Sorted by joint score</p>
+              <p className="text-xs text-muted-foreground">Reviews completed in the period, grouped by project · Sorted by Manager Review score</p>
             </CardHeader>
             <CardContent>
               {data.projects.length === 0 ? (
@@ -538,8 +535,7 @@ export function PerformanceReport() {
                         <TableHead className="table-header text-center">Employees</TableHead>
                         <TableHead className="table-header text-right">Hours (period)</TableHead>
                         <TableHead className="table-header text-center">Self</TableHead>
-                        <TableHead className="table-header text-center">Manager</TableHead>
-                        <TableHead className="table-header text-center">Joint (official)</TableHead>
+                        <TableHead className="table-header text-center">Manager Review (official)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -552,7 +548,6 @@ export function PerformanceReport() {
                           <TableCell className="text-center text-sm tabular-nums">{p.employees_reviewed}</TableCell>
                           <TableCell className="text-right text-sm tabular-nums">{fmtHours(p.hours_in_window)}</TableCell>
                           <TableCell className="text-center text-sm tabular-nums">{fmt(p.self_avg)}</TableCell>
-                          <TableCell className="text-center text-sm tabular-nums">{fmt(p.manager_avg)}</TableCell>
                           <TableCell className="text-center"><ScorePill value={p.joint_avg} /></TableCell>
                         </TableRow>
                       ))}

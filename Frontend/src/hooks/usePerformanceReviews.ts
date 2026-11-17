@@ -7,8 +7,7 @@ import {
 
 export const REVIEW_STATUS_BADGE: Record<PerformanceReviewStatus, { label: string; className: string }> = {
   self_assessment: { label: 'Self-assessment', className: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300' },
-  in_review: { label: 'Manager review', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
-  joint_review: { label: 'Final Submission', className: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300' },
+  in_review: { label: 'Manager Review', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
   completed: { label: 'Completed', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' },
 };
 
@@ -18,11 +17,7 @@ export const EVALUATION_META: Record<EvaluationKey, { label: string; short: stri
     activeTab: 'data-[state=active]:border-sky-600 dark:data-[state=active]:border-sky-400 data-[state=active]:text-sky-700 dark:data-[state=active]:text-sky-400',
   },
   manager: {
-    label: 'Manager evaluation', short: 'Manager', who: 'by each assigned reviewer, independently', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400', ring: 'bg-amber-600 border-amber-600',
-    activeTab: 'data-[state=active]:border-amber-600 dark:data-[state=active]:border-amber-400 data-[state=active]:text-amber-700 dark:data-[state=active]:text-amber-400',
-  },
-  joint: {
-    label: 'Final Submission', short: 'Final', who: 'agreed together — official', dot: 'bg-emerald-600', text: 'text-emerald-700 dark:text-emerald-400', ring: 'bg-emerald-600 border-emerald-600',
+    label: 'Manager Review', short: 'Manager', who: 'shared by every assigned reviewer — official', dot: 'bg-emerald-600', text: 'text-emerald-700 dark:text-emerald-400', ring: 'bg-emerald-600 border-emerald-600',
     activeTab: 'data-[state=active]:border-emerald-600 dark:data-[state=active]:border-emerald-400 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-400',
   },
 };
@@ -113,16 +108,16 @@ export function useUpdatePerformanceReview() {
 }
 
 export type ReviewTransitionAction =
-  | 'submit_self' | 'submit_manager' | 'complete'
-  // Reopening is always scoped to one specific part, never the whole
-  // process at once — see Backend/services/performance_reviews.py::transition_review.
-  | 'reopen_self' | 'reopen_reviewer' | 'reopen_joint';
+  | 'submit_self' | 'complete'
+  // Reopening is scoped: the self-assessment, or a completed Manager Review —
+  // see Backend/services/performance_reviews.py::transition_review.
+  | 'reopen_self' | 'reopen_manager';
 
 export function useTransitionPerformanceReview() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, action, reviewer_id }: { id: string; action: ReviewTransitionAction; reviewer_id?: string }) =>
-      api.post<PerformanceReview>(`/performance-reviews/${id}/transition`, { action, reviewer_id }),
+    mutationFn: ({ id, action }: { id: string; action: ReviewTransitionAction }) =>
+      api.post<PerformanceReview>(`/performance-reviews/${id}/transition`, { action }),
     onSuccess: (review) => {
       queryClient.setQueryData(['performance-reviews', 'detail', review.id], review);
       queryClient.invalidateQueries({ queryKey: ['performance-reviews', 'list'] });

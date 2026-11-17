@@ -83,7 +83,7 @@ def test_employee_rows(db):
     assert ana["projects_count"] == 2
     assert ana["pto_hours"] == 40  # approved only
     assert ana["reviews_count"] == 2 and ana["review_score"] == 3.5  # joint only
-    assert ana["self_manager_gap"] == 2.0
+    assert ana["self_manager_gap"] == 1.0  # self (5) − Manager Review (4)
     assert ana["open_reviews"] == 1
 
     # Started in September → averaged over Sep only (Oct is still running).
@@ -95,7 +95,7 @@ def test_employee_rows(db):
 def test_project_rollup(db):
     data = employee_performance(db, *default_window(TODAY), TODAY)
     by_id = {p["project_id"]: p for p in data["projects"]}
-    assert by_id["p1"]["joint_avg"] == 4.0 and by_id["p1"]["self_avg"] == 5.0 and by_id["p1"]["manager_avg"] == 3.0
+    assert by_id["p1"]["joint_avg"] == 4.0 and by_id["p1"]["self_avg"] == 5.0 and by_id["p1"]["manager_avg"] == 4.0  # Manager Review = the official score
     assert by_id["p1"]["hours_in_window"] == 108
     assert by_id["p2"]["joint_avg"] == 3.0 and by_id["p2"]["self_avg"] is None
     assert [p["project_id"] for p in data["projects"]] == ["p1", "p2"]  # best score first

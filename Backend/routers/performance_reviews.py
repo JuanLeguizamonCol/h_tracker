@@ -16,7 +16,7 @@ from schemas.performance_reviews import (
 from services import performance_reviews as svc
 from services.export_performance_review import generate_performance_review_xlsx, export_filename, export_reviews_zip
 from services.performance_review_notifications import (
-    notify_review_created, notify_self_assessment_submitted, notify_joint_review_ready, notify_review_completed,
+    notify_review_created, notify_self_assessment_submitted, notify_review_completed,
 )
 from utils.auth_jwt import get_current_employee
 from utils.section_access import get_section_access
@@ -308,18 +308,8 @@ def update_review(
     if "review_date" in changes and changes["review_date"] is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Review date is required.")
 
-    # Editing reviewer_evaluation is always the caller's OWN row, with no
-    # bypass for Admin/Manager — reviewer content is blind to everyone,
-    # including Admin, until Final Submission (see svc.editable_fields),
-    # so there's no legitimate "edit someone else's row" case to support.
-    reviewer_evaluation = changes.pop("reviewer_evaluation", None)
-
     try:
         review = svc.update_review(db, review, changes)
-        if reviewer_evaluation is not None:
-            svc.apply_reviewer_evaluation(db, review, current_employee.id, reviewer_evaluation)
-            db.commit()
-            db.refresh(review)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return _out(db, review, current_employee, manage)
@@ -338,10 +328,7 @@ def transition_review(
     is_reviewer = current_employee.id in reviewer_ids
 
     # Every review walks the same stages in order — Admin/Manager can act on
-    # anyone's behalf at each stage, but can't skip one. With N reviewers,
-    # "submit_manager" submits only the CALLING reviewer's own evaluation —
-    # the stage only advances to joint_review once every assigned reviewer
-    # has done this (see services/performance_reviews.py::transition_review).
+    # anyone's behalf at each stage, but can't skip one.
     if body.action == "submit_self":
         if not (manage or is_reviewee):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the employee can submit their self-assessment.")
@@ -352,58 +339,35 @@ def transition_review(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"The self-assessment deadline ({review.self_due_date.isoformat()}) has passed. Ask an Admin to extend it.",
             )
-    elif body.action == "submit_manager":
-        if not (manage or is_reviewer):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an assigned reviewer can submit a reviewer evaluation.")
-        if review.status != "in_review":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A reviewer evaluation can only be submitted after the self-assessment and before the joint review.")
     elif body.action == "complete":
         if not (manage or is_reviewer):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an assigned reviewer can complete this review.")
-        if review.status != "joint_review":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A review can only be completed from the joint review stage.")
-        if svc.compute_averages(review.joint_scores or {}, review.evaluation_format)[1] is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Score the joint evaluation before completing.")
+        if review.status != "in_review":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A review can only be completed once the self-assessment is submitted.")
     elif body.action == "reopen_self":
         if not manage:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
         if review.status == "self_assessment":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The self-assessment is already open.")
-    elif body.action == "reopen_reviewer":
-        if not manage:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
-        if not body.reviewer_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reviewer_id is required.")
-        target_row = next((r for r in review.reviewers if r.reviewer_id == body.reviewer_id), None)
-        if target_row is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That person isn't an assigned reviewer on this review.")
-        if target_row.submitted_at is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That reviewer hasn't submitted yet.")
-    elif body.action == "reopen_joint":
+    elif body.action == "reopen_manager":
         if not manage:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviews edit access required.")
         if review.status != "completed":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Final Submission can only be reopened from a completed review.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The Manager Review can only be reopened from a completed review.")
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail='action must be "submit_self", "submit_manager", "complete", "reopen_self", "reopen_reviewer" or "reopen_joint"',
+            detail='action must be "submit_self", "complete", "reopen_self" or "reopen_manager"',
         )
 
-    was_in_review = review.status == "in_review"
     try:
-        review = svc.transition_review(db, review, body.action, actor_id=current_employee.id, reviewer_id=body.reviewer_id)
+        review = svc.transition_review(db, review, body.action)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     out = _out(db, review, current_employee, manage)
     if body.action == "submit_self":
         for reviewer_id in reviewer_ids:
             notify_self_assessment_submitted(out, _email_of(db, reviewer_id))
-    elif body.action == "submit_manager" and was_in_review and review.status == "joint_review":
-        # Only fires once the LAST reviewer's submission actually opened the
-        # joint stage — not on every individual reviewer's submission.
-        reviewer_emails = [_email_of(db, rid) for rid in reviewer_ids]
-        notify_joint_review_ready(out, _email_of(db, review.employee_id), *reviewer_emails)
     elif body.action == "complete":
         notify_review_completed(out, _email_of(db, review.employee_id))
     return out

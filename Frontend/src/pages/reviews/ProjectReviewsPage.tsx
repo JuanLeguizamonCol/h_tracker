@@ -84,7 +84,7 @@ function AssignDialog({ open, onOpenChange, projectId, managerName, members, onA
         <DialogHeader>
           <DialogTitle>Assign Self-Assessment{members.length > 1 ? 's' : ''}</DialogTitle>
           <DialogDescription>
-            Each employee completes their project details and self-assessment, then the reviewer scores it.
+            Each employee completes their project details and self-assessment, then the reviewer(s) fill in one shared Manager Review.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -115,7 +115,7 @@ function AssignDialog({ open, onOpenChange, projectId, managerName, members, onA
               onChange={id => { if (id) setReviewerIds(ids => [...ids, id]); }}
               placeholder={managerName ? `Add a reviewer — project manager (${managerName})` : 'Add a reviewer...'}
             />
-            <p className="text-xs text-muted-foreground">Leave empty to use the project manager. Nobody is assigned as their own reviewer. Add more than one to collect independent evaluations from each.</p>
+            <p className="text-xs text-muted-foreground">Leave empty to use the project manager. Nobody is assigned as their own reviewer. With more than one, they all edit the same Manager Review.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

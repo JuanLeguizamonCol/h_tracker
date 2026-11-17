@@ -27,20 +27,12 @@ class PerformanceReviewCreate(BaseModel):
     project_description: Optional[str] = None
 
 
-class ReviewerEvaluationPatch(BaseModel):
-    """A single reviewer's own scores/notes. Always applies to the calling
-    reviewer's own row — no bypass for Admin/Manager, reviewer content stays
-    blind to everyone until Final Submission — see routers/performance_reviews.py."""
-    scores: Optional[Dict[str, ReviewScore]] = None
-    strengths_notes: Optional[str] = None
-    improvement_notes: Optional[str] = None
-    development_notes: Optional[str] = None
-
-
 class PerformanceReviewUpdate(BaseModel):
     """Partial update — which fields a caller may actually change depends on
     who they are (see services/performance_reviews.py::EMPLOYEE_FIELDS /
-    JOINT_FIELDS / ADMIN_FIELDS); disallowed fields are rejected."""
+    MANAGER_FIELDS / ADMIN_FIELDS); disallowed fields are rejected. The
+    manager_* fields are the shared Manager Review, editable by any assigned
+    reviewer while the review is in_review."""
     reviewer_ids: Optional[List[str]] = None
     review_date: Optional[date] = None
     self_due_date: Optional[date] = None
@@ -54,26 +46,19 @@ class PerformanceReviewUpdate(BaseModel):
     self_improvement: Optional[str] = None
     self_development: Optional[str] = None
     self_section_comments: Optional[Dict[str, str]] = None
-    joint_notes: Optional[str] = None
-    joint_scores: Optional[Dict[str, ReviewScore]] = None
-    reviewer_evaluation: Optional[ReviewerEvaluationPatch] = None
+    manager_scores: Optional[Dict[str, ReviewScore]] = None
+    manager_notes: Optional[str] = None
+    manager_strengths_notes: Optional[str] = None
+    manager_improvement_notes: Optional[str] = None
+    manager_development_notes: Optional[str] = None
 
 
 class PerformanceReviewTransition(BaseModel):
-    # "submit_self" (employee: self_assessment → in_review)
-    # "submit_manager" (the calling reviewer submits THEIR OWN evaluation;
-    #                    once every assigned reviewer has, in_review → joint_review
-    #                    and joint is pre-filled from the average of all reviewers)
-    # "complete" (any assigned reviewer, or Admin/Manager: joint_review → completed)
-    # Reopening is always scoped to one specific part — never the whole
-    # process at once (see services/performance_reviews.py::transition_review):
-    # "reopen_self"     (Admin/Manager: back to self_assessment; clears self_submitted_at
-    #                    and completed_at — every reviewer's own submission is untouched)
-    # "reopen_reviewer" (Admin/Manager: clears ONE reviewer's own submission — needs
-    #                    reviewer_id; drops joint_review/completed back to in_review)
-    # "reopen_joint"    (Admin/Manager: completed → joint_review; clears completed_at)
+    # "submit_self"    (employee, or Admin/Manager: self_assessment → in_review)
+    # "complete"       (any assigned reviewer, or Admin/Manager: in_review → completed)
+    # "reopen_self"    (Admin/Manager: back to self_assessment; the Manager Review is kept)
+    # "reopen_manager" (Admin/Manager: completed → in_review)
     action: str
-    reviewer_id: Optional[str] = None
 
 
 class CriterionAverage(BaseModel):
@@ -83,10 +68,8 @@ class CriterionAverage(BaseModel):
 
 
 class EvaluationOut(BaseModel):
-    # False when the caller may not see this evaluation yet (self, each
-    # reviewer, and joint are blind to each other until joint_review; the
-    # reviewee additionally never sees any individual reviewer's row) —
-    # scores come back empty.
+    # False when the caller may not see this evaluation yet (see
+    # services/performance_reviews.py::visibility) — scores come back empty.
     visible: bool
     scores: Dict[str, ReviewScore]
     criteria_averages: List[CriterionAverage]
@@ -96,19 +79,22 @@ class EvaluationOut(BaseModel):
     section_comments: Optional[Dict[str, str]] = None
 
 
-class ReviewerEvaluationOut(EvaluationOut):
-    reviewer_id: str
-    reviewer_name: Optional[str] = None
+class ManagerEvaluationOut(EvaluationOut):
+    """The shared Manager Review — the official evaluation."""
     strengths_notes: Optional[str] = None
     improvement_notes: Optional[str] = None
     development_notes: Optional[str] = None
-    submitted: bool = False
+    notes: Optional[str] = None
 
 
 class EvaluationsOut(BaseModel):
     self: EvaluationOut
-    reviewers: List[ReviewerEvaluationOut]
-    joint: EvaluationOut
+    manager: ManagerEvaluationOut
+
+
+class ReviewerOut(BaseModel):
+    reviewer_id: str
+    reviewer_name: Optional[str] = None
 
 
 class PerformanceReviewOut(BaseModel):
@@ -118,6 +104,7 @@ class PerformanceReviewOut(BaseModel):
     client_name: Optional[str] = None
     employee_id: str
     employee_name: str
+    reviewers: List[ReviewerOut] = []
     review_date: date
     self_due_date: Optional[date] = None
     self_locked: bool = False
@@ -131,9 +118,8 @@ class PerformanceReviewOut(BaseModel):
     self_strengths: Optional[str] = None
     self_improvement: Optional[str] = None
     self_development: Optional[str] = None
-    joint_notes: Optional[str] = None
     evaluations: EvaluationsOut
-    # Official score = the joint evaluation's overall average.
+    # Official score = the Manager Review's overall average.
     overall_average: Optional[float] = None
     status: str
     self_submitted_at: Optional[datetime] = None
@@ -156,7 +142,7 @@ class ReviewCriterionOut(BaseModel):
 
 class ReviewTemplateOut(BaseModel):
     format: str = "standard"
-    format_label: str = "Impact Point Standard"
+    format_label: str = "Principals and Directors Review"
     score_min: int
     score_max: int
     criteria: List[ReviewCriterionOut]
@@ -178,7 +164,6 @@ class ReviewProjectOut(BaseModel):
     reviews_total: int
     reviews_self_assessment: int
     reviews_in_review: int
-    reviews_joint_review: int
     reviews_completed: int
 
 
@@ -245,10 +230,8 @@ class AnalyticsReviewOut(BaseModel):
     duration_hours: Optional[float] = None
     evaluation_format: str = "standard"
     self: EvaluationScoresOut
-    # Cross-reviewer average (same formula used to pre-fill joint) — not any
-    # one reviewer's individual scores.
+    # The shared Manager Review — the official evaluation.
     manager: EvaluationScoresOut
-    joint: EvaluationScoresOut
 
 
 class ReviewAnalyticsOut(BaseModel):

@@ -4,26 +4,22 @@ from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
 
-# Lifecycle — three stages (status value "joint_review" is unchanged in the
-# DB/API; the UI displays it as "Final Submission"):
+# Lifecycle — three stages:
 #   self_assessment: the employee fills project details + a per-section self
 #                     comment (no scores — see self_section_comments). Has a
 #                     real deadline (self_due_date): once past it, the
 #                     employee can no longer edit/submit it — only an Admin
-#                     can un-stick it (by pushing the date out, or editing on
-#                     the employee's behalf; Admin/Manager always bypass the
-#                     deadline). Reviewers cannot start until this is submitted.
-#   in_review:       each assigned reviewer fills their OWN scores + notes,
-#                     independently, with no deadline of their own.
-#   joint_review:    employee + reviewers agree on the JOINT scores (official,
-#                     "Final Submission") — opens once EVERY assigned reviewer
-#                     has submitted their own evaluation.
+#                     can un-stick it. Reviewers cannot start until this is
+#                     submitted.
+#   in_review:       every assigned reviewer edits the same, shared Manager
+#                     Review (scores + notes) — the official, definitive
+#                     evaluation. Any of them (or Admin/Manager) completes it.
 #   completed
-# The self evaluation and every reviewer's row are blind to each other (and
-# reviewers blind to each other) until joint_review. The reviewee never sees
-# any individual reviewer's evaluation, even at joint_review — only the joint
-# ("Final Submission") result. See services/performance_reviews.py::visibility.
-REVIEW_STATUSES = ("self_assessment", "in_review", "joint_review", "completed")
+# There used to be a fourth "joint_review" ("Final Submission") stage, with
+# one independent evaluation per reviewer feeding it — removed in migration
+# 069, which folded every in-flight review into the shared Manager Review.
+# See services/performance_reviews.py::visibility for who sees what.
+REVIEW_STATUSES = ("self_assessment", "in_review", "completed")
 
 # Which evaluation format (template) a review uses — see
 # services/performance_reviews.py::EVALUATION_FORMATS / get_template().
@@ -55,9 +51,9 @@ class PerformanceReview(Base):
     period_end = Column(Date, nullable=True)
     duration_hours = Column(Numeric(10, 2), nullable=True)
 
-    # Which REVIEW_TEMPLATE-equivalent format this review uses — see
+    # Which evaluation format (template) this review uses — see
     # EVALUATION_FORMATS in services/performance_reviews.py. Set once at
-    # creation/assignment; only "standard" exists today.
+    # creation/assignment (an Admin can change it until scoring starts).
     evaluation_format = Column(String, nullable=False, default=DEFAULT_EVALUATION_FORMAT)
 
     # Project details (employee)
@@ -75,15 +71,21 @@ class PerformanceReview(Base):
     # {criterion_key: comment_text}
     self_section_comments = Column(JSON, nullable=False, default=dict)
 
-    # One {sub_criterion_key: {"score": int|None, "notes": str|None}} per
-    # evaluation. Only joint_scores feeds the official/annual averages. Each
-    # reviewer's own scores/notes live on PerformanceReviewReviewer instead of
-    # here — see that model for why (N independent reviewers, not one).
-    # self_scores is kept only for backward-compat with reviews scored before
-    # the self stage switched to comments-only; nothing writes to it anymore.
+    # {sub_criterion_key: {"score": int|None, "notes": str|None}}.
+    # joint_scores / joint_notes / manager_*_notes ARE the shared Manager
+    # Review — the official evaluation every assigned reviewer edits (the
+    # "joint" column names predate the removal of the Final Submission stage;
+    # kept to avoid a data migration of the official scores). self_scores is
+    # kept only for backward-compat with reviews scored before the self stage
+    # switched to comments-only; nothing writes to it anymore.
     self_scores = Column(JSON, nullable=False, default=dict)
     joint_scores = Column(JSON, nullable=False, default=dict)
     joint_notes = Column(Text, nullable=True)
+    # Manager Review notes on the self-assessment's three reflection fields
+    # ("Reviewer Notes" column of the workbook).
+    manager_strengths_notes = Column(Text, nullable=True)
+    manager_improvement_notes = Column(Text, nullable=True)
+    manager_development_notes = Column(Text, nullable=True)
 
     status = Column(String, nullable=False, default="self_assessment", index=True)
     self_submitted_at = Column(DateTime, nullable=True)
@@ -99,12 +101,11 @@ class PerformanceReview(Base):
 
 
 class PerformanceReviewReviewer(Base):
-    """One assigned reviewer's independent evaluation of a PerformanceReview —
-    their own scores, their own notes, their own submission timestamp. A
-    review can have any number of these; reviewers are blind to each other's
-    rows until the review reaches joint_review (every reviewer has submitted),
-    exactly like self vs. reviewer was already blind before this table
-    existed. See services/performance_reviews.py::visibility/transition_review."""
+    """One assigned reviewer of a PerformanceReview — the roster of who may
+    edit its shared Manager Review. The scores/notes/submitted_at columns are
+    legacy (from when each reviewer filled an independent evaluation, before
+    migration 069 folded them into the shared Manager Review) and nothing
+    writes to them anymore."""
 
     __tablename__ = "performance_review_reviewers"
     __table_args__ = (UniqueConstraint("review_id", "reviewer_id", name="uq_review_reviewer"),)

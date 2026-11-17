@@ -12,11 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 
-// Official numbers here are always the JOINT evaluation: a review's score is
-// its joint overall average, and an employee's annual measurement is the plain
-// mean of their completed reviews' joint overall averages in the year
-// (Backend/services/performance_reviews.py::analytics). Self/manager only
-// appear in the Items view, to compare how each side rated.
+// Official numbers here are always the Manager Review (the shared evaluation
+// every assigned reviewer edits): a review's score is its overall average, and
+// an employee's annual measurement is the plain mean of their completed
+// reviews' Manager Review overall averages in the year
+// (Backend/services/performance_reviews.py::analytics). Self only appears in
+// the Items view, to compare against the Manager Review.
 
 type View = 'employees' | 'projects' | 'items';
 
@@ -52,14 +53,14 @@ function groupRows(
     id,
     ...labelOf(rs[0]),
     count: rs.length,
-    criteria: template.criteria.map(c => mean(rs.map(r => r.joint.criteria[c.key]))),
-    total: mean(rs.map(r => r.joint.overall)),
+    criteria: template.criteria.map(c => mean(rs.map(r => r.manager.criteria[c.key]))),
+    total: mean(rs.map(r => r.manager.overall)),
     children: rs.map(r => ({
       id: r.id,
       reviewId: r.id,
       ...childOf(r),
-      criteria: template.criteria.map(c => r.joint.criteria[c.key] ?? null),
-      total: r.joint.overall,
+      criteria: template.criteria.map(c => r.manager.criteria[c.key] ?? null),
+      total: r.manager.overall,
     })),
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -145,7 +146,7 @@ export default function ReviewAnalytics() {
     return template.criteria.map(c => ({
       key: c.key,
       label: c.label,
-      values: { self: avgCriterion('self', c.key), manager: avgCriterion('manager', c.key), joint: avgCriterion('joint', c.key) },
+      values: { self: avgCriterion('self', c.key), manager: avgCriterion('manager', c.key) },
       items: [
         ...c.sub_criteria.map(s => ({ ...s, formatLabel: otherTemplates.length ? template.format_label : null })),
         ...otherTemplates.flatMap(t => (t.criteria.find(tc => tc.key === c.key)?.sub_criteria ?? [])
@@ -154,8 +155,8 @@ export default function ReviewAnalytics() {
         key: s.key,
         label: s.label,
         formatLabel: s.formatLabel,
-        values: { self: avg('self', s.key), manager: avg('manager', s.key), joint: avg('joint', s.key) },
-        rated: rs.filter(r => r.joint.items[s.key] != null).length,
+        values: { self: avg('self', s.key), manager: avg('manager', s.key) },
+        rated: rs.filter(r => r.manager.items[s.key] != null).length,
       })),
     }));
   }, [reviews, template, templates, term]);
@@ -262,7 +263,7 @@ export default function ReviewAnalytics() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Completed reviews" value={String(kpis.reviews)} icon={ClipboardCheck} />
         <KpiCard label="Employees evaluated" value={String(kpis.employees)} icon={Users} />
-        <KpiCard label="Average annual score" value={kpis.avg != null ? kpis.avg.toFixed(2) : '—'} hint="Mean of employees' Final Submission averages (1 best – 5 worst)" icon={Star} />
+        <KpiCard label="Average annual score" value={kpis.avg != null ? kpis.avg.toFixed(2) : '—'} hint="Mean of employees' Manager Review averages (1 best – 5 worst)" icon={Star} />
         <KpiCard
           label="Self vs manager gap"
           value={kpis.gap != null ? `${kpis.gap > 0 ? '+' : ''}${kpis.gap.toFixed(2)}` : '—'}
@@ -275,7 +276,7 @@ export default function ReviewAnalytics() {
         <Card className="card-elevated">
           <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
             <ClipboardCheck className="h-8 w-8" />
-            <p className="text-sm">No completed reviews{year ? ` in ${year}` : ''} yet — only completed reviews (Final Submission agreed) count here.</p>
+            <p className="text-sm">No completed reviews{year ? ` in ${year}` : ''} yet — only completed reviews count here.</p>
           </CardContent>
         </Card>
       ) : view === 'items' ? (
@@ -292,9 +293,9 @@ export default function ReviewAnalytics() {
                 <TableHeader className="sticky top-0 z-20 bg-background">
                   <TableRow>
                     <TableHead className={cn('table-header bg-background min-w-[320px]', stickyCell)}>Item</TableHead>
-                    {(['self', 'manager', 'joint'] as const).map(k => (
-                      <TableHead key={k} className={cn('table-header text-center min-w-[90px]', k === 'joint' && 'border-l-2 border-border')}>
-                        {EVALUATION_META[k].short}{k === 'joint' && ' (official)'}
+                    {(['self', 'manager'] as const).map(k => (
+                      <TableHead key={k} className={cn('table-header text-center min-w-[90px]', k === 'manager' && 'border-l-2 border-border')}>
+                        {EVALUATION_META[k].short}{k === 'manager' && ' (official)'}
                       </TableHead>
                     ))}
                     <TableHead className="table-header text-center min-w-[80px] border-l border-border">Gap</TableHead>
@@ -308,8 +309,8 @@ export default function ReviewAnalytics() {
                       <Fragment key={c.key}>
                         <TableRow className="bg-muted/40 hover:bg-muted/40">
                           <TableCell className={cn('font-semibold text-sm bg-muted', stickyCell)}>{c.label}</TableCell>
-                          {(['self', 'manager', 'joint'] as const).map(k => (
-                            <TableCell key={k} className={cn('text-center text-sm font-semibold tabular-nums', k === 'joint' && 'border-l-2 border-border')}>{fmt(c.values[k])}</TableCell>
+                          {(['self', 'manager'] as const).map(k => (
+                            <TableCell key={k} className={cn('text-center text-sm font-semibold tabular-nums', k === 'manager' && 'border-l-2 border-border')}>{fmt(c.values[k])}</TableCell>
                           ))}
                           <TableCell className="text-center text-sm font-semibold tabular-nums border-l border-border">{gap == null ? '' : `${gap > 0 ? '+' : ''}${gap.toFixed(2)}`}</TableCell>
                           <TableCell />
@@ -322,8 +323,8 @@ export default function ReviewAnalytics() {
                                 {item.label}
                                 {item.formatLabel && <span className="block mt-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{item.formatLabel}</span>}
                               </TableCell>
-                              {(['self', 'manager', 'joint'] as const).map(k => (
-                                <TableCell key={k} className={cn('text-center text-sm font-medium tabular-nums', k === 'joint' && 'border-l-2 border-border')} style={heat(item.values[k])}>
+                              {(['self', 'manager'] as const).map(k => (
+                                <TableCell key={k} className={cn('text-center text-sm font-medium tabular-nums', k === 'manager' && 'border-l-2 border-border')} style={heat(item.values[k])}>
                                   {fmt(item.values[k])}
                                 </TableCell>
                               ))}
@@ -351,8 +352,8 @@ export default function ReviewAnalytics() {
             <CardTitle className="text-base">{view === 'employees' ? 'Annual Score by Employee' : 'Average by Project'}</CardTitle>
             <p className="text-xs text-muted-foreground">
               {view === 'employees'
-                ? 'Final Submission averages per criterion · Annual score = mean of the employee\'s completed reviews in the year · Click an employee to see each project review'
-                : 'Final Submission averages per criterion across the project\'s reviewed employees · Click a project to see each employee'}
+                ? 'Manager Review averages per criterion · Annual score = mean of the employee\'s completed reviews in the year · Click an employee to see each project review'
+                : 'Manager Review averages per criterion across the project\'s reviewed employees · Click a project to see each employee'}
               {' · '}Darker cells mean a better score (scale 1 best – 5 worst)
             </p>
           </CardHeader>

@@ -2,11 +2,8 @@
 review workbook layout (columns Criteria / Sub-Criteria / Score / Reviewer
 Notes; blue = employee sections, green = reviewer sections).
 
-With N reviewers, the fixed "Manager" sheet is the cross-reviewer average
-(same figure used to seed the joint evaluation and shown in Analytics/Reports
-— see services/performance_reviews.py::manager_evaluation_scores), and when
-there's more than one reviewer each gets their own extra detail sheet with
-their individual scores/notes."""
+Two sheets: "Manager Review" — the shared, official evaluation every assigned
+reviewer edits — and "Self" (the employee's self-assessment)."""
 import math
 import re
 import zipfile
@@ -16,7 +13,7 @@ from typing import List
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
-from services.performance_reviews import get_template, manager_evaluation_scores, compute_averages
+from services.performance_reviews import get_template
 
 NAVY = "FF0B347D"         # employee section headers
 GREEN = "FF237F2E"        # reviewer section headers
@@ -103,62 +100,25 @@ def export_reviews_zip(datas: List[dict]) -> bytes:
     return buf.getvalue()
 
 
-def _manager_average_evaluation(data: dict) -> dict:
-    reviewers = data["evaluations"]["reviewers"]
-    pooled = manager_evaluation_scores([r["scores"] for r in reviewers])
-    criteria, overall = compute_averages(pooled, data.get("evaluation_format"))
-    return {"visible": True, "scores": pooled, "criteria_averages": criteria, "overall_average": overall}
-
-
-def _unique_sheet_name(used: set, base: str) -> str:
-    name = base[:31]
-    n = 2
-    while name in used:
-        name = f"{base[:28]} {n}"[:31]
-        n += 1
-    used.add(name)
-    return name
-
-
 def generate_performance_review_xlsx(data: dict) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
-    reviewers = data["evaluations"]["reviewers"]
-    multiple_reviewers = len(reviewers) > 1
-
-    used_names = {"Final Submission", "Manager", "Self"}
-    # Final Submission first — it's the official one — then the Manager average, then Self.
+    manager = data["evaluations"]["manager"]
     _write_sheet(
-        wb.create_sheet("Final Submission"), data, data["evaluations"]["joint"],
-        "Final Submission (official — counts toward the annual score)", reviewer=None,
+        wb.create_sheet("Manager Review"), data, manager,
+        "Manager Review (official — counts toward the annual score)", notes=manager,
     )
-    _write_sheet(
-        wb.create_sheet("Manager"), data, _manager_average_evaluation(data),
-        "Manager evaluation (average across reviewers)" if multiple_reviewers else "Manager evaluation",
-        reviewer=None,
-    )
-    _write_sheet(wb.create_sheet("Self"), data, data["evaluations"]["self"], "Self evaluation", reviewer=None, is_self=True)
-
-    # One extra detail sheet per reviewer when there's more than one — the
-    # fixed "Manager" sheet above already covers the single-reviewer case.
-    if multiple_reviewers:
-        for r in reviewers:
-            name = _unique_sheet_name(used_names, r.get("reviewer_name") or "Reviewer")
-            _write_sheet(
-                wb.create_sheet(name), data, r,
-                f"Reviewer evaluation — {r.get('reviewer_name') or ''}", reviewer=r,
-            )
-
+    _write_sheet(wb.create_sheet("Self"), data, data["evaluations"]["self"], "Self evaluation", notes=None, is_self=True)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
 
 
-def _write_sheet(ws, data: dict, evaluation: dict, caption: str, reviewer: dict | None, is_self: bool = False) -> None:
+def _write_sheet(ws, data: dict, evaluation: dict, caption: str, notes: dict | None, is_self: bool = False) -> None:
     for col, width in COL_WIDTHS.items():
         ws.column_dimensions[col].width = width
 
-    reviewers = data["evaluations"]["reviewers"]
+    reviewers = data.get("reviewers") or []
     reviewer_label = "Reviewers" if len(reviewers) != 1 else "Reviewer"
     reviewer_names = ", ".join(r.get("reviewer_name") or "" for r in reviewers if r.get("reviewer_name"))
 
@@ -181,7 +141,7 @@ def _write_sheet(ws, data: dict, evaluation: dict, caption: str, reviewer: dict 
 
     details = [
         ("Project Name", data.get("client_name") or data["project_name"]),
-        (reviewer_label, (reviewer.get("reviewer_name") if reviewer else reviewer_names) or ""),
+        (reviewer_label, reviewer_names),
         ("Project Description", data.get("project_description") or ""),
         ("Employee's Role / Key Activities", data.get("employee_role") or ""),
         ("Duration", _hours_label(data.get("duration_hours"))),
@@ -198,9 +158,8 @@ def _write_sheet(ws, data: dict, evaluation: dict, caption: str, reviewer: dict 
         _cell(ws, f"D{row}", s_value, BOLD10, PEACH if s_label == "Average Total" else CREAM, CENTER)
         _fit_row(ws, row)
 
-    # Self assessment (employee) + this sheet's reviewer's notes on each row
-    # (blank on Joint/Manager-average/Self, since those aren't any one
-    # reviewer's notes — see the per-reviewer detail sheets for those).
+    # Self assessment (employee) + the Manager Review's notes on each row
+    # (blank on the Self sheet).
     _cell(ws, "A13", "Self Assessment", H12_WHITE, NAVY, LEFT)
     _cell(ws, "B13", "Self-Assessment Notes", H12_WHITE, NAVY)
     _cell(ws, "C13", None, H12_WHITE, NAVY)
@@ -214,11 +173,11 @@ def _write_sheet(ws, data: dict, evaluation: dict, caption: str, reviewer: dict 
         row = 14 + i
         _cell(ws, f"A{row}", label, BOLD10, LIGHT_BLUE, LEFT)
         _cell(ws, f"B{row}", data.get(self_key) or None, align=WRAP)
-        _cell(ws, f"D{row}", (reviewer.get(reviewer_notes_key) if reviewer else None) or None, align=WRAP)
+        _cell(ws, f"D{row}", (notes.get(reviewer_notes_key) if notes else None) or None, align=WRAP)
         _fit_row(ws, row)
-    if evaluation is data["evaluations"]["joint"] and data.get("joint_notes"):
-        _cell(ws, "A17", "Final Submission Notes", BOLD10, LIGHT_GREEN, LEFT)
-        _cell(ws, "B17", data["joint_notes"], align=WRAP)
+    if notes and notes.get("notes"):
+        _cell(ws, "A17", "Manager Review Notes", BOLD10, LIGHT_GREEN, LEFT)
+        _cell(ws, "B17", notes["notes"], align=WRAP)
         _fit_row(ws, 17)
 
     if is_self:

@@ -9,7 +9,7 @@ import {
   useReviewLoggedHours, downloadReviewXlsx, REVIEW_STATUS_BADGE, EVALUATION_META, ReviewTransitionAction,
 } from '@/hooks/usePerformanceReviews';
 import { useEmployees } from '@/hooks/useEmployees';
-import { EvaluationKey, PerformanceReview, PerformanceReviewStatus, ReviewerEvaluation, ReviewScore, ReviewTemplate } from '@/types';
+import { EvaluationKey, PerformanceReview, PerformanceReviewStatus, ReviewScore, ReviewTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -27,31 +27,15 @@ import { cn } from '@/lib/utils';
 const EMPLOYEE_ACCENT = 'border-l-4 border-l-sky-500';
 const REVIEWER_ACCENT = 'border-l-4 border-l-emerald-600';
 
-const EVALUATIONS: EvaluationKey[] = ['self', 'manager', 'joint'];
-// The Average Score summary card has no "Self" column — self no longer
-// scores anything numerically, just one comment per section.
-const SUMMARY_EVALUATIONS: EvaluationKey[] = ['manager', 'joint'];
-// Only joint is a flat scored column on the review itself — "self" no longer
-// scores anything (one comment per section instead, see self_section_comments)
-// and "manager" is whichever reviewer is currently selected (see
-// ReviewerDraft/selectedReviewerId below), since a review can have any number
-// of independent reviewers.
-const SCORE_FIELD = { joint: 'joint_scores' } as const;
+const EVALUATIONS: EvaluationKey[] = ['self', 'manager'];
 
 const STAGES: { status: PerformanceReviewStatus; label: string }[] = [
   { status: 'self_assessment', label: 'Self evaluation' },
-  { status: 'in_review', label: 'Reviewer evaluation' },
-  { status: 'joint_review', label: 'Final Submission' },
+  { status: 'in_review', label: 'Manager Review' },
   { status: 'completed', label: 'Completed' },
 ];
 
 type Scores = Record<string, ReviewScore>;
-type ReviewerDraft = {
-  scores: Scores;
-  strengths_notes: string | null;
-  improvement_notes: string | null;
-  development_notes: string | null;
-};
 type Draft = {
   reviewer_ids: string[];
   review_date: string;
@@ -65,20 +49,26 @@ type Draft = {
   self_improvement: string | null;
   self_development: string | null;
   self_section_comments: Record<string, string>;
-  joint_notes: string | null;
-  joint_scores: Scores;
+  // The shared Manager Review.
+  manager_scores: Scores;
+  manager_notes: string | null;
+  manager_strengths_notes: string | null;
+  manager_improvement_notes: string | null;
+  manager_development_notes: string | null;
 };
-type TextField = 'project_description' | 'employee_role' | 'self_strengths' | 'self_improvement' | 'self_development' | 'joint_notes';
-type ReviewerTextField = 'strengths_notes' | 'improvement_notes' | 'development_notes';
+type TextField =
+  | 'project_description' | 'employee_role' | 'self_strengths' | 'self_improvement' | 'self_development'
+  | 'manager_notes' | 'manager_strengths_notes' | 'manager_improvement_notes' | 'manager_development_notes';
 
 // Mirrors Backend/services/performance_reviews.py field groups.
 const EMPLOYEE_FIELDS: (keyof Draft)[] = ['project_description', 'employee_role', 'self_strengths', 'self_improvement', 'self_development', 'self_section_comments'];
-const JOINT_FIELDS: (keyof Draft)[] = ['joint_scores', 'joint_notes'];
+const MANAGER_FIELDS: (keyof Draft)[] = ['manager_scores', 'manager_notes', 'manager_strengths_notes', 'manager_improvement_notes', 'manager_development_notes'];
 const ADMIN_ONLY_FIELDS: (keyof Draft)[] = ['reviewer_ids', 'review_date', 'self_due_date', 'period_start', 'period_end', 'duration_hours'];
 
 function toDraft(r: PerformanceReview): Draft {
+  const m = r.evaluations.manager;
   return {
-    reviewer_ids: r.evaluations.reviewers.map(rr => rr.reviewer_id),
+    reviewer_ids: r.reviewers.map(rr => rr.reviewer_id),
     review_date: r.review_date,
     self_due_date: r.self_due_date,
     period_start: r.period_start,
@@ -90,32 +80,29 @@ function toDraft(r: PerformanceReview): Draft {
     self_improvement: r.self_improvement,
     self_development: r.self_development,
     self_section_comments: r.evaluations.self.section_comments ?? {},
-    joint_notes: r.joint_notes,
-    joint_scores: r.evaluations.joint.scores,
+    manager_scores: m.scores,
+    manager_notes: m.notes,
+    manager_strengths_notes: m.strengths_notes,
+    manager_improvement_notes: m.improvement_notes,
+    manager_development_notes: m.development_notes,
   };
 }
 
-function toReviewerDraft(row: ReviewerEvaluation | undefined): ReviewerDraft | null {
-  if (!row) return null;
-  return {
-    scores: row.scores,
-    strengths_notes: row.strengths_notes,
-    improvement_notes: row.improvement_notes,
-    development_notes: row.development_notes,
-  };
+function normEntry(v: ReviewScore | undefined): string {
+  // A {score: null, notes: null} entry is an explicit N/A (see
+  // ScorePicker/naSelected) — distinct from an absent (untouched) item.
+  return v === undefined ? 'absent' : JSON.stringify([v.score ?? null, (v.notes ?? '').trim() || null]);
 }
 
-function normScores(scores: Scores): string {
-  // No "both null -> drop" filter here: a {score: null, notes: null} entry
-  // is an explicit N/A (see ScorePicker/naSelected above), and its mere
-  // presence as a key is the only signal that distinguishes it from an
-  // untouched sub-criterion. Filtering it out made marking something N/A
-  // (with no score and no notes) invisible to the dirty-check below, so it
-  // never made it into the save payload at all.
-  const clean = Object.entries(scores)
-    .map(([k, v]) => [k, v.score ?? null, (v.notes ?? '').trim() || null] as const)
-    .sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify(clean);
+/** Only the items that differ from the saved version — the backend merges
+ * them into the stored Manager Review, so several reviewers saving different
+ * items don't overwrite each other. */
+function changedScores(draft: Scores, base: Scores): Scores {
+  const out: Scores = {};
+  Object.entries(draft).forEach(([k, v]) => {
+    if (normEntry(v) !== normEntry(base[k])) out[k] = v;
+  });
+  return out;
 }
 
 function normText(v: unknown): unknown {
@@ -128,12 +115,6 @@ function normComments(comments: Record<string, string>): string {
     .filter(([, v]) => v !== '')
     .sort(([a], [b]) => a.localeCompare(b));
   return JSON.stringify(clean);
-}
-
-function isSame(key: keyof Draft, a: unknown, b: unknown): boolean {
-  if (key.endsWith('_scores')) return normScores(a as Scores) === normScores(b as Scores);
-  if (key === 'self_section_comments') return normComments(a as Record<string, string>) === normComments(b as Record<string, string>);
-  return normText(a) === normText(b);
 }
 
 function sameIdSet(a: string[], b: string[]): boolean {
@@ -261,52 +242,25 @@ export default function PerformanceReviewPage() {
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [tab, setTab] = useState<EvaluationKey | null>(null);
-  // Which reviewer's independent evaluation is shown in the "manager" tab —
-  // only matters when there's more than one; defaults to the viewer's own
-  // row if they're a reviewer, else the first one.
-  const [selectedReviewerId, setSelectedReviewerId] = useState<string | null>(null);
-  const [reviewerDraft, setReviewerDraft] = useState<ReviewerDraft | null>(null);
   useEffect(() => { if (review) setDraft(toDraft(review)); }, [review]);
-  useEffect(() => {
-    if (!review) return;
-    if (selectedReviewerId && review.evaluations.reviewers.some(r => r.reviewer_id === selectedReviewerId)) return;
-    const own = review.evaluations.reviewers.find(r => r.reviewer_id === employee?.id);
-    // Only default to someone ELSE's row once everyone's work is visible
-    // together (Final Submission) — before that, a non-reviewer (including
-    // Admin) has no row of their own to default to, so the Manager tab
-    // simply shows its locked state until then.
-    const together = review.evaluations.joint.visible;
-    setSelectedReviewerId(own?.reviewer_id ?? (together ? review.evaluations.reviewers[0]?.reviewer_id ?? null : null));
-  }, [review, employee?.id, selectedReviewerId]);
-  useEffect(() => {
-    if (!review) return;
-    setReviewerDraft(toReviewerDraft(review.evaluations.reviewers.find(r => r.reviewer_id === selectedReviewerId)));
-  }, [review, selectedReviewerId]);
 
   const manage = hasEdit('reviews');
   const isReviewee = !!review && review.employee_id === employee?.id;
-  const ownReviewerRow = review?.evaluations.reviewers.find(r => r.reviewer_id === employee?.id);
-  const isReviewer = !!ownReviewerRow;
-  const selectedRow = review?.evaluations.reviewers.find(r => r.reviewer_id === selectedReviewerId);
+  const isReviewer = !!review && review.reviewers.some(r => r.reviewer_id === employee?.id);
   const status = review?.status;
   const canEdit: Record<EvaluationKey, boolean> = {
     self: !!review && (manage || (isReviewee && status === 'self_assessment' && !review.self_locked)),
-    // A reviewer can't start until the self evaluation has been submitted
-    // (status moves to in_review) — no more "in parallel" with self.
-    // Always the caller's OWN row, even for Admin/Manager — reviewer content
-    // is blind to everyone (including Admin) until Final Submission, so
-    // there's no "edit anyone's row" bypass here anymore.
-    manager: !!review && !!selectedRow && selectedReviewerId === employee?.id && !selectedRow.submitted && status === 'in_review',
-    joint: !!review && (manage || (isReviewer && status === 'joint_review')),
+    // Every assigned reviewer edits the same Manager Review, from the moment
+    // the self-assessment is submitted until the review is completed.
+    manager: isReviewer && status === 'in_review',
   };
 
   // Default tab: whichever evaluation the caller is expected to work on now.
   useEffect(() => {
     if (!review || tab) return;
-    if (review.status === 'joint_review' || review.status === 'completed') setTab('joint');
-    else if (isReviewer || (manage && review.status === 'in_review')) setTab('manager');
+    if (review.status === 'completed' || (isReviewer && review.status === 'in_review')) setTab('manager');
     else setTab('self');
-  }, [review, tab, isReviewer, manage]);
+  }, [review, tab, isReviewer]);
 
   const { data: logged, refetch: refetchHours, isFetching: hoursFetching } = useReviewLoggedHours({
     projectId: review?.project_id, employeeId: review?.employee_id,
@@ -317,49 +271,48 @@ export default function PerformanceReviewPage() {
   const allowed = useMemo(() => {
     const s = new Set<string>();
     if (canEdit.self) EMPLOYEE_FIELDS.forEach(f => s.add(f));
-    if (canEdit.manager) s.add('reviewer_evaluation');
-    if (canEdit.joint) JOINT_FIELDS.forEach(f => s.add(f));
+    if (canEdit.manager) MANAGER_FIELDS.forEach(f => s.add(f));
     if (manage) ADMIN_ONLY_FIELDS.forEach(f => s.add(f));
     return s;
-  }, [canEdit.self, canEdit.manager, canEdit.joint, manage]);
+  }, [canEdit.self, canEdit.manager, manage]);
 
   const patch = useMemo(() => {
     if (!review || !draft) return {};
     const base = toDraft(review);
     const out: Record<string, unknown> = {};
     (Object.keys(draft) as (keyof Draft)[]).forEach(k => {
+      if (!allowed.has(k)) return;
       if (k === 'reviewer_ids') {
-        if (allowed.has('reviewer_ids') && !sameIdSet(draft.reviewer_ids, base.reviewer_ids)) out.reviewer_ids = draft.reviewer_ids;
+        if (!sameIdSet(draft.reviewer_ids, base.reviewer_ids)) out.reviewer_ids = draft.reviewer_ids;
         return;
       }
-      if (allowed.has(k) && !isSame(k, draft[k], base[k])) {
+      if (k === 'manager_scores') {
+        const changed = changedScores(draft.manager_scores, base.manager_scores);
+        if (Object.keys(changed).length > 0) out.manager_scores = changed;
+        return;
+      }
+      if (k === 'self_section_comments') {
+        if (normComments(draft.self_section_comments) !== normComments(base.self_section_comments)) out[k] = draft[k];
+        return;
+      }
+      if (normText(draft[k]) !== normText(base[k])) {
         const v = draft[k];
         out[k] = typeof v === 'string' && v.trim() === '' ? null : v;
       }
     });
-    if (allowed.has('reviewer_evaluation') && reviewerDraft && selectedRow) {
-      const rp: Record<string, unknown> = {};
-      if (normScores(reviewerDraft.scores) !== normScores(selectedRow.scores)) rp.scores = reviewerDraft.scores;
-      (['strengths_notes', 'improvement_notes', 'development_notes'] as ReviewerTextField[]).forEach(f => {
-        if (normText(reviewerDraft[f]) !== normText(selectedRow[f])) rp[f] = normText(reviewerDraft[f]);
-      });
-      if (Object.keys(rp).length > 0) out.reviewer_evaluation = rp;
-    }
     return out;
-  }, [review, draft, reviewerDraft, selectedRow, allowed]);
+  }, [review, draft, allowed]);
   const isDirty = Object.keys(patch).length > 0;
 
   const averages = useMemo(() => {
     if (!template || !draft || !review) return null;
     return {
       // Self no longer scores anything new, but an older review scored under
-      // the previous format may still carry some — shown read-only, straight
-      // from the server (there's nothing in Draft to edit here anymore).
+      // the previous format may still carry some — shown read-only.
       self: computeAverages(template, review.evaluations.self.scores),
-      manager: computeAverages(template, reviewerDraft?.scores ?? {}),
-      joint: computeAverages(template, draft.joint_scores),
+      manager: computeAverages(template, draft.manager_scores),
     };
-  }, [template, draft, review, reviewerDraft]);
+  }, [template, draft, review]);
 
   const reviewerOptions = useMemo(
     () => employees.filter(e => e.is_active && e.id !== review?.employee_id && !draft?.reviewer_ids.includes(e.id))
@@ -380,33 +333,19 @@ export default function PerformanceReviewPage() {
     );
   }
 
-  const visible = (k: EvaluationKey) => (k === 'manager' ? !!selectedRow?.visible : review.evaluations[k].visible);
+  const visible = (k: EvaluationKey) => review.evaluations[k].visible;
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(d => (d ? { ...d, [key]: value } : d));
-  // Only 'manager' (a reviewer's own row) and 'joint' score anything now —
-  // self is comments-only (see setSelfComment below).
-  const setScore = (evaluation: 'manager' | 'joint', subKey: string, change: Partial<ReviewScore>) => {
-    if (evaluation === 'manager') {
-      setReviewerDraft(d => {
-        if (!d) return d;
-        const current = d.scores[subKey] ?? { score: null, notes: null };
-        return { ...d, scores: { ...d.scores, [subKey]: { ...current, ...change } } };
-      });
-      return;
-    }
-    const field = SCORE_FIELD[evaluation];
+  const setScore = (subKey: string, change: Partial<ReviewScore>) =>
     setDraft(d => {
       if (!d) return d;
-      const current = d[field][subKey] ?? { score: null, notes: null };
-      return { ...d, [field]: { ...d[field], [subKey]: { ...current, ...change } } };
+      const current = d.manager_scores[subKey] ?? { score: null, notes: null };
+      return { ...d, manager_scores: { ...d.manager_scores, [subKey]: { ...current, ...change } } };
     });
-  };
-
   const setSelfComment = (criterionKey: string, value: string) =>
     setDraft(d => (d ? { ...d, self_section_comments: { ...d.self_section_comments, [criterionKey]: value } } : d));
 
   function discard() {
     setDraft(toDraft(review!));
-    setReviewerDraft(toReviewerDraft(review!.evaluations.reviewers.find(r => r.reviewer_id === selectedReviewerId)));
   }
 
   async function save(silent = false): Promise<boolean> {
@@ -421,15 +360,13 @@ export default function PerformanceReviewPage() {
     }
   }
 
-  async function runTransition(action: ReviewTransitionAction, confirmText: string, successText: string, reviewerId?: string) {
+  async function runTransition(action: ReviewTransitionAction, confirmText: string, successText: string) {
     if (!confirm(confirmText)) return;
     if (!(await save(true))) return;
     try {
-      await transition.mutateAsync({ id: review!.id, action, reviewer_id: reviewerId });
+      await transition.mutateAsync({ id: review!.id, action });
       toast.success(successText);
-      if (action === 'submit_manager' || action === 'complete' || action === 'reopen_joint') setTab('joint');
-      else if (action === 'reopen_self') setTab('self');
-      else if (action === 'reopen_reviewer') { setTab('manager'); if (reviewerId) setSelectedReviewerId(reviewerId); }
+      setTab(action === 'reopen_self' ? 'self' : 'manager');
     } catch (e) {
       toast.error(e instanceof Error ? e.message.replace(/^API error \d+: /, '') : 'Action failed.');
     }
@@ -453,26 +390,14 @@ export default function PerformanceReviewPage() {
   const busy = updateReview.isPending || transition.isPending;
   // Each submit/complete action also requires being ON that evaluation's own
   // tab — these buttons live in the page header, outside the tabbed area, so
-  // without this a reviewer browsing the Self tab (e.g. to read it once it's
-  // visible) would still see "Submit My Evaluation" sitting there armed and
-  // could click it without meaning to submit the Manager evaluation at all.
+  // a reviewer reading the Self tab can't complete the review by accident.
   const canSubmitSelf = tab === 'self' && review.status === 'self_assessment' && (isReviewee || manage);
-  // Submitting is always the caller's OWN row — Admin/Manager can edit any
-  // reviewer's scores, but submitting on someone else's behalf doesn't make
-  // sense (see services/performance_reviews.py::transition_review), so this
-  // only shows for an actual assigned reviewer who hasn't submitted yet.
-  const canSubmitManager = tab === 'manager' && review.status === 'in_review' && !!ownReviewerRow && !ownReviewerRow.submitted;
-  const canComplete = tab === 'joint' && review.status === 'joint_review' && (isReviewer || manage);
-  // Reopening is always scoped to one specific part, never the whole
-  // process at once: Self, one reviewer's own evaluation, or Final
-  // Submission, each independently of the others (see transition_review).
-  const submittedReviewers = review.evaluations.reviewers.filter(r => r.submitted);
+  const canComplete = tab === 'manager' && review.status === 'in_review' && (isReviewer || manage);
   const canReopenSelf = manage && review.status !== 'self_assessment';
-  const canReopenJoint = manage && review.status === 'completed';
-  const canReopenAnything = canReopenSelf || canReopenJoint || (manage && submittedReviewers.length > 0);
+  const canReopenManager = manage && review.status === 'completed';
   const canExport = manage || review.status === 'completed';
   const canEditEmployeeText = canEdit.self;
-  const reviewers = review.evaluations.reviewers;
+  const reviewers = review.reviewers;
 
   const textArea = (field: TextField, editable: boolean, placeholder: string, rows = 3) =>
     editable ? (
@@ -481,19 +406,10 @@ export default function PerformanceReviewPage() {
       <ReadOnlyText value={draft[field]} />
     );
 
-  const reviewerTextArea = (field: ReviewerTextField, editable: boolean, placeholder: string, rows = 3) =>
-    editable ? (
-      <Textarea value={reviewerDraft?.[field] ?? ''} onChange={e => setReviewerDraft(d => d ? { ...d, [field]: e.target.value } : d)} placeholder={placeholder} rows={rows} className="resize-y" />
-    ) : (
-      <ReadOnlyText value={reviewerDraft?.[field] ?? null} />
-    );
-
   const lockedReason = (k: EvaluationKey) =>
-    k === 'joint'
-      ? 'Final Submission opens once the self evaluation and every reviewer evaluation are submitted.'
-      : k === 'self'
+    k === 'self'
       ? 'The self evaluation becomes visible to the assigned reviewer(s) and Admin/Manager once the employee submits it.'
-      : 'This reviewer’s evaluation is visible to others at Final Submission — evaluations are blind until then.';
+      : 'The Manager Review is written by the assigned reviewer(s) and becomes visible once the review is completed.';
 
   return (
     <div className="space-y-6 pb-24">
@@ -507,9 +423,7 @@ export default function PerformanceReviewPage() {
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-foreground">{review.employee_name}</h1>
             <Badge variant="outline" className={`border-0 ${badge.className}`}>{badge.label}</Badge>
-            {review.evaluation_format !== 'standard' && template && (
-              <Badge variant="outline">{template.format_label}</Badge>
-            )}
+            <Badge variant="outline">{template.format_label}</Badge>
           </div>
           <p className="text-muted-foreground">
             {review.project_name}{review.client_name ? ` · ${review.client_name}` : ''} · reviewed by{' '}
@@ -525,7 +439,7 @@ export default function PerformanceReviewPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {canReopenAnything && (
+          {(canReopenSelf || canReopenManager) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="gap-2" disabled={busy}>
@@ -536,29 +450,19 @@ export default function PerformanceReviewPage() {
                 {canReopenSelf && (
                   <DropdownMenuItem onClick={() => runTransition(
                     'reopen_self',
-                    'Reopen the self evaluation? The employee will be able to edit and resubmit it — every reviewer\'s own evaluation is left exactly as it is.',
+                    'Reopen the self evaluation? The employee will be able to edit and resubmit it — the Manager Review is left exactly as it is.',
                     'Self evaluation reopened.',
                   )}>
                     Reopen Self Evaluation
                   </DropdownMenuItem>
                 )}
-                {submittedReviewers.map(r => (
-                  <DropdownMenuItem key={r.reviewer_id} onClick={() => runTransition(
-                    'reopen_reviewer',
-                    `Reopen ${r.reviewer_name}'s evaluation? They'll be able to edit and resubmit it — nothing else on this review is affected.`,
-                    `${r.reviewer_name}'s evaluation reopened.`,
-                    r.reviewer_id,
-                  )}>
-                    Reopen {r.reviewer_name}'s Evaluation
-                  </DropdownMenuItem>
-                ))}
-                {canReopenJoint && (
+                {canReopenManager && (
                   <DropdownMenuItem onClick={() => runTransition(
-                    'reopen_joint',
-                    'Reopen Final Submission? This review will no longer count toward the annual measurement until it\'s completed again.',
-                    'Final Submission reopened.',
+                    'reopen_manager',
+                    'Reopen the Manager Review? Reviewers will be able to edit it again, and this review won\'t count toward the annual measurement until it\'s completed again.',
+                    'Manager Review reopened.',
                   )}>
-                    Reopen Final Submission
+                    Reopen Manager Review
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -580,26 +484,18 @@ export default function PerformanceReviewPage() {
               <Send className="h-4 w-4" /> Submit Self Evaluation
             </Button>
           )}
-          {canSubmitManager && (
-            <Button className="gap-2" disabled={busy || averages.manager.overall == null}
-              title={averages.manager.overall == null ? 'Rate at least one item before submitting.' : undefined}
-              onClick={() => runTransition('submit_manager', "Submit your evaluation? You won't be able to edit it afterwards. Final Submission opens once every assigned reviewer has submitted.", 'Your evaluation was submitted.')}>
-              <Send className="h-4 w-4" /> Submit My Evaluation
-            </Button>
-          )}
           {canComplete && (
-            <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700" disabled={busy}
-              onClick={() => runTransition('complete', 'Complete this review? The Final Submission becomes the official score for the annual measurement.', 'Review completed.')}>
+            <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700" disabled={busy || averages.manager.overall == null}
+              title={averages.manager.overall == null ? 'Rate at least one item before completing.' : undefined}
+              onClick={() => runTransition('complete', 'Complete this review? The Manager Review becomes final and counts toward the annual measurement. No reviewer can edit it afterwards.', 'Review completed.')}>
               <CheckCircle2 className="h-4 w-4" /> Complete Review
             </Button>
           )}
         </div>
       </div>
 
-      {/* Self / Manager / Joint — the primary navigation for this whole page,
-          not a control tucked inside a card: everything below (project
-          details, average score, notes, scoring) follows whichever one is
-          selected here. */}
+      {/* Self / Manager Review — the primary navigation for this whole page:
+          everything below follows whichever one is selected here. */}
       <Tabs value={tab} onValueChange={v => setTab(v as EvaluationKey)}>
         <TabsList className="w-full h-auto justify-start gap-6 rounded-none border-b bg-transparent p-0">
           {EVALUATIONS.map(k => (
@@ -613,7 +509,7 @@ export default function PerformanceReviewPage() {
               )}
             >
               <span className={cn('h-2.5 w-2.5 rounded-full', EVALUATION_META[k].dot)} />
-              {k === 'manager' && reviewers.length > 1 ? 'Reviewers' : EVALUATION_META[k].label}
+              {EVALUATION_META[k].label}
               {!visible(k) && <Lock className="h-3.5 w-3.5" />}
               {visible(k) && averages[k].overall != null && (
                 <span className="tabular-nums text-muted-foreground font-normal">· {fmtAvg(averages[k].overall)}</span>
@@ -622,22 +518,20 @@ export default function PerformanceReviewPage() {
           ))}
         </TabsList>
 
-      {/* Prominent "whose evaluation is this" banner — moved up from inside
-          the Evaluations card (where it was easy to miss) so it's the first
-          thing seen after switching tabs, to avoid confusing one person's
-          evaluation for another's. */}
+      {/* Prominent "whose evaluation is this" banner. */}
       <div className={cn(
         'flex flex-wrap items-center gap-3 rounded-lg border-2 px-4 py-3',
         tab === 'self' && 'border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40',
-        tab === 'manager' && 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40',
-        tab === 'joint' && 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40',
+        tab === 'manager' && 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40',
       )}>
         <span className={cn('h-3 w-3 shrink-0 rounded-full', EVALUATION_META[tab].dot)} />
         <div className="min-w-0">
-          <p className={cn('text-base font-bold', EVALUATION_META[tab].text)}>
-            {tab === 'manager' && selectedRow ? `${selectedRow.reviewer_name}'s evaluation` : EVALUATION_META[tab].label}
+          <p className={cn('text-base font-bold', EVALUATION_META[tab].text)}>{EVALUATION_META[tab].label}</p>
+          <p className="text-xs text-muted-foreground">
+            {tab === 'manager' && reviewers.length > 0
+              ? `Shared by ${reviewers.map(r => r.reviewer_name).filter(Boolean).join(', ')} — official`
+              : EVALUATION_META[tab].who}
           </p>
-          <p className="text-xs text-muted-foreground">{EVALUATION_META[tab].who}</p>
         </div>
         {!visible(tab) && (
           <span className="ml-auto flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -724,43 +618,30 @@ export default function PerformanceReviewPage() {
         <Card className="card-elevated h-fit">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Average Score</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Only the Final Submission counts toward the annual measurement.
-              {reviewers.length > 1 && selectedRow && ` "Manager" below shows ${selectedRow.reviewer_name}'s evaluation.`}
-            </p>
+            <p className="text-xs text-muted-foreground">The Manager Review is the official score for the annual measurement.</p>
           </CardHeader>
           <CardContent className="p-0 pb-2">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-xs text-muted-foreground">
                   <th className="text-left font-medium px-4 py-2">Criteria</th>
-                  {/* No "Self" column — self no longer scores anything, just
-                      one comment per section (see the Self Evaluation tab). */}
-                  {SUMMARY_EVALUATIONS.map(k => (
-                    <th key={k} className={cn('font-medium px-2 py-2 text-center', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300')}>
-                      {EVALUATION_META[k].short}
-                    </th>
-                  ))}
+                  <th className="font-medium px-2 py-2 text-center bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300">Manager Review</th>
                 </tr>
               </thead>
               <tbody>
                 {template.criteria.map((c, i) => (
                   <tr key={c.key} className="border-b last:border-b-0">
                     <td className="px-4 py-2">{c.short_label}</td>
-                    {SUMMARY_EVALUATIONS.map(k => (
-                      <td key={k} className={cn('px-2 py-2 text-center tabular-nums', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 font-semibold')}>
-                        {visible(k) ? fmtAvg(averages[k].criteria[i].average) : <Lock className="h-3.5 w-3.5 mx-auto text-muted-foreground" />}
-                      </td>
-                    ))}
+                    <td className="px-2 py-2 text-center tabular-nums bg-emerald-50 dark:bg-emerald-950/40 font-semibold">
+                      {visible('manager') ? fmtAvg(averages.manager.criteria[i].average) : <Lock className="h-3.5 w-3.5 mx-auto text-muted-foreground" />}
+                    </td>
                   </tr>
                 ))}
                 <tr className="border-t-2">
                   <td className="px-4 py-2.5 font-semibold">Average Total</td>
-                  {SUMMARY_EVALUATIONS.map(k => (
-                    <td key={k} className={cn('px-2 py-2.5 text-center tabular-nums font-semibold', k === 'joint' && 'bg-emerald-50 dark:bg-emerald-950/40 text-lg text-emerald-700 dark:text-emerald-400 font-bold')}>
-                      {visible(k) ? fmtAvg(averages[k].overall) : <Lock className="h-3.5 w-3.5 mx-auto text-muted-foreground" />}
-                    </td>
-                  ))}
+                  <td className="px-2 py-2.5 text-center tabular-nums bg-emerald-50 dark:bg-emerald-950/40 text-lg text-emerald-700 dark:text-emerald-400 font-bold">
+                    {visible('manager') ? fmtAvg(averages.manager.overall) : <Lock className="h-3.5 w-3.5 mx-auto text-muted-foreground" />}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -771,15 +652,15 @@ export default function PerformanceReviewPage() {
         </Card>
       </div>
 
-      {/* Self assessment (text) */}
+      {/* Self assessment (text) + the Manager Review's notes on it */}
       <Card className={cn('card-elevated', EMPLOYEE_ACCENT)}>
         <CardHeader className="pb-2"><CardTitle className="text-base">Self Assessment</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {([
-            ['Strengths', 'self_strengths', 'strengths_notes'],
-            ['Areas for Improvement', 'self_improvement', 'improvement_notes'],
-            ['Personal Development Needs', 'self_development', 'development_notes'],
-          ] as const).map(([label, selfKey, reviewerKey]) => (
+            ['Strengths', 'self_strengths', 'manager_strengths_notes'],
+            ['Areas for Improvement', 'self_improvement', 'manager_improvement_notes'],
+            ['Personal Development Needs', 'self_development', 'manager_development_notes'],
+          ] as const).map(([label, selfKey, managerKey]) => (
             <div key={selfKey} className="grid gap-3 lg:grid-cols-[200px_1fr_1fr] border-b pb-4 last:border-b-0 last:pb-0">
               <div className="text-sm font-semibold pt-2">{label}</div>
               <div className="space-y-1">
@@ -789,26 +670,24 @@ export default function PerformanceReviewPage() {
                   : <LockedNote>Visible once the employee submits their self evaluation</LockedNote>}
               </div>
               <div className="space-y-1">
-                <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                  {selectedRow ? `${selectedRow.reviewer_name}'s notes` : 'Reviewer notes'}
-                </div>
+                <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Reviewer notes</div>
                 {visible('manager')
-                  ? reviewerTextArea(reviewerKey, canEdit.manager, 'Reviewer comments')
-                  : <LockedNote>Visible at Final Submission</LockedNote>}
+                  ? textArea(managerKey, canEdit.manager, 'Reviewer comments')
+                  : <LockedNote>Visible once the review is completed</LockedNote>}
               </div>
             </div>
           ))}
         </CardContent>
       </Card>
 
-      {/* The three evaluations */}
+      {/* The evaluations */}
       <Card className={cn('card-elevated', REVIEWER_ACCENT)}>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Evaluations</CardTitle>
           <p className="text-xs text-muted-foreground">
             {tab === 'self'
               ? "Write a comment for each section below based on the items listed — you're not asked to assign yourself a score."
-              : `Rate each item from ${template.score_min} (best) to ${template.score_max} (worst); leave N/A when it doesn't apply to this project.`}
+              : `Rate each item from ${template.score_min} (best) to ${template.score_max} (worst); leave N/A when it doesn't apply to this project. Every assigned reviewer edits this same evaluation.`}
           </p>
         </CardHeader>
         <CardContent>
@@ -818,35 +697,15 @@ export default function PerformanceReviewPage() {
               return (
                 <TabsContent key={k} value={k} className="mt-4 space-y-5">
                   {!editable && visible(k) && (
-                    <p className="text-sm text-muted-foreground">Read-only at this stage.</p>
+                    <p className="text-sm text-muted-foreground">
+                      {k === 'manager' && review.status === 'self_assessment'
+                        ? 'Read-only until the employee submits their self evaluation.'
+                        : 'Read-only at this stage.'}
+                    </p>
                   )}
-                  {k === 'manager' && reviewers.length > 1 && visible('joint') && (
-                    // Once Final Submission is reached everyone's row is
-                    // visible together, to compare — before that each person
-                    // only ever has their own row to look at, so there's
-                    // nothing useful to switch between yet.
-                    <div className="flex flex-wrap gap-1.5">
-                      {reviewers.map(rr => (
-                        <button
-                          key={rr.reviewer_id}
-                          type="button"
-                          onClick={() => setSelectedReviewerId(rr.reviewer_id)}
-                          className={cn(
-                            'px-2.5 py-1 rounded-full text-xs font-medium border transition-colors inline-flex items-center gap-1',
-                            rr.reviewer_id === selectedReviewerId
-                              ? `${meta.ring} text-white`
-                              : 'bg-background text-muted-foreground hover:bg-muted',
-                          )}
-                        >
-                          {rr.reviewer_name}
-                          {rr.submitted && <Check className="h-3 w-3" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {k === 'joint' && canComplete && (
+                  {k === 'manager' && canComplete && (
                     <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-md px-3 py-2">
-                      Save keeps your scores, but this review only counts toward Analytics once you click
+                      Save keeps your scores, but this review only counts toward Analytics once someone clicks
                       <span className="font-semibold"> Complete Review</span> above.
                     </p>
                   )}
@@ -859,9 +718,9 @@ export default function PerformanceReviewPage() {
                       <Lock className="h-5 w-5" /> {lockedReason(k)}
                     </div>
                   ) : k === 'self' ? (
-                    // No scoring for self anymore — the sub-criteria are a
-                    // read-only reading guide, and the employee leaves one
-                    // free-text comment at the end of each section.
+                    // No scoring for self — the sub-criteria are a read-only
+                    // reading guide, and the employee leaves one free-text
+                    // comment at the end of each section.
                     <>
                       {template.criteria.map(criterion => (
                         <div key={criterion.key} className="rounded-lg border overflow-hidden">
@@ -888,45 +747,31 @@ export default function PerformanceReviewPage() {
                     </>
                   ) : (
                     <>
-                      {k === 'joint' && (
-                        <div className="space-y-1.5">
-                          <div className="text-sm font-semibold">Final Submission notes</div>
-                          {textArea('joint_notes', editable, 'What was agreed in the joint session', 2)}
-                        </div>
-                      )}
+                      <div className="space-y-1.5">
+                        <div className="text-sm font-semibold">Manager Review notes</div>
+                        {textArea('manager_notes', editable, 'Overall comments on this review', 2)}
+                      </div>
                       {template.criteria.map((criterion, ci) => (
                         <div key={criterion.key} className="rounded-lg border overflow-hidden">
                           <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 px-4 py-2.5">
                             <span className="font-semibold text-sm">{criterion.label}</span>
-                            <span className="text-sm">Average: <span className="font-bold tabular-nums">{fmtAvg(averages[k].criteria[ci].average)}</span></span>
+                            <span className="text-sm">Average: <span className="font-bold tabular-nums">{fmtAvg(averages.manager.criteria[ci].average)}</span></span>
                           </div>
                           <div className="divide-y">
                             {criterion.sub_criteria.map(sub => {
-                              const scoresMap = k === 'manager' ? (reviewerDraft?.scores ?? {}) : draft[SCORE_FIELD[k]];
-                              const entry = scoresMap[sub.key] ?? { score: null, notes: null };
-                              // Present in the draft map at all (loaded from the server, or
-                              // touched this session) means the user has actually looked at
-                              // it — vs. simply never having been rated yet.
-                              const touched = sub.key in scoresMap;
+                              const entry = draft.manager_scores[sub.key] ?? { score: null, notes: null };
+                              // Present in the map at all (loaded from the server, or
+                              // touched this session) means someone has actually looked
+                              // at it — vs. simply never having been rated yet.
+                              const touched = sub.key in draft.manager_scores;
                               return (
                                 <div key={sub.key} className="grid gap-3 px-4 py-3 lg:grid-cols-[1fr_250px_1fr]">
-                                  <div className="space-y-1.5">
-                                    <p className="text-sm whitespace-pre-line">{sub.label}</p>
-                                    {k === 'joint' && (
-                                      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                                        {reviewers.map(rr => (
-                                          <span key={rr.reviewer_id}>
-                                            {rr.reviewer_name}: <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{rr.scores[sub.key]?.score ?? '—'}</span>
-                                          </span>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <ScorePicker value={entry.score} onChange={v => setScore(k, sub.key, { score: v })}
+                                  <p className="text-sm whitespace-pre-line">{sub.label}</p>
+                                  <ScorePicker value={entry.score} onChange={v => setScore(sub.key, { score: v })}
                                     min={template.score_min} max={template.score_max} disabled={!editable} activeClass={meta.ring}
                                     naSelected={touched && entry.score == null} />
                                   {editable ? (
-                                    <Textarea value={entry.notes ?? ''} onChange={e => setScore(k, sub.key, { notes: e.target.value })}
+                                    <Textarea value={entry.notes ?? ''} onChange={e => setScore(sub.key, { notes: e.target.value })}
                                       placeholder="Notes (optional)" rows={2} className="resize-y" />
                                   ) : <ReadOnlyText value={entry.notes} placeholder="" />}
                                 </div>
