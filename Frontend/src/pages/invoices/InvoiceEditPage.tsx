@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Clock, FileDown, FileSpreadsheet, RefreshCw, ChevronDown, ChevronUp, RotateCcw, Pencil, Check, ChevronsUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums, useRecalculateInvoice, useAddEmployeeToInvoice } from '@/hooks/useInvoices';
+import { useInvoiceEditData, usePatchInvoice, useUpdateManagedServicesMinimums, useRecalculateInvoice, useAddEmployeeToInvoice, useRemoveInvoiceLine } from '@/hooks/useInvoices';
 import { useAuth } from '@/contexts/AuthContext';
 import { InvoiceEditLine, InvoiceEditData, InvoiceExpense, InvoiceLinePatch, InvoiceExpensePatch, OnHoldEntryPatch, TimeDetailWeekPatch, InvoiceTimeDetailRow, MinHoursBasis, MIN_HOURS_BASIS_LABELS, FIXED_FEE_PERIOD_LABELS, Employee } from '@/types';
 import { api } from '@/lib/api';
@@ -462,6 +462,7 @@ export default function InvoiceEditPage() {
   const updateMinimums = useUpdateManagedServicesMinimums();
   const recalculateInvoice = useRecalculateInvoice();
   const addEmployeeToInvoice = useAddEmployeeToInvoice();
+  const removeInvoiceLine = useRemoveInvoiceLine();
   const [billToContact, setBillToContact] = useState('');
   const [billToTitle, setBillToTitle] = useState('');
   const [billToCompany, setBillToCompany] = useState('');
@@ -620,6 +621,19 @@ export default function InvoiceEditPage() {
     setTimeDetailRows(prev => {
       const next = prev.map(r => (r.line_id === lineId && r.week_start === weekStart) ? { ...r, ...updates } : r);
       syncLineFromWeeks(lineId, next.filter(r => r.line_id === lineId));
+      return next;
+    });
+  }, [syncLineFromWeeks]);
+
+  // Removes one week's hours entirely (vs. zeroing it, which would still
+  // print a "0.00" row on the Time Detail attachment) — persists on the next
+  // Save, same as any other Time Detail edit (see handleSave's
+  // timeDetailWeekPatches: it replaces a line's whole week set wholesale).
+  const removeTimeDetailRow = useCallback((row: LocalTimeDetailRow) => {
+    setIsDirty(true);
+    setTimeDetailRows(prev => {
+      const next = prev.filter(r => !(r.line_id === row.line_id && r.week_start === row.week_start));
+      syncLineFromWeeks(row.line_id, next.filter(r => r.line_id === row.line_id));
       return next;
     });
   }, [syncLineFromWeeks]);
@@ -871,6 +885,19 @@ export default function InvoiceEditPage() {
           ? "No unbilled hours found for them on this project in this invoice's period."
           : 'Failed to add employee.',
       );
+    }
+  };
+
+  const handleRemoveLine = async (line: LocalLine) => {
+    if (!invoiceId) return;
+    if (!confirm(`Remove ${line.employee_name} from this invoice? Their hours go back to being available for a future invoice.`)) return;
+    try {
+      await removeInvoiceLine.mutateAsync({ id: invoiceId, lineId: line.id });
+      toast.success(`${line.employee_name} removed from the invoice.`);
+      setIsDirty(false);
+      setInitialized(false); // reconcile state from server response
+    } catch {
+      toast.error('Failed to remove this line.');
     }
   };
 
@@ -1593,6 +1620,7 @@ export default function InvoiceEditPage() {
                               <TableHead className="text-xs text-right w-28">Total</TableHead>
                             </>
                           )}
+                          {!['paid', 'cancelled', 'voided'].includes(status) && <TableHead className="text-xs w-10" />}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1775,6 +1803,21 @@ export default function InvoiceEditPage() {
                                   </TableCell>
                                 </>
                               ))}
+                              {!['paid', 'cancelled', 'voided'].includes(status) && (
+                                <TableCell>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-destructive"
+                                    disabled={removeInvoiceLine.isPending}
+                                    onClick={() => handleRemoveLine(line)}
+                                    title={`Remove ${line.employee_name} from this invoice`}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TableCell>
+                              )}
                             </TableRow>
                           );
                         })}
@@ -1964,6 +2007,7 @@ export default function InvoiceEditPage() {
                         <TableHead className="table-header text-right">Subtotal</TableHead>
                         {!isFlatBilling && !hideDiscountColumn && <TableHead className="table-header w-56">Discount</TableHead>}
                         <TableHead className="table-header text-right">Total</TableHead>
+                        {!['paid', 'cancelled', 'voided'].includes(status) && <TableHead className="table-header w-10" />}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2048,6 +2092,20 @@ export default function InvoiceEditPage() {
                               </TableCell>
                             )}
                             <TableCell className="text-right tabular-nums font-medium">${total.toFixed(2)}</TableCell>
+                            {!['paid', 'cancelled', 'voided'].includes(status) && (
+                              <TableCell>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-destructive"
+                                  onClick={() => removeTimeDetailRow(r)}
+                                  title="Remove this week's hours"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </TableCell>
+                            )}
                           </TableRow>
                         );
                       })}

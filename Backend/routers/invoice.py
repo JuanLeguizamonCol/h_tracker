@@ -733,6 +733,50 @@ def add_employee_to_invoice(
     return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
 
 
+@invoice_router.delete("/{invoice_id}/lines/{line_id}", response_model=InvoiceEditDataOut,
+                        dependencies=[Depends(require_section_edit('invoices'))])
+def remove_invoice_line(
+    invoice_id: str,
+    line_id: str,
+    db: Session = Depends(get_db),
+    current_employee: Employee = Depends(get_current_employee),
+):
+    """Removes one person's line from the invoice entirely — the inverse of
+    add_employee_to_invoice above. Their hours stop being billed here and go
+    back to being available for a future invoice (their TimeEntry rows are
+    unlinked, not deleted)."""
+    invoice = get_invoice(db, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    _ensure_can_access_invoice(invoice, current_employee, db)
+    if invoice.status in ("paid", "cancelled", "voided"):
+        raise HTTPException(status_code=400, detail=f"Cannot edit a {invoice.status} invoice")
+
+    line = db.query(InvoiceLine).filter(InvoiceLine.id == line_id, InvoiceLine.invoice_id == invoice_id).first()
+    if not line:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice line not found")
+
+    if line.user_id:
+        their_entry_ids = {
+            row[0] for row in db.query(TimeEntry.id).filter(TimeEntry.user_id == line.user_id).all()
+        }
+        if their_entry_ids:
+            db.query(InvoiceTimeEntry).filter(
+                InvoiceTimeEntry.invoice_id == invoice_id,
+                InvoiceTimeEntry.time_entry_id.in_(their_entry_ids),
+            ).delete(synchronize_session=False)
+
+    # Explicit, rather than relying on the FK's ondelete=CASCADE — matches
+    # the time_detail_weeks handling in patch_invoice below.
+    db.query(InvoiceLineWeek).filter(InvoiceLineWeek.invoice_line_id == line_id).delete()
+    db.delete(line)
+    db.flush()
+    db.refresh(invoice)
+    _recalculate_invoice_totals(invoice)
+    db.commit()
+    return get_invoice_edit_data(invoice_id, db=db, current_employee=current_employee)
+
+
 @invoice_router.patch("/{invoice_id}", response_model=InvoiceOut, dependencies=[Depends(require_section_edit('invoices'))])
 def patch_invoice(
     invoice_id: str,

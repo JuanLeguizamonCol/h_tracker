@@ -187,3 +187,19 @@ export function useAddEmployeeToInvoice() {
     },
   });
 }
+
+/** Removes one person's line from the invoice entirely — the inverse of
+ * useAddEmployeeToInvoice. Their hours are unlinked (not deleted), so they're
+ * available for a future invoice. See
+ * Backend/routers/invoice.py::remove_invoice_line. */
+export function useRemoveInvoiceLine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, lineId }: { id: string; lineId: string }) =>
+      api.delete<InvoiceEditData>(`/invoices/${id}/lines/${lineId}`),
+    onSuccess: (data, { id }) => {
+      queryClient.setQueryData(['invoice-edit-data', id], data);
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    },
+  });
+}
