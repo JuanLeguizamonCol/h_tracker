@@ -345,10 +345,11 @@ Panel principal (Admin/Manager): lista de proyectos cliente con un switch
 proyecto se ve el equipo (asignados + quien registró horas) y se asignan
 autoevaluaciones a uno o varios empleados (`POST /bulk`; solo si el proyecto tiene
 reviews activadas; omite a quien ya tiene una review abierta en ese proyecto).
-Dos formatos (`services/performance_reviews.py::EVALUATION_FORMATS` / `TEMPLATES`, copiados
-de los workbooks de Impact Point): **Principals and Directors Review** (key `standard`,
-`REVIEW_TEMPLATE`) y **Seniors and Managers Review** (key `seniors_managers`, sub-criterios
-con prefijo `md_`). Mismos 5 criterios en ambos, escala 1 (mejor) – 5 (peor), N/A excluido
+Tres formatos (`services/performance_reviews.py::EVALUATION_FORMATS` / `TEMPLATES`, copiados
+de los workbooks de Impact Point): **Impact Point Standard** (key `standard`, `REVIEW_TEMPLATE`),
+**Seniors and Managers Review** (key `seniors_managers`, sub-criterios con prefijo `md_`) y
+**Principals and Directors Review** (key `principals_directors`, prefijo `pd_`). Mismos 5
+criterios en todos, escala 1 (mejor) – 5 (peor), N/A excluido
 del promedio; promedio por criterio = media de sus ítems calificados, total = media de los
 criterios. **Cada review tiene dos evaluaciones**: la self-assessment (empleado: un
 comentario por sección, sin puntajes) y **una sola Manager Review compartida** — la oficial —

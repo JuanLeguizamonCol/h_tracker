@@ -128,8 +128,9 @@ def test_create_with_multiple_reviewers(db):
 
 def test_evaluation_formats_registry():
     assert svc.EVALUATION_FORMATS == {
-        "standard": "Principals and Directors Review",
+        "standard": "Impact Point Standard",
         "seniors_managers": "Seniors and Managers Review",
+        "principals_directors": "Principals and Directors Review",
     }
 
 
@@ -143,7 +144,7 @@ def test_seniors_managers_template_matches_its_workbook():
     out = svc.template_out("seniors_managers")
     assert out["format"] == "seniors_managers" and out["format_label"] == "Seniors and Managers Review"
     assert svc.template_out("nope")["format"] == "standard"
-    assert svc.template_out(None)["format_label"] == "Principals and Directors Review"
+    assert svc.template_out(None)["format_label"] == "Impact Point Standard"
     assert svc.get_template(None) is svc.REVIEW_TEMPLATE
 
 
@@ -479,3 +480,26 @@ def test_one_reviewer_alone_can_complete_when_there_are_several(db):
     review = svc.transition_review(db, review, "complete")
     assert review.status == "completed"
     assert svc.serialize(db, [review], "emp", False)[0]["overall_average"] == 2.0
+
+
+def test_principals_directors_is_its_own_format(db):
+    tpl = svc.get_template("principals_directors")
+    assert [c["key"] for c in tpl] == [c["key"] for c in svc.REVIEW_TEMPLATE]
+    assert [len(c["sub_criteria"]) for c in tpl] == [5, 5, 5, 5, 4]
+    assert tpl[0]["sub_criteria"][0] == ("pd_written_1", "Strong grasp of story boarding and knowing your audience")
+    # Its own keys — never shared with another format's stored scores.
+    keys = svc.sub_criterion_keys("principals_directors")
+    assert not (keys & svc.SUB_CRITERION_KEYS) and not (keys & svc.sub_criterion_keys("seniors_managers"))
+    assert svc.template_out("principals_directors")["format_label"] == "Principals and Directors Review"
+
+    review = svc.create_review(db, PerformanceReviewCreate(
+        project_id="prj", employee_id="emp", review_date=date(2025, 12, 15),
+        reviewer_ids=["mgr"], evaluation_format="principals_directors",
+    ), "x")
+    svc.transition_review(db, review, "submit_self")
+    with pytest.raises(ValueError):
+        svc.update_review(db, review, {"manager_scores": _scores({"written_1": 3})})
+    review = svc.update_review(db, review, {"manager_scores": _scores({"pd_written_1": 2, "pd_professionalism_4": 4})})
+    assert svc.serialize(db, [review], "mgr", False)[0]["overall_average"] == 3.0
+    ws = load_workbook(BytesIO(generate_performance_review_xlsx(svc.review_export_data(db, review))))["Manager Review"]
+    assert ws["B20"].value == "Strong grasp of story boarding and knowing your audience" and ws["C20"].value == 2

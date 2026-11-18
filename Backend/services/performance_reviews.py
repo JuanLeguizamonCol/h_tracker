@@ -161,20 +161,84 @@ SENIORS_MANAGERS_TEMPLATE: List[dict] = [
     },
 ]
 
+# "Principals and Directors Review" — copied verbatim from the firm's
+# "Project Performance Review Template - Prin / DIR" workbook. Same five
+# criteria keys as the other formats, its own sub-criteria under `pd_` keys.
+PRINCIPALS_DIRECTORS_TEMPLATE: List[dict] = [
+    {
+        "key": "written",
+        "label": "Written Communications",
+        "short_label": "Written Communications",
+        "sub_criteria": [
+            ("pd_written_1", 'Strong grasp of story boarding and knowing your audience'),
+            ("pd_written_2", "Defines the client's overall problem; accurately and creatively frames the issues"),
+            ("pd_written_3", 'Develops clear recommendations with an action bias'),
+            ("pd_written_4", 'Concise and effective written communication'),
+            ("pd_written_5", 'Provide meaningful coaching to junior personnel on how to improve'),
+        ],
+    },
+    {
+        "key": "verbal",
+        "label": "Verbal Communications",
+        "short_label": "Verbal Communications",
+        "sub_criteria": [
+            ("pd_verbal_1", 'Presentations and meetings with clients are crisp/ clear\nManages conversations effectively; influences others\u2019 perspectives'),
+            ("pd_verbal_2", 'Demonstrates an understanding the client business\nPersuades based on facts and reason'),
+            ("pd_verbal_3", 'Demonstrates credibility and self-assurance; displays "executive" presence; and engages audience'),
+            ("pd_verbal_4", 'Provides feedback and training to staff relating to improving communications'),
+            ("pd_verbal_5", 'Portrays clear recommendations with an action bias\nSteers client and project team interaction; takes it to the next level'),
+        ],
+    },
+    {
+        "key": "analysis",
+        "label": "Quality of Analysis",
+        "short_label": "Quality of Analysis",
+        "sub_criteria": [
+            ("pd_analysis_1", 'Identifies key issues and linkages; scopes module\nPrioritizes analyses through hypothesis-driven approach'),
+            ("pd_analysis_2", 'Can handle complex problems; delivers integrated solutions\nGoes beyond the obvious'),
+            ("pd_analysis_3", 'Provides good insight\nDistills insight from analyses; goes beyond the obvious and identifies second order implications\nTranslates the output of analyses into practical recommendations'),
+            ("pd_analysis_4", 'Motivates team creativity and uses team insight effectively'),
+            ("pd_analysis_5", 'Accurate analysis / Limited rework\nChecks accuracy of juniors / own-work'),
+        ],
+    },
+    {
+        "key": "client",
+        "label": "Client Management",
+        "short_label": "Client Management",
+        "sub_criteria": [
+            ("pd_client_1", 'Clarifies initial objectives and manages scope throughout the project; effectively structures work\nIs reliable and timely; manages client / team expectations'),
+            ("pd_client_2", 'Builds strong client relationships at appropriate levels / rapport building'),
+            ("pd_client_3", 'Builds trust with client\nUnderstands client\u2019s organizational dynamics and adapts behavior accordingly'),
+            ("pd_client_4", 'Can prioritize multiple workstreams or projects\nPrioritizes work effectively; demonstrates business sense and adaptability'),
+            ("pd_client_5", 'Identifies opportunities for add-ons\nBudget and scoping management\nBilling and collections management'),
+        ],
+    },
+    {
+        "key": "professionalism",
+        "label": "Overall Professionalism and Core Values",
+        "short_label": "Professionalism / Values",
+        "sub_criteria": [
+            ("pd_professionalism_1", 'Time Management / Delivers to deadlines\nDisplays perseverance and tenacity in the face of obstacles; responds calmly to stressful situations'),
+            ("pd_professionalism_2", 'Demonstrates DRIVE values\nContributes to positive working environment\nIs available and approachable; creates sufficient time to engage on content\nOverall attitude, work ethic and professionalism\nTreats all others with respect regardless of background, position or performance'),
+            ("pd_professionalism_3", 'Provides coaching to junior personnel (where applicable)\nProvides frequent and timely feedback; coaches effectively'),
+            ("pd_professionalism_4", 'Performs role with highest level of integrity, generating trust and protecting client interests'),
+        ],
+    },
+]
+
 # Review formats — every review carries the chosen key (set at assignment
 # time, see evaluation_format), and everything that walks the criteria
 # (averages, score validation, the panel, the .xlsx export) resolves the
 # template through get_template(review.evaluation_format).
 EVALUATION_FORMATS = {
-    "standard": "Principals and Directors Review",
+    "standard": "Impact Point Standard",
     "seniors_managers": "Seniors and Managers Review",
+    "principals_directors": "Principals and Directors Review",
 }
 TEMPLATES: Dict[str, List[dict]] = {
-    # REVIEW_TEMPLATE is the "Project Performance Review Template - Prin / DIR"
-    # workbook, item for item — kept under the original "standard" key so
-    # every existing review keeps resolving to it.
     "standard": REVIEW_TEMPLATE,
     "seniors_managers": SENIORS_MANAGERS_TEMPLATE,
+    "principals_directors": PRINCIPALS_DIRECTORS_TEMPLATE,
 }
 
 

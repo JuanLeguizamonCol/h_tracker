@@ -142,7 +142,7 @@ class ReviewCriterionOut(BaseModel):
 
 class ReviewTemplateOut(BaseModel):
     format: str = "standard"
-    format_label: str = "Principals and Directors Review"
+    format_label: str = "Impact Point Standard"
     score_min: int
     score_max: int
     criteria: List[ReviewCriterionOut]
