@@ -1013,6 +1013,15 @@ export default function Reports() {
     });
   };
 
+  const [expandedUtilizationRows, setExpandedUtilizationRows] = useState<Set<string>>(new Set());
+  const toggleUtilizationRow = (employeeId: string) => {
+    setExpandedUtilizationRows(prev => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) next.delete(employeeId); else next.add(employeeId);
+      return next;
+    });
+  };
+
   // Blue heatmap gradient — intensity relative to the matrix's own max cell,
   // so it reads correctly whether the busiest week was 20h or 60h. Text
   // flips to white once the fill gets dark enough to need it.
@@ -1118,6 +1127,10 @@ export default function Reports() {
           utilizationPct,
           status,
           overloadedWeeks: row.weekHours.filter(h => h > WEEKLY_CAPACITY_HOURS).length,
+          // Same per-project breakdown the Hours tab's matrix drills into —
+          // reused here so a 100%-utilized person's row can be expanded to
+          // show which projects actually make up those hours.
+          projects: row.projects.map(p => ({ projectId: p.projectId, name: p.name, total: p.total })),
         };
       })
       .sort((a, b) => b.avgWeeklyHours - a.avgWeeklyHours);
@@ -2040,26 +2053,59 @@ export default function Reports() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {utilizationData.map(d => (
-                      <TableRow key={d.employeeId}>
-                        <TableCell className="font-medium text-sm">{d.name}</TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">{d.avgWeeklyHours.toFixed(1)}h</TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">{d.utilizationPct.toFixed(0)}%</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs" style={{ color: STATUS_COLORS[d.status], borderColor: STATUS_COLORS[d.status] }}>
-                            {STATUS_LABELS[d.status]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">{d.clientHours.toFixed(1)}h</TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">
-                          {d.internalHours > 0 ? `${d.internalHours.toFixed(1)}h` : <span className="text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell className="text-right text-sm tabular-nums font-medium">{d.totalHours.toFixed(1)}h</TableCell>
-                        <TableCell className="text-right text-sm tabular-nums">
-                          {d.overloadedWeeks > 0 ? d.overloadedWeeks : <span className="text-muted-foreground">—</span>}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {utilizationData.map(d => {
+                      const isExpanded = expandedUtilizationRows.has(d.employeeId);
+                      const hasProjects = d.projects.length > 0;
+                      return (
+                        <Fragment key={d.employeeId}>
+                          <TableRow
+                            className={hasProjects ? 'cursor-pointer hover:bg-muted/40' : undefined}
+                            onClick={() => hasProjects && toggleUtilizationRow(d.employeeId)}
+                          >
+                            <TableCell className="font-medium text-sm">
+                              <div className="flex items-center gap-1.5">
+                                {hasProjects ? (
+                                  isExpanded
+                                    ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                    : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                ) : (
+                                  <span className="w-3.5 shrink-0" />
+                                )}
+                                {d.name}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{d.avgWeeklyHours.toFixed(1)}h</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{d.utilizationPct.toFixed(0)}%</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="text-xs" style={{ color: STATUS_COLORS[d.status], borderColor: STATUS_COLORS[d.status] }}>
+                                {STATUS_LABELS[d.status]}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{d.clientHours.toFixed(1)}h</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">
+                              {d.internalHours > 0 ? `${d.internalHours.toFixed(1)}h` : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell className="text-right text-sm tabular-nums font-medium">{d.totalHours.toFixed(1)}h</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">
+                              {d.overloadedWeeks > 0 ? d.overloadedWeeks : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                          </TableRow>
+                          {isExpanded && d.projects.map(proj => (
+                            <TableRow key={`${d.employeeId}-${proj.projectId}`} className="bg-muted/20">
+                              <TableCell className="text-xs text-muted-foreground pl-9">{proj.name}</TableCell>
+                              <TableCell colSpan={5} />
+                              <TableCell className="text-right text-xs tabular-nums font-medium">
+                                {proj.total.toFixed(1)}h
+                                {d.totalHours > 0 && (
+                                  <span className="text-muted-foreground ml-1">({((proj.total / d.totalHours) * 100).toFixed(0)}%)</span>
+                                )}
+                              </TableCell>
+                              <TableCell />
+                            </TableRow>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
                     {utilizationData.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
