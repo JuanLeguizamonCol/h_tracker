@@ -21,7 +21,7 @@ import { useAllTimeEntriesByDateRange, useTimeEntriesByDateRange } from '@/hooks
 import { useStaffing } from '@/hooks/useAssignedProjects';
 import { useExportReportTable } from '@/hooks/useReportExport';
 import { useSkillSearch, useSkillCatalog } from '@/hooks/useSkills';
-import { TimeEntry } from '@/types';
+import { TimeEntry, StaffingAssignment } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
@@ -1022,6 +1022,15 @@ export default function Reports() {
     });
   };
 
+  const [expandedProjectionRows, setExpandedProjectionRows] = useState<Set<string>>(new Set());
+  const toggleProjectionRow = (employeeId: string) => {
+    setExpandedProjectionRows(prev => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) next.delete(employeeId); else next.add(employeeId);
+      return next;
+    });
+  };
+
   // Blue heatmap gradient — intensity relative to the matrix's own max cell,
   // so it reads correctly whether the busiest week was 20h or 60h. Text
   // flips to white once the fill gets dark enough to need it.
@@ -1129,8 +1138,20 @@ export default function Reports() {
           overloadedWeeks: row.weekHours.filter(h => h > WEEKLY_CAPACITY_HOURS).length,
           // Same per-project breakdown the Hours tab's matrix drills into —
           // reused here so a 100%-utilized person's row can be expanded to
-          // show which projects actually make up those hours.
-          projects: row.projects.map(p => ({ projectId: p.projectId, name: p.name, total: p.total })),
+          // show which projects actually make up those hours. Avg hours/week
+          // and utilization % per project use the same denominators as the
+          // parent row (weeksCounted / WEEKLY_CAPACITY_HOURS), so they add up
+          // to the parent row's own figures.
+          projects: row.projects.map(p => {
+            const projAvgWeeklyHours = weeksCounted > 0 ? p.total / weeksCounted : 0;
+            return {
+              projectId: p.projectId,
+              name: p.name,
+              total: p.total,
+              avgWeeklyHours: projAvgWeeklyHours,
+              utilizationPct: (projAvgWeeklyHours / WEEKLY_CAPACITY_HOURS) * 100,
+            };
+          }),
         };
       })
       .sort((a, b) => b.avgWeeklyHours - a.avgWeeklyHours);
@@ -1223,8 +1244,13 @@ export default function Reports() {
   }, []);
 
   const projectedMatrixData = useMemo(() => {
-    if (!canManage || filteredStaffing.length === 0) return { weeks: projectedWeeks, rows: [] as { employeeId: string; name: string; weekPct: number[] }[] };
-    const byPerson = new Map<string, { userId: string; name: string; weekHours: number[] }>();
+    if (!canManage || filteredStaffing.length === 0) {
+      return { weeks: projectedWeeks, rows: [] as { employeeId: string; name: string; weekPct: number[]; projects: { projectId: string; name: string; weekPct: number[]; avgPct: number }[] }[] };
+    }
+    const byPerson = new Map<string, {
+      userId: string; name: string; weekHours: number[];
+      projectHours: Map<string, { name: string; weekHours: number[] }>;
+    }>();
 
     projectedWeeks.forEach((week, weekIdx) => {
       filteredStaffing.forEach(a => {
@@ -1240,18 +1266,38 @@ export default function Reports() {
         if (!activeThisWeek) return;
 
         if (!byPerson.has(a.user_id)) {
-          byPerson.set(a.user_id, { userId: a.user_id, name: a.employee_name, weekHours: new Array(projectedWeeks.length).fill(0) });
+          byPerson.set(a.user_id, {
+            userId: a.user_id, name: a.employee_name,
+            weekHours: new Array(projectedWeeks.length).fill(0),
+            projectHours: new Map(),
+          });
         }
-        byPerson.get(a.user_id)!.weekHours[weekIdx] += (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
+        const person = byPerson.get(a.user_id)!;
+        const hours = (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS;
+        person.weekHours[weekIdx] += hours;
+
+        if (!person.projectHours.has(a.project_id)) {
+          person.projectHours.set(a.project_id, { name: a.project_name, weekHours: new Array(projectedWeeks.length).fill(0) });
+        }
+        person.projectHours.get(a.project_id)!.weekHours[weekIdx] += hours;
       });
     });
 
     const rows = Array.from(byPerson.values())
-      .map(p => ({
-        employeeId: p.userId,
-        name: p.name,
-        weekPct: p.weekHours.map(h => (h / WEEKLY_CAPACITY_HOURS) * 100),
-      }))
+      .map(p => {
+        const projects = Array.from(p.projectHours.entries())
+          .map(([projectId, proj]) => {
+            const weekPct = proj.weekHours.map(h => (h / WEEKLY_CAPACITY_HOURS) * 100);
+            return { projectId, name: proj.name, weekPct, avgPct: weekPct.reduce((s, v) => s + v, 0) / weekPct.length };
+          })
+          .sort((a, b) => b.avgPct - a.avgPct);
+        return {
+          employeeId: p.userId,
+          name: p.name,
+          weekPct: p.weekHours.map(h => (h / WEEKLY_CAPACITY_HOURS) * 100),
+          projects,
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return { weeks: projectedWeeks, rows };
@@ -1268,19 +1314,40 @@ export default function Reports() {
   // their other project got filtered out of view. The Employee/Location
   // filters still narrow WHICH people are considered, since those describe
   // the person being looked for, not a project-side attribute.
+  //
+  // Who actually makes the list: free (< LOW_LOAD_THRESHOLD_PCT avg) over the
+  // first FREE_WINDOW_WEEKS weeks specifically — not the full LOW_LOAD_WEEKS
+  // shown — since "can they start something new soon" is about the near
+  // term; the rest of the columns are just extra context once they're shown.
+  //
+  // An assignment with no allocation % set is NOT the same as no assignment
+  // at all — it used to be silently dropped before computing load, which
+  // made someone who IS staffed (just never had a % entered for it) read as
+  // "0%, fully available". That's a real double-booking risk, not a harmless
+  // display quirk, so anyone with an active-but-unquantified assignment in
+  // the eligibility window is excluded instead of guessed at.
   const LOW_LOAD_WEEKS = 5;
+  const FREE_WINDOW_WEEKS = 3;
   const LOW_LOAD_THRESHOLD_PCT = 50;
 
   const availableCapacityForecast = useMemo(() => {
     const weeks = projectedWeeks.slice(0, LOW_LOAD_WEEKS);
+    const freeWindow = weeks.slice(0, FREE_WINDOW_WEEKS);
     if (!canManage) return { weeks, rows: [] as { employeeId: string; name: string; weekPct: number[]; avgPct: number }[] };
 
     const assignmentsByEmployee = new Map<string, typeof staffing>();
     staffing.forEach(a => {
-      if (a.allocation_percentage == null || a.allocation_percentage <= 0) return;
       if (!assignmentsByEmployee.has(a.user_id)) assignmentsByEmployee.set(a.user_id, []);
       assignmentsByEmployee.get(a.user_id)!.push(a);
     });
+
+    const activeInWeek = (a: StaffingAssignment, week: { start: Date; end: Date }) => {
+      const startStr = a.start_date ?? a.project_start_date;
+      const endStr = a.end_date ?? a.project_end_date;
+      const start = startStr ? parseLocalDate(startStr) : null;
+      const end = endStr ? parseLocalDate(endStr) : null;
+      return (!start || start <= week.end) && (!end || end >= week.start);
+    };
 
     const pool = employees.filter(e =>
       e.is_active &&
@@ -1293,20 +1360,20 @@ export default function Reports() {
         const assignments = assignmentsByEmployee.get(emp.id) ?? [];
         const weekPct = weeks.map(week => {
           const hours = assignments.reduce((sum, a) => {
-            const startStr = a.start_date ?? a.project_start_date;
-            const endStr = a.end_date ?? a.project_end_date;
-            const start = startStr ? parseLocalDate(startStr) : null;
-            const end = endStr ? parseLocalDate(endStr) : null;
-            const activeThisWeek = (!start || start <= week.end) && (!end || end >= week.start);
-            return activeThisWeek ? sum + (a.allocation_percentage! / 100) * WEEKLY_CAPACITY_HOURS : sum;
+            if (a.allocation_percentage == null || a.allocation_percentage <= 0) return sum;
+            return activeInWeek(a, week) ? sum + (a.allocation_percentage / 100) * WEEKLY_CAPACITY_HOURS : sum;
           }, 0);
           return (hours / WEEKLY_CAPACITY_HOURS) * 100;
         });
+        const hasUnknownLoad = assignments.some(a =>
+          (a.allocation_percentage == null || a.allocation_percentage <= 0) && freeWindow.some(week => activeInWeek(a, week))
+        );
         const avgPct = weekPct.reduce((s, p) => s + p, 0) / weekPct.length;
-        return { employeeId: emp.id, name: emp.name, weekPct, avgPct };
+        const freeWindowAvgPct = weekPct.slice(0, FREE_WINDOW_WEEKS).reduce((s, p) => s + p, 0) / FREE_WINDOW_WEEKS;
+        return { employeeId: emp.id, name: emp.name, weekPct, avgPct, freeWindowAvgPct, hasUnknownLoad };
       })
-      .filter(r => r.avgPct < LOW_LOAD_THRESHOLD_PCT)
-      .sort((a, b) => a.avgPct - b.avgPct);
+      .filter(r => !r.hasUnknownLoad && r.freeWindowAvgPct < LOW_LOAD_THRESHOLD_PCT)
+      .sort((a, b) => a.freeWindowAvgPct - b.freeWindowAvgPct);
 
     return { weeks, rows };
   }, [employees, staffing, projectedWeeks, canManage, f.employeeId, f.location, locationKeyOf]);
@@ -2093,7 +2160,9 @@ export default function Reports() {
                           {isExpanded && d.projects.map(proj => (
                             <TableRow key={`${d.employeeId}-${proj.projectId}`} className="bg-muted/20">
                               <TableCell className="text-xs text-muted-foreground pl-9">{proj.name}</TableCell>
-                              <TableCell colSpan={5} />
+                              <TableCell className="text-right text-xs tabular-nums">{proj.avgWeeklyHours.toFixed(1)}h</TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">{proj.utilizationPct.toFixed(0)}%</TableCell>
+                              <TableCell colSpan={3} />
                               <TableCell className="text-right text-xs tabular-nums font-medium">
                                 {proj.total.toFixed(1)}h
                                 {d.totalHours > 0 && (
@@ -2150,18 +2219,48 @@ export default function Reports() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {projectedMatrixData.rows.map(row => (
-                          <TableRow key={row.employeeId}>
-                            <TableCell className="font-medium text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
-                              {row.name}
-                            </TableCell>
-                            {row.weekPct.map((pct, i) => (
-                              <TableCell key={i} className={`text-center text-sm font-medium tabular-nums transition-colors ${occupancyCellClass(pct)}`}>
-                                {pct > 0 ? `${pct.toFixed(0)}%` : ''}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))}
+                        {projectedMatrixData.rows.map(row => {
+                          const isExpanded = expandedProjectionRows.has(row.employeeId);
+                          const hasProjects = row.projects.length > 0;
+                          return (
+                            <Fragment key={row.employeeId}>
+                              <TableRow
+                                className={hasProjects ? 'cursor-pointer hover:bg-muted/40' : undefined}
+                                onClick={() => hasProjects && toggleProjectionRow(row.employeeId)}
+                              >
+                                <TableCell className="font-medium text-sm sticky left-0 bg-background z-10 shadow-[1px_0_0_0_hsl(var(--border))]">
+                                  <div className="flex items-center gap-1.5">
+                                    {hasProjects ? (
+                                      isExpanded
+                                        ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                        : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                    ) : (
+                                      <span className="w-3.5 shrink-0" />
+                                    )}
+                                    {row.name}
+                                  </div>
+                                </TableCell>
+                                {row.weekPct.map((pct, i) => (
+                                  <TableCell key={i} className={`text-center text-sm font-medium tabular-nums transition-colors ${occupancyCellClass(pct)}`}>
+                                    {pct > 0 ? `${pct.toFixed(0)}%` : ''}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                              {isExpanded && row.projects.map(proj => (
+                                <TableRow key={`${row.employeeId}-${proj.projectId}`} className="bg-muted/20">
+                                  <TableCell className="text-xs text-muted-foreground sticky left-0 bg-muted/20 z-10 shadow-[1px_0_0_0_hsl(var(--border))] pl-9">
+                                    {proj.name}
+                                  </TableCell>
+                                  {proj.weekPct.map((pct, i) => (
+                                    <TableCell key={i} className="text-center text-xs tabular-nums text-muted-foreground">
+                                      {pct > 0 ? `${pct.toFixed(0)}%` : ''}
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              ))}
+                            </Fragment>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
@@ -2178,12 +2277,12 @@ export default function Reports() {
                   <TrendingDown className="h-4 w-4" />Available for New Projects — Next {LOW_LOAD_WEEKS} Weeks
                 </CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Active employees averaging under {LOW_LOAD_THRESHOLD_PCT}% projected load over the next {LOW_LOAD_WEEKS} weeks (from Staffing, across ALL their assignments regardless of the Filters card) · Sorted lowest load first · Someone with no Staffing row at all shows as 0%.
+                  Active employees averaging under {LOW_LOAD_THRESHOLD_PCT}% projected load over the next {FREE_WINDOW_WEEKS} weeks (from Staffing, across ALL their assignments regardless of the Filters card) · {LOW_LOAD_WEEKS - FREE_WINDOW_WEEKS} extra week{LOW_LOAD_WEEKS - FREE_WINDOW_WEEKS !== 1 ? 's' : ''} of context shown after · Sorted lowest load first · Someone with no Staffing row at all shows as 0% — someone with an assignment that has no allocation % set in that window is left off instead, since we can't tell how loaded they actually are.
                 </p>
               </CardHeader>
               <CardContent>
                 {availableCapacityForecast.rows.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-6 text-sm">No active employees are averaging under {LOW_LOAD_THRESHOLD_PCT}% for the next {LOW_LOAD_WEEKS} weeks.</p>
+                  <p className="text-center text-muted-foreground py-6 text-sm">No active employees are averaging under {LOW_LOAD_THRESHOLD_PCT}% for the next {FREE_WINDOW_WEEKS} weeks.</p>
                 ) : (
                   <div className="max-h-[420px] overflow-auto">
                     <Table containerClassName="overflow-visible">
@@ -2192,13 +2291,17 @@ export default function Reports() {
                           <TableHead className="table-header sticky left-0 bg-background z-10 min-w-[160px] shadow-[1px_0_0_0_hsl(var(--border))]">
                             Person
                           </TableHead>
-                          {availableCapacityForecast.weeks.map(w => (
-                            <TableHead key={w.key} className="table-header text-center whitespace-nowrap min-w-[90px]">
+                          {availableCapacityForecast.weeks.map((w, i) => (
+                            <TableHead
+                              key={w.key}
+                              className={`table-header text-center whitespace-nowrap min-w-[90px] ${i === FREE_WINDOW_WEEKS - 1 ? 'border-r-2 border-border' : ''}`}
+                              title={i < FREE_WINDOW_WEEKS ? 'Counts toward "free"' : 'Context only — not part of the "free" window'}
+                            >
                               {w.label}
                             </TableHead>
                           ))}
                           <TableHead className="table-header text-center whitespace-nowrap min-w-[90px] border-l-2 border-border">
-                            Avg
+                            Avg (3 wk)
                           </TableHead>
                         </TableRow>
                       </TableHeader>
@@ -2209,12 +2312,15 @@ export default function Reports() {
                               {row.name}
                             </TableCell>
                             {row.weekPct.map((pct, i) => (
-                              <TableCell key={i} className={`text-center text-sm font-medium tabular-nums transition-colors ${availabilityCellClass(pct)}`}>
+                              <TableCell
+                                key={i}
+                                className={`text-center text-sm font-medium tabular-nums transition-colors ${availabilityCellClass(pct)} ${i === FREE_WINDOW_WEEKS - 1 ? 'border-r-2 border-border' : ''}`}
+                              >
                                 {pct > 0 ? `${pct.toFixed(0)}%` : '0%'}
                               </TableCell>
                             ))}
                             <TableCell className="text-center text-sm font-bold tabular-nums text-primary border-l-2 border-border">
-                              {row.avgPct.toFixed(0)}%
+                              {row.freeWindowAvgPct.toFixed(0)}%
                             </TableCell>
                           </TableRow>
                         ))}
